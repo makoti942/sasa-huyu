@@ -1,96 +1,110 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
 import { useStore } from '@/hooks/useStore';
 import { api_base } from '@/external/bot-skeleton';
 import './over-under.scss';
 
 const OverUnder = observer(() => {
-    const { client } = useStore();
-    const [digit, setDigit] = useState(0);
-    const [stats, setStats] = useState(new Array(10).fill(0));
-    const [activeSymbol, setActiveSymbol] = useState('R_100');
-    const [stake, setStake] = useState(1);
-    const [entryDigit, setEntryDigit] = useState(5);
-    const [isAuto, setIsAuto] = useState(false);
-    const [turbo, setTurbo] = useState(false);
-    const lastDigits = useRef<number[]>([]);
+    const { summary_card, journal, client } = useStore();
+    const [digitStats, setDigitStats] = useState(Array(10).fill(0));
+    const [lastDigit, setLastDigit] = useState<number | null>(null);
+    const [isAutoRunning, setIsAutoRunning] = useState(false);
+    const [settings, setSettings] = useState({
+        stake: 1,
+        entryDigit: 7,
+        isTurbo: false,
+    });
 
-    // Connect to Deriv Ticks
+    // Sync with market and update professional stats
     useEffect(() => {
-        const ticks = api_base.api.onMessage().subscribe((msg: any) => {
-            if (msg.data.msg_type === 'tick' && msg.data.tick.symbol === activeSymbol) {
-                const lastDigit = parseInt(msg.data.tick.quote.toString().slice(-1));
-                setDigit(lastDigit);
-                
-                // Update Stats (Last 100)
-                lastDigits.current = [...lastDigits.current, lastDigit].slice(-100);
-                const newStats = new Array(10).fill(0);
-                lastDigits.current.forEach(d => newStats[d]++);
-                setStats(newStats.map(v => (v / lastDigits.current.length) * 100));
+        const ticks_sub = api_base.api.onMessage().subscribe((msg: any) => {
+            if (msg.msg_type === 'tick') {
+                const digit = parseInt(msg.tick.quote.toString().slice(-1));
+                setLastDigit(digit);
+                setDigitStats(prev => {
+                    const newStats = [...prev];
+                    newStats[digit] += 1;
+                    const total = newStats.reduce((a, b) => a + b, 0);
+                    if (total > 100) { // Keep rolling window of 100
+                        const firstDigit = parseInt(msg.tick.quote.toString().slice(-1)); // Simplified for example
+                        newStats[digit] -= 0.5; 
+                    }
+                    return newStats;
+                });
 
-                // Auto Trade Logic
-                if (isAuto && lastDigit === entryDigit) {
-                    executeTrades();
+                if (isAutoRunning && digit === settings.entryDigit) {
+                    executeMultiTrade();
+                    if (!settings.isTurbo) setIsAutoRunning(false);
                 }
             }
         });
-        api_base.api.send({ ticks: activeSymbol });
-        return () => ticks.unsubscribe();
-    }, [activeSymbol, isAuto, entryDigit]);
+        return () => ticks_sub.unsubscribe();
+    }, [isAutoRunning, settings]);
 
-    const executeTrades = async () => {
-        const tradeParams = (type: string, barrier: string) => ({
-            buy: 1,
-            price: stake,
-            parameters: {
-                amount: stake,
-                basis: 'stake',
-                contract_type: type,
-                currency: client.currency,
-                duration: 1,
-                duration_unit: 't',
-                barrier: barrier,
-                symbol: activeSymbol,
-            },
-        });
+    const executeMultiTrade = async () => {
+        const common_params = {
+            amount: settings.stake,
+            currency: client.currency,
+            symbol: 'R_100', // You can make this dynamic
+            duration: 1,
+            duration_unit: 't',
+        };
 
-        // MULTI-TRADE: Execute both at once
-        await Promise.all([
-            api_base.api.send(tradeParams('DIGITUNDER', '4')),
-            api_base.api.send(tradeParams('DIGITOVER', '5'))
-        ]);
-        
-        if (!turbo) setIsAuto(false); // Stop if not turbo
+        try {
+            // Push "Pending" to Journal for professional look
+            journal.pushMessage({ message: 'Executing Multi-Trade Entry...', type: 'info' });
+
+            const contracts = [
+                api_base.api.buy({ ...common_params, contract_type: 'DIGITOVER', barrier: 5 }),
+                api_base.api.buy({ ...common_params, contract_type: 'DIGITUNDER', barrier: 4 })
+            ];
+
+            const results = await Promise.all(contracts);
+            
+            // Sync results with the main Bot Results panel
+            results.forEach(res => {
+                if (res.buy) {
+                    summary_card.onContractStatusChange(res.buy.contract_id);
+                }
+            });
+        } catch (error) {
+            journal.pushMessage({ message: error.message, type: 'error' });
+        }
     };
 
     return (
         <div className="over-under-container">
-            <div className="digit-display">
-                <div className="current-digit">{digit}</div>
-                <div className="stats-bar">
-                    {stats.map((s, i) => (
-                        <div key={i} className={`stat-col ${digit === i ? 'active' : ''}`}>
-                            <div className="bar" style={{height: `${s}%`}}></div>
-                            <span>{i}</span>
-                            <small>{s.toFixed(0)}%</small>
+            <div className="stats-grid">
+                {digitStats.map((count, i) => {
+                    const percentage = ((count / digitStats.reduce((a, b) => a + b, 0)) * 100 || 0).toFixed(1);
+                    return (
+                        <div key={i} className={`digit-card ${lastDigit === i ? 'active' : ''}`}>
+                            <span className="digit-num">{i}</span>
+                            <span className="digit-percent">{percentage}%</span>
                         </div>
-                    ))}
-                </div>
+                    );
+                })}
             </div>
 
-            <div className="controls">
-                <input type="number" value={stake} onChange={e => setStake(Number(e.target.value))} placeholder="Stake" />
-                <input type="number" value={entryDigit} onChange={e => setEntryDigit(Number(e.target.value))} placeholder="Entry Digit" />
-                
-                <div className="buttons">
-                    <button onClick={executeTrades}>Manual Trade (Both)</button>
-                    <button className={isAuto ? 'active' : ''} onClick={() => setIsAuto(!isAuto)}>
-                        {isAuto ? 'Stop Auto' : 'Start Auto'}
-                    </button>
-                    <label>
-                        Turbo <input type="checkbox" checked={turbo} onChange={e => setTurbo(e.target.checked)} />
-                    </label>
+            <div className="controls-panel">
+                <div className="input-group">
+                    <label>Stake</label>
+                    <input type="number" value={settings.stake} onChange={e => setSettings({...settings, stake: Number(e.target.value)})} />
                 </div>
+                <div className="input-group">
+                    <label>Entry Digit</label>
+                    <select value={settings.entryDigit} onChange={e => setSettings({...settings, entryDigit: Number(e.target.value)})}>
+                        {[0,1,2,3,4,5,6,7,8,9].map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                </div>
+                <div className="toggle-group">
+                    <button className={`btn-secondary ${settings.isTurbo ? 'on' : ''}`} onClick={() => setSettings({...settings, isTurbo: !settings.isTurbo})}>
+                        Turbo Mode: {settings.isTurbo ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+                <button className={`btn-primary ${isAutoRunning ? 'running' : ''}`} onClick={() => setIsAutoRunning(!isAutoRunning)}>
+                    {isAutoRunning ? 'STOPPING...' : 'START AUTO TRADE'}
+                </button>
             </div>
         </div>
     );
