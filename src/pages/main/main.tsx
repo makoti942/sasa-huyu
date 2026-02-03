@@ -3,27 +3,21 @@ import classNames from 'classnames';
 import { observer } from 'mobx-react-lite';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ChunkLoader from '@/components/loader/chunk-loader';
-import { generateOAuthURL } from '@/components/shared';
 import DesktopWrapper from '@/components/shared_ui/desktop-wrapper';
-import Dialog from '@/components/shared_ui/dialog';
 import MobileWrapper from '@/components/shared_ui/mobile-wrapper';
 import Tabs from '@/components/shared_ui/tabs/tabs';
 import TradingViewModal from '@/components/trading-view-chart/trading-view-modal';
-import { DBOT_TABS, TAB_IDS } from '@/constants/bot-contents';
-import { api_base, updateWorkspaceName } from '@/external/bot-skeleton';
+import { DBOT_TABS } from '@/constants/bot-contents';
+import { api_base } from '@/external/bot-skeleton';
 import { CONNECTION_STATUS } from '@/external/bot-skeleton/services/api/observables/connection-status-stream';
-import { isDbotRTL } from '@/external/bot-skeleton/utils/workspace';
-import { useOauth2 } from '@/hooks/auth/useOauth2';
 import { useApiBase } from '@/hooks/useApiBase';
 import { useStore } from '@/hooks/useStore';
 import useTMB from '@/hooks/useTMB';
-import { handleOidcAuthFailure } from '@/utils/auth-utils';
 import {
     LabelPairedChartLineCaptionRegularIcon,
     LabelPairedObjectsColumnCaptionRegularIcon,
     LabelPairedPuzzlePieceTwoCaptionBoldIcon,
     LabelPairedPlayCaptionBoldIcon,
-    LabelPairedMagicWandCaptionBoldIcon, // Imported a magic icon for the new tool
 } from '@deriv/quill-icons/LabelPaired';
 import { LegacyChartsIcon, LegacyIndicatorsIcon } from '@deriv/quill-icons/Legacy';
 import { requestOidcAuthentication } from '@deriv-com/auth-client';
@@ -35,7 +29,7 @@ import ChartModal from '../chart/chart-modal';
 import Dashboard from '../dashboard';
 import RunStrategy from '../dashboard/run-strategy';
 import OverUnder from '../OverUnder'; 
-import MakotiMagic from '../MakotiMagic'; // <--- FULL IMPORT ADDED
+import MakotiMagic from './MakotiMagic'; // Adjusted to relative path
 import './main.scss';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
@@ -48,36 +42,20 @@ import TradingBots from '../free-bots/trading-bots';
 
 const AppWrapper = observer(() => {
     const { connectionStatus } = useApiBase();
-    const { dashboard, load_modal, run_panel, quick_strategy, summary_card } = useStore();
+    const { dashboard, run_panel, quick_strategy, summary_card } = useStore();
     const {
         active_tab,
         active_tour,
-        is_chart_modal_visible,
-        is_trading_view_modal_visible,
         setActiveTab,
         setWebSocketState,
-        setActiveTour,
         setTourDialogVisibility,
     } = dashboard;
-    const { dashboard_strategies } = load_modal;
-    const {
-        is_dialog_open,
-        is_drawer_open,
-        dialog_options,
-        onCancelButtonClick,
-        onCloseDialog,
-        onOkButtonClick,
-        stopBot,
-    } = run_panel;
+    const { stopBot } = run_panel;
     const { is_open } = quick_strategy;
-    const { cancel_button_text, ok_button_text, title, message, dismissable, is_closed_on_cancel } = dialog_options as {
-        [key: string]: string;
-    };
     const { clear } = summary_card;
-    const { DASHBOARD, BOT_BUILDER } = DBOT_TABS;
+    const { DASHBOARD } = DBOT_TABS;
     const init_render = React.useRef(true);
 
-    // ADDED 'makoti_magic' TO THE HASH ARRAY AT INDEX 10
     const hash = [
         'dashboard',
         'bot_builder',
@@ -102,7 +80,6 @@ const AppWrapper = observer(() => {
         return Number(hash.indexOf(String(tab_val)));
     };
     const active_hash_tab = GetHashedValue(active_tab);
-
     const { onRenderTMBCheck, isTmbEnabled } = useTMB();
 
     useEffect(() => {
@@ -121,25 +98,16 @@ const AppWrapper = observer(() => {
         if (is_open) setTourDialogVisibility(false);
 
         if (init_render.current) {
-            const tabToSet = location.hash ? Number(active_hash_tab) : DBOT_TABS.BOT_BUILDER;
+            const tabToSet = location.hash ? Number(active_hash_tab) : 1;
             setActiveTab(tabToSet);
             init_render.current = false;
         } else {
-            navigate(`#${hash[active_tab] || hash[DBOT_TABS.BOT_BUILDER]}`);
+            navigate(`#${hash[active_tab] || 'bot_builder'}`);
         }
     }, [active_tab]);
 
     const handleTabChange = (tab_index: number) => {
         setActiveTab(tab_index);
-    };
-
-    const handleLoginGeneration = async () => {
-        const tmbEnabled = await isTmbEnabled();
-        if (tmbEnabled) {
-            await onRenderTMBCheck();
-        } else {
-            await requestOidcAuthentication({ redirectCallbackUri: `${window.location.origin}/callback` });
-        }
     };
 
     return (
@@ -162,8 +130,8 @@ const AppWrapper = observer(() => {
                             <OverUnder />
                         </div>
 
-                        {/* MAKOTI MAGIC FULL TAB ADDED */}
-                        <div label={<><LabelPairedMagicWandCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Makoti Magic' /></>} id='makoti_magic'>
+                        {/* MAKOTI MAGIC TAB */}
+                        <div label={<><LabelPairedPlayCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Makoti Magic' /></>} id='makoti_magic'>
                             <MakotiMagic />
                         </div>
 
@@ -186,7 +154,6 @@ const AppWrapper = observer(() => {
                 </div>
             </div>
             <DesktopWrapper>
-                {/* Ensure run panel and strategy icons don't show when Makoti Magic or OverUnder are active */}
                 {active_tab !== 8 && hash[active_tab] !== 'over_under' && hash[active_tab] !== 'makoti_magic' && (
                     <div className='main__run-strategy-wrapper'>
                         {active_tab !== 3 && <RunStrategy />}
