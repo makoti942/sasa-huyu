@@ -28,7 +28,7 @@ import ChartModal from '../chart/chart-modal';
 import Dashboard from '../dashboard';
 import RunStrategy from '../dashboard/run-strategy';
 import OverUnder from '../OverUnder'; 
-import MakotiMagic from './MakotiMagic'; // Ensure this points to MakotiMagic.jsx in the same folder
+import MakotiMagic from '../MakotiMagic'; // The new tool import
 import './main.scss';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
@@ -124,15 +124,15 @@ const AppWrapper = observer(() => {
                         <div label={<><LabelPairedPuzzlePieceTwoCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Trading Bots' /></>} id='id-trading-bots'>
                             <TradingBots />
                         </div>
-                        
                         <div label={<><LabelPairedPlayCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Over/Under' /></>} id='over_under'>
                             <OverUnder />
                         </div>
 
-                        {/* MAKOTI MAGIC TAB */}
+                        {/* MAKOTI MAGIC TAB START */}
                         <div label={<><LabelPairedPlayCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Makoti Magic' /></>} id='makoti_magic'>
                             <MakotiMagic />
                         </div>
+                        {/* MAKOTI MAGIC TAB END */}
 
                         <div label={<><LegacyIndicatorsIcon height='16px' width='16px' /><Localize i18n_default_text='Analysis Tool' /></>} id='id-analysis-tool'>
                             <Suspense fallback={<ChunkLoader message={localize('Please wait, loading Analysis Tool...')} />}><AnalysisTools /></Suspense>
@@ -153,7 +153,6 @@ const AppWrapper = observer(() => {
                 </div>
             </div>
             <DesktopWrapper>
-                {/* Prevent Run panel from showing in custom tools */}
                 {active_tab !== 8 && hash[active_tab] !== 'over_under' && hash[active_tab] !== 'makoti_magic' && (
                     <div className='main__run-strategy-wrapper'>
                         {active_tab !== 3 && <RunStrategy />}
