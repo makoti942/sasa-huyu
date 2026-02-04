@@ -9,6 +9,8 @@ const STATUS_CONNECTING = 'Connecting...';
 const STATUS_LIVE = 'Live Ticks';
 const STATUS_AUTHORIZED = 'Account Connected';
 
+const MAX_TICKS = 1000;
+
 const OverUnder = observer(() => {
     const { journal, client } = useStore();
     const ws = useRef<WebSocket | null>(null);
@@ -18,7 +20,7 @@ const OverUnder = observer(() => {
 
     // State
     const [connectionStatus, setConnectionStatus] = useState(STATUS_OFFLINE);
-    const [digitStats, setDigitStats] = useState(Array(10).fill(0));
+    const [tickHistory, setTickHistory] = useState<number[]>([]);
     const [lastDigit, setLastDigit] = useState<number | null>(null);
     const [isAutoRunning, setIsAutoRunning] = useState(false);
     
@@ -52,11 +54,19 @@ const OverUnder = observer(() => {
             return;
         }
         
-        addLog(`Subscribing to ${symbol}`);
+        addLog(`Fetching history & subscribing: ${symbol}`);
         ws.current.send(JSON.stringify({ forget_all: 'ticks' }));
-        ws.current.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
         
-        setDigitStats(Array(10).fill(0));
+        // Fetch last 1000 ticks history + subscribe to live ticks
+        ws.current.send(JSON.stringify({ 
+            ticks_history: symbol, 
+            count: MAX_TICKS,
+            end: 'latest',
+            style: 'ticks',
+            subscribe: 1 
+        }));
+        
+        setTickHistory([]);
         setLastDigit(null);
     };
 
@@ -74,30 +84,23 @@ const OverUnder = observer(() => {
         setConnectionStatus(STATUS_CONNECTING);
         isAuthorized.current = false;
         
-        // Use default production app_id as fallback
         const app_id = localStorage.getItem('config.app_id') || '117164';
         const server_url = localStorage.getItem('config.server_url') || 'ws.derivws.com';
-        
-        addLog(`Using AppID: ${app_id}`);
         
         try {
             ws.current = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
 
             ws.current.onopen = () => {
-                addLog('WS Opened - Public');
+                addLog('WS Opened');
                 setConnectionStatus(STATUS_LIVE);
                 subscribeToTicks(selectedSymbol);
 
-                // Attempt Authorization
                 const token = localStorage.getItem('authToken') || 
                               localStorage.getItem('token') || 
                               JSON.parse(localStorage.getItem('accountsList') || '{}')[client.loginid];
                 
                 if (token) {
-                    addLog('Sending Authorize...');
                     ws.current?.send(JSON.stringify({ authorize: token }));
-                } else {
-                    addLog('No token found');
                 }
             };
 
@@ -106,25 +109,36 @@ const OverUnder = observer(() => {
                     const data = JSON.parse(msg.data);
 
                     if (data.msg_type === 'authorize') {
-                        if (data.error) {
-                            addLog(`Auth Error: ${data.error.message}`);
-                            isAuthorized.current = false;
-                        } else {
+                        if (!data.error) {
                             addLog('Authorized!');
                             isAuthorized.current = true;
                             setConnectionStatus(STATUS_AUTHORIZED);
                         }
                     }
 
+                    // Handle Tick History (Initial Load)
+                    if (data.msg_type === 'history') {
+                        const prices = data.history.prices;
+                        const digits = prices.map((p: string) => parseInt(p.slice(-1)));
+                        setTickHistory(digits);
+                        if (digits.length > 0) {
+                            setLastDigit(digits[digits.length - 1]);
+                        }
+                        addLog(`Loaded ${digits.length} historical ticks`);
+                    }
+
+                    // Handle Live Ticks
                     if (data.msg_type === 'tick') {
                         const quote = data.tick.quote.toString();
                         const digit = parseInt(quote.charAt(quote.length - 1));
                         
                         setLastDigit(digit);
-                        setDigitStats(prev => {
-                            const newStats = [...prev];
-                            newStats[digit] += 1;
-                            return newStats;
+                        setTickHistory(prev => {
+                            const newHistory = [...prev, digit];
+                            if (newHistory.length > MAX_TICKS) {
+                                return newHistory.slice(-MAX_TICKS);
+                            }
+                            return newHistory;
                         });
 
                         if (isAutoRunning && digit === entryDigit) {
@@ -144,11 +158,6 @@ const OverUnder = observer(() => {
                 addLog(`WS Closed: ${e.code}`);
                 setConnectionStatus(STATUS_OFFLINE);
                 reconnectTimeout.current = setTimeout(connectWebSocket, 5000);
-            };
-
-            ws.current.onerror = (err) => {
-                addLog('WS Error');
-                console.error(err);
             };
         } catch (e) {
             addLog(`WS Init Fail: ${e.message}`);
@@ -205,7 +214,18 @@ const OverUnder = observer(() => {
         if (!isTurbo) setIsAutoRunning(false);
     };
 
-    const totalTicks = useMemo(() => digitStats.reduce((a, b) => a + b, 0) || 1, [digitStats]);
+    // Calculate percentages based on 1000-tick window
+    const digitStats = useMemo(() => {
+        const stats = Array(10).fill(0);
+        tickHistory.forEach(digit => {
+            if (digit >= 0 && digit <= 9) {
+                stats[digit]++;
+            }
+        });
+        return stats;
+    }, [tickHistory]);
+
+    const totalTicksCount = tickHistory.length || 1;
 
     const getStatusClassName = () => {
         switch(connectionStatus) {
@@ -219,7 +239,7 @@ const OverUnder = observer(() => {
         <div className="over-under-container">
             <div className="stats-grid">
                 {digitStats.map((count, i) => {
-                    const percentage = ((count / totalTicks) * 100).toFixed(1);
+                    const percentage = ((count / totalTicksCount) * 100).toFixed(1);
                     return (
                         <div key={i} className={`digit-card ${lastDigit === i ? 'active' : ''}`}>
                             <span className="digit-num">{i}</span>
@@ -234,7 +254,7 @@ const OverUnder = observer(() => {
 
             <div className="controls-panel">
                 <div className="input-group">
-                    <label>Status</label>
+                    <label>Status ({totalTicksCount} ticks)</label>
                     <div className={`connection-status ${getStatusClassName()}`}>
                         {connectionStatus}
                     </div>
@@ -270,7 +290,6 @@ const OverUnder = observer(() => {
                 </div>
             </div>
             
-            {/* Debug Monitor for troubleshooting */}
             <div style={{marginTop: '20px', padding: '10px', background: '#111', borderRadius: '8px', fontSize: '10px', color: '#666'}}>
                 <div style={{fontWeight: 'bold', marginBottom: '5px'}}>DEBUG LOG:</div>
                 {debugInfo.map((log, i) => <div key={i}>• {log}</div>)}
