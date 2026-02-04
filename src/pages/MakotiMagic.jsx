@@ -12,69 +12,89 @@ const MakotiMagic = () => {
     const workerRef = useRef(null);
 
     useEffect(() => {
+        // WORKER LOGIC
         const workerBlob = new Blob([`
             let ws;
-            let active = false;
-            let isWaiting = false; // THE GATE KEEPER
+            let active = false; // Moved to global scope of Worker
+            let isWaiting = false; 
 
             self.onmessage = function(e) {
                 const { type, payload } = e.data;
                 
                 if (type === 'START') {
                     active = true;
+                    // Reset connection if exists
+                    if(ws) ws.close();
+
                     ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-                    ws.onopen = () => ws.send(JSON.stringify({ authorize: payload.token }));
+                    
+                    ws.onopen = () => {
+                        ws.send(JSON.stringify({ authorize: payload.token }));
+                    };
                     
                     ws.onmessage = (msg) => {
                         const res = JSON.parse(msg.data);
                         
+                        if (res.error) {
+                            self.postMessage({ type: 'STATUS', data: 'ERROR: ' + res.error.code });
+                            return;
+                        }
+
                         if (res.msg_type === 'authorize') {
                             self.postMessage({ type: 'STATUS', data: 'CONNECTED' });
                             ws.send(JSON.stringify({ ticks: '1HZ100V', subscribe: 1 }));
                         }
 
-                        // SURGICAL INJECTION
+                        // THE INJECTION TRIGGER
                         if (active && res.msg_type === 'tick' && !isWaiting) {
                             const digit = parseInt(res.tick.quote.toString().slice(-1));
-                            isWaiting = true; // LOCK THE GATE
+                            isWaiting = true; // Lock immediately
 
-                            const buy_req = {
-                                buy: 1, 
-                                price: payload.stake,
-                                parameters: {
-                                    amount: payload.stake,
-                                    basis: 'stake',
-                                    contract_type: 'DIGITMATCH',
-                                    currency: 'USD',
-                                    duration: 1,
-                                    duration_unit: 't',
-                                    symbol: '1HZ100V',
-                                    barrier: digit
-                                }
-                            };
-
-                            if (payload.offset > 0) {
-                                setTimeout(() => {
-                                    if(!active) return;
-                                    ws.send(JSON.stringify(buy_req));
-                                }, payload.offset);
-                            } else {
-                                ws.send(JSON.stringify(buy_req));
-                            }
+                            // EXECUTE TRADE
+                            setTimeout(() => {
+                                if(!active || !ws || ws.readyState !== 1) return;
+                                
+                                ws.send(JSON.stringify({
+                                    buy: 1, 
+                                    price: payload.stake,
+                                    parameters: {
+                                        amount: payload.stake,
+                                        basis: 'stake',
+                                        contract_type: 'DIGITMATCH',
+                                        currency: 'USD',
+                                        duration: 1,
+                                        duration_unit: 't',
+                                        symbol: '1HZ100V',
+                                        barrier: digit
+                                    },
+                                    subscribe: 1 // CRITICAL FIX: Ensures we get the result
+                                }));
+                            }, payload.offset);
                         }
 
-                        // CATCH RESULT & UNLOCK
-                        if (res.msg_type === 'proposal_open_contract' && res.proposal_open_contract.is_sold) {
-                            isWaiting = false; // OPEN THE GATE FOR NEXT TRADE
-                            self.postMessage({ type: 'RESULT', data: res.proposal_open_contract });
+                        // LISTEN FOR RESULTS
+                        if (res.msg_type === 'proposal_open_contract') {
+                            const contract = res.proposal_open_contract;
+                            
+                            // Only unlock if the contract is actually finished
+                            if (contract.is_sold) {
+                                isWaiting = false; 
+                                self.postMessage({ type: 'RESULT', data: contract });
+                            }
                         }
                     };
                 }
-                if (type === 'STOP') { active = false; if(ws) ws.close(); }
+
+                if (type === 'STOP') {
+                    active = false;
+                    if(ws) ws.close();
+                    self.postMessage({ type: 'STATUS', data: 'OFFLINE' });
+                }
             };
         `], { type: 'application/javascript' });
 
         workerRef.current = new Worker(URL.createObjectURL(workerBlob));
+        
         workerRef.current.onmessage = (e) => {
             const { type, data } = e.data;
             if (type === 'STATUS') setStatus(data);
@@ -85,16 +105,19 @@ const MakotiMagic = () => {
                     target: data.barrier,
                     exit: data.exit_tick_display_value?.slice(-1) || '?',
                     profit: data.profit
-                }, ...prev].slice(0, 10));
+                }, ...prev].slice(0, 8));
                 setTotalPL(v => v + data.profit);
             }
         };
+
         return () => workerRef.current.terminate();
     }, []);
 
     const handleToggle = () => {
         if (!is_hunting) {
+            if (!token) return alert("Please enter API Token");
             setIsHunting(true);
+            setResults([]); // Clear previous session results
             workerRef.current.postMessage({ 
                 type: 'START', 
                 payload: { token: token.trim(), stake: Number(stake), offset: Number(offset) } 
@@ -102,17 +125,16 @@ const MakotiMagic = () => {
         } else {
             setIsHunting(false);
             workerRef.current.postMessage({ type: 'STOP' });
-            setStatus('OFFLINE');
         }
     };
 
     return (
         <div style={ui.page}>
             <div style={ui.card}>
-                <h1 style={ui.title}>MAKOTIMAGIC <span style={{color:'#0f0'}}>HFT</span></h1>
+                <h1 style={ui.title}>MAKOTI <span style={{color:'#0f0'}}>V15</span></h1>
                 
                 <div style={ui.statsRow}>
-                    <div style={{color: status === 'CONNECTED' ? '#0f0' : '#f44', fontWeight:'bold'}}>{status}</div>
+                    <div style={{color: status === 'CONNECTED' ? '#0f0' : '#f44', fontWeight:'bold', fontSize:'14px'}}>{status}</div>
                     <div style={{fontSize: '32px', color: total_pl >= 0 ? '#0f0' : '#f44'}}>${total_pl.toFixed(2)}</div>
                 </div>
 
@@ -128,19 +150,19 @@ const MakotiMagic = () => {
                             <input type="number" value={stake} onChange={e => setStake(e.target.value)} style={ui.input} />
                         </div>
                         <div style={ui.field}>
-                            <label style={ui.label}>DELAY (MS)</label>
+                            <label style={ui.label}>OFFSET (MS)</label>
                             <input type="number" value={offset} onChange={e => setOffset(e.target.value)} style={ui.input} />
                         </div>
                     </div>
 
                     <button onClick={handleToggle} style={is_hunting ? ui.btnStop : ui.btnStart}>
-                        {is_hunting ? 'STOP SCANNER' : 'ACTIVATE INJECTION'}
+                        {is_hunting ? 'STOP ENGINE' : 'START SURGICAL STRIKE'}
                     </button>
                 </div>
 
                 <div style={ui.table}>
                     <div style={ui.th}>
-                        <span>STAKE</span><span>TGT</span><span>EXIT</span><span>PROFIT</span>
+                        <span>STAKE</span><span>TGT</span><span>EXIT</span><span>P/L</span>
                     </div>
                     {results.map((r) => (
                         <div key={r.id} style={ui.tr}>
