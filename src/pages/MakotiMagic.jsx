@@ -116,6 +116,12 @@ const MakotiMagic = () => {
                 </div>
 
                 <div style={ui.form}>
+                    <button 
+                        onClick={() => window.open('https://app.deriv.com/account/api-token', '_blank')} 
+                        style={ui.btnSecondary}
+                    >
+                        GET YOUR API TOKEN
+                    </button>
                     <input type="password" value={token} onChange={e => setToken(e.target.value)} style={ui.input} placeholder="API TOKEN" />
                     <input type="number" value={stake} onChange={e => setStake(e.target.value)} style={ui.input} placeholder="STAKE ($)" />
                     <button onClick={handleToggle} style={is_hunting ? ui.btnStop : ui.btnStart}>
@@ -147,6 +153,7 @@ const ui = {
     input: { width: '100%', padding: '15px', background: '#000', border: '1px solid #333', color: '#0f0', fontSize: '18px', boxSizing: 'border-box' },
     btnStart: { padding: '20px', background: '#0f0', color: '#000', border: 'none', fontWeight: '900', fontSize: '18px', cursor: 'pointer', borderRadius: '10px' },
     btnStop: { padding: '20px', background: '#300', color: '#f44', border: 'none', fontWeight: '900', fontSize: '18px', cursor: 'pointer', borderRadius: '10px' },
+    btnSecondary: { padding: '15px', background: '#222', color: '#fff', border: '1px solid #333', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', borderRadius: '10px', textAlign: 'center' },
     table: { marginTop: '25px' },
     tr: { display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#111', marginBottom: '6px', borderRadius: '8px', color: '#eee' }
 };
