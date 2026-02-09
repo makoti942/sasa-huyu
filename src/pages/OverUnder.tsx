@@ -11,11 +11,15 @@ const OverUnder = observer(() => {
         last_digit,
         is_auto_running,
         stake,
+        martingale,
+        is_volatility_changer,
         entry_digit,
         is_turbo,
         selected_symbol,
         debug_info,
         setStake,
+        setMartingale,
+        setIsVolatilityChanger,
         setEntryDigit,
         setIsTurbo,
         setSelectedSymbol,
@@ -104,22 +108,40 @@ const OverUnder = observer(() => {
                     <label>Status ({tick_history.length} ticks)</label>
                     <div className={`connection-status ${getStatusClassName()}`}>{connection_status}</div>
                 </div>
-                <div className="input-group">
-                    <label>Index</label>
-                    <select className="ui-select" value={selected_symbol} onChange={(e) => setSelectedSymbol(e.target.value)} disabled={is_auto_running}>
-                        {volatilityIndices.map(idx => <option key={idx.value} value={idx.value}>{idx.text}</option>)}
-                    </select>
-                </div>
-                <div className="input-group">
-                    <label>Stake</label>
-                    <input className="ui-input" type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} disabled={is_auto_running} />
-                </div>
-                <div className="input-group">
-                    <label>Trigger Digit</label>
-                    <div className="entry-config">
-                        <input className="ui-input digit-entry" type="number" min="0" max="9" value={entry_digit} onChange={(e) => setEntryDigit(Number(e.target.value))} disabled={is_auto_running} />
-                        <div className={`status-led ${last_digit === Number(entry_digit) ? 'glow' : ''}`}></div>
+                <div className="input-row">
+                    <div className="input-group">
+                        <label>Index</label>
+                        <select className="ui-select" value={selected_symbol} onChange={(e) => setSelectedSymbol(e.target.value)} disabled={is_auto_running}>
+                            {volatilityIndices.map(idx => <option key={idx.value} value={idx.value}>{idx.text}</option>)}
+                        </select>
                     </div>
+                    <div className="input-group">
+                        <label>Trigger Digit</label>
+                        <div className="entry-config">
+                            <input className="ui-input digit-entry" type="number" min="0" max="9" value={entry_digit} onChange={(e) => setEntryDigit(Number(e.target.value))} disabled={is_auto_running} />
+                            <div className={`status-led ${last_digit === Number(entry_digit) ? 'glow' : ''}`}></div>
+                        </div>
+                    </div>
+                </div>
+                <div className="input-row">
+                    <div className="input-group">
+                        <label>Stake</label>
+                        <input className="ui-input" type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} disabled={is_auto_running} />
+                    </div>
+                    <div className="input-group">
+                        <label>Martingale</label>
+                        <input className="ui-input" type="number" step="0.1" value={martingale} onChange={(e) => setMartingale(Number(e.target.value))} disabled={is_auto_running} />
+                    </div>
+                </div>
+                <div className="input-group switch-group">
+                    <label>Volatility Changer</label>
+                    <button 
+                        className={`ui-switch ${is_volatility_changer ? 'active' : ''}`} 
+                        onClick={() => setIsVolatilityChanger(!is_volatility_changer)}
+                        disabled={is_auto_running}
+                    >
+                        {is_volatility_changer ? 'ON' : 'OFF'}
+                    </button>
                 </div>
                 <div className="button-group">
                     <button className={`btn-secondary ${is_turbo ? 'active' : ''}`} onClick={() => setIsTurbo(!is_turbo)} disabled={is_auto_running}>

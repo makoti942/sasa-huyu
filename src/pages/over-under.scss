@@ -4,6 +4,53 @@
     color: var(--text-general);
     font-family: 'IBM Plex Sans', sans-serif;
 
+    .input-row {
+        display: flex;
+        gap: 1rem;
+        width: 100%;
+
+        .input-group {
+            flex: 1;
+        }
+    }
+
+    .switch-group {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--general-main-1);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-normal);
+        width: 100%;
+
+        label {
+            margin-bottom: 0 !important;
+        }
+
+        .ui-switch {
+            background: var(--fill-active);
+            border: 1px solid var(--border-normal);
+            color: var(--text-prominent);
+            padding: 0.25rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+
+            &.active {
+                background: var(--brand-red-coral);
+                color: white;
+            }
+
+            &:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+        }
+    }
+
     .stats-grid {
         display: grid;
         grid-template-columns: repeat(10, 1fr);

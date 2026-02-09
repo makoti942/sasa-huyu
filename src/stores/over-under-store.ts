@@ -36,9 +36,14 @@ export default class OverUnderStore {
     last_digit: number | null = null;
     is_auto_running = false;
     stake = 1;
+    initial_stake = 1;
+    martingale = 2;
+    is_volatility_changer = false;
     entry_digit = 7;
     is_turbo = false;
     selected_symbol = 'R_100';
+    active_contracts: Set<string> = new Set();
+    contract_results: Map<string, number> = new Map();
 
     constructor(root_store: RootStore) {
         makeObservable(this, {
@@ -47,11 +52,16 @@ export default class OverUnderStore {
             last_digit: observable,
             is_auto_running: observable,
             stake: observable,
+            initial_stake: observable,
+            martingale: observable,
+            is_volatility_changer: observable,
             entry_digit: observable,
             is_turbo: observable,
             selected_symbol: observable,
             debug_info: observable,
             setStake: action.bound,
+            setMartingale: action.bound,
+            setIsVolatilityChanger: action.bound,
             setEntryDigit: action.bound,
             setIsTurbo: action.bound,
             setSelectedSymbol: action.bound,
@@ -80,6 +90,17 @@ export default class OverUnderStore {
 
     setStake(stake: number) {
         this.stake = stake;
+        if (!this.is_auto_running) {
+            this.initial_stake = stake;
+        }
+    }
+
+    setMartingale(value: number) {
+        this.martingale = value;
+    }
+
+    setIsVolatilityChanger(value: boolean) {
+        this.is_volatility_changer = value;
     }
 
     setEntryDigit(digit: number) {
@@ -99,6 +120,10 @@ export default class OverUnderStore {
 
     setIsAutoRunning(is_running: boolean) {
         this.is_auto_running = is_running;
+        if (is_running) {
+            this.active_contracts.clear();
+            this.contract_results.clear();
+        }
     }
 
     handleStartStop() {
@@ -107,6 +132,11 @@ export default class OverUnderStore {
             this.root_store.journal.pushMessage('⚠️ Login required to trade.', 'error');
             return;
         }
+        
+        if (!this.is_auto_running) {
+            this.initial_stake = this.stake;
+        }
+
         this.setIsAutoRunning(!this.is_auto_running);
         if (this.is_auto_running) {
             this.addLog("Tool started. Waiting for trigger...");
@@ -199,6 +229,7 @@ export default class OverUnderStore {
                         const buy_data = data.buy;
                         const contract_id = buy_data.contract_id;
                         this.addLog(`Purchase Successful: ${contract_id}`);
+                        this.active_contracts.add(String(contract_id));
 
                         this.ws?.send(
                             JSON.stringify({
@@ -219,13 +250,21 @@ export default class OverUnderStore {
                         }
 
                         if (contract.is_sold) {
+                            const contract_id = String(contract.contract_id);
                             const profit = contract.profit;
+                            this.contract_results.set(contract_id, profit);
+                            
                             const result = profit >= 0 ? 'WON' : 'LOST';
-                            this.addLog(`Trade Result: ${result} ($${profit})`);
+                            this.addLog(`Trade Result [${contract_id}]: ${result} ($${profit})`);
                             this.root_store.journal.onLogSuccess({
                                 log_type: profit > 0 ? LogTypes.PROFIT : LogTypes.LOST,
                                 extra: { currency: this.root_store.client.currency, profit },
                             });
+
+                            // Check if all active trades for this round are finished
+                            if (this.contract_results.size >= 2) {
+                                this.processRoundResults();
+                            }
                         }
                     }
 
@@ -253,8 +292,11 @@ export default class OverUnderStore {
                         this.tick_history = [...this.tick_history.slice(-MAX_TICKS + 1), digit];
 
                         if (this.is_auto_running && digit === Number(this.entry_digit)) {
-                            this.addLog(`Trigger Hit: Last digit is ${digit}`);
-                            this.executeMultiTrade();
+                            // Only trigger if no active trades
+                            if (this.active_contracts.size === 0) {
+                                this.addLog(`Trigger Hit: Last digit is ${digit}`);
+                                this.executeMultiTrade();
+                            }
                         }
                     }
                 } catch (error) {
@@ -272,6 +314,38 @@ export default class OverUnderStore {
             };
         } catch (e) {
             this.addLog(`WS Init Fail: ${e.message}`);
+        }
+    }
+
+    processRoundResults() {
+        const profits = Array.from(this.contract_results.values());
+        const all_loss = profits.every(p => p < 0);
+        const any_win = profits.some(p => p > 0);
+
+        this.addLog(`Round finished. All Loss: ${all_loss}, Any Win: ${any_win}`);
+
+        if (all_loss) {
+            this.stake = Number((this.stake * this.martingale).toFixed(2));
+            this.addLog(`Martingale Applied: New stake is ${this.stake}`);
+        } else if (any_win) {
+            this.stake = this.initial_stake;
+            this.addLog(`Win detected. Resetting stake to ${this.initial_stake}`);
+            
+            if (this.is_volatility_changer) {
+                const symbols = Object.keys(pip_sizes);
+                const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
+                this.addLog(`Volatility Changer: Switching to ${randomSymbol}`);
+                this.setSelectedSymbol(randomSymbol);
+            }
+        }
+
+        // Reset for next round
+        this.active_contracts.clear();
+        this.contract_results.clear();
+
+        if (!this.is_turbo) {
+            this.setIsAutoRunning(false);
+            this.addLog('Auto-run stopped (Turbo OFF).');
         }
     }
 
@@ -321,15 +395,7 @@ export default class OverUnderStore {
 
         this.addLog(`Executing trades: Over 5, Under 4. Stake: ${tradeAmount} ${currency}`);
 
-        this.addLog(`Sending Trade 1: ${JSON.stringify(trade1_params)}`);
         this.ws.send(JSON.stringify(trade1_params));
-
-        this.addLog(`Sending Trade 2: ${JSON.stringify(trade2_params)}`);
         this.ws.send(JSON.stringify(trade2_params));
-
-        if (!this.is_turbo) {
-            this.setIsAutoRunning(false);
-            this.addLog('Auto-run stopped (Turbo OFF).');
-        }
     }
 }
