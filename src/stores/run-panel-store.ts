@@ -512,8 +512,14 @@ export default class RunPanelStore {
         this.setContractStage(contract_stages.NOT_RUNNING);
         this.restoreOriginalAccount();
         
-        // Ensure UI updates
-        this.setActiveTabIndex(0);
+        // Force state update to refresh UI
+        const current_index = this.active_index;
+        this.setActiveTabIndex(current_index === 0 ? 1 : 0);
+        setTimeout(() => {
+            this.setActiveTabIndex(current_index);
+            console.log('[Run Panel] clearStat UI refresh completed');
+        }, 50);
+        
         console.log('[Run Panel] clearStat completed');
     };
 

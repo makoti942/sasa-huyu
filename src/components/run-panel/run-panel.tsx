@@ -168,7 +168,7 @@ const DrawerFooter = ({ is_clear_stat_disabled, onClearStatClick }: TDrawerFoote
         <Button
             id='db-run-panel__clear-button'
             className='run-panel__footer-button'
-            is_disabled={is_clear_stat_disabled}
+            is_disabled={false}
             onClick={() => {
                 console.log('[Run Panel] Reset button clicked');
                 onClearStatClick();
