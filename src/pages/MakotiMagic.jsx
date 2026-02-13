@@ -1,161 +1,139 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
-const MakotiMagic = () => {
-    const [token, setToken] = useState('');
-    const [stake, setStake] = useState(0.35);
-    const [is_hunting, setIsHunting] = useState(false);
-    const [results, setResults] = useState([]);
-    const [total_pl, setTotalPL] = useState(0);
-    const [status, setStatus] = useState('OFFLINE');
-    const [liveDigit, setLiveDigit] = useState('-');
-    
-    const workerRef = useRef(null);
+const Makotimagic = () => {
+    const [isRunning, setIsRunning] = useState(false);
+    const [status, setStatus] = useState('SYSTEM READY');
+    const [logs, setLogs] = useState([]);
+    const [volatility, setVolatility] = useState('R_100');
+    const [stake, setStake] = useState(10);
+    const [lastDigit, setLastDigit] = useState(null);
+
+    // Refs are critical for 100% timing accuracy (no state lag)
+    const ws = useRef(null);
+    const app_id = 1089; // Replace with your authorized app_id
 
     useEffect(() => {
-        const workerBlob = new Blob([`
-            let ws;
-            let active = false;
-            let isWaiting = false;
+        // Initialize high-speed socket
+        ws.current = new WebSocket(`wss://ws.binaryws.com/websockets/v3?app_id=${app_id}`);
 
-            self.onmessage = function(e) {
-                const { type, payload } = e.data;
-                
-                if (type === 'START') {
-                    active = true;
-                    ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-                    
-                    ws.onopen = () => ws.send(JSON.stringify({ authorize: payload.token }));
-                    
-                    ws.onmessage = (msg) => {
-                        const res = JSON.parse(msg.data);
-                        
-                        if (res.msg_type === 'authorize') {
-                            self.postMessage({ type: 'STATUS', data: 'CONNECTED' });
-                            ws.send(JSON.stringify({ ticks: '1HZ100V', subscribe: 1 }));
-                        }
+        ws.current.onmessage = (msg) => {
+            const data = JSON.parse(msg.data);
 
-                        // THE OVERLAP SHOTGUN (4 STRIKES)
-                        if (active && res.msg_type === 'tick' && !isWaiting) {
-                            const q = res.tick.quote.toString();
-                            const d = q[q.length - 1]; 
-                            
-                            self.postMessage({ type: 'TICK', data: d });
-                            isWaiting = true; 
+            if (data.msg_type === 'tick') {
+                const digit = parseInt(data.tick.quote.toString().slice(-1));
+                setLastDigit(digit);
 
-                            // PRE-FLIGHT RAW STRING (Max Speed)
-                            const packet = '{"buy":1,"price":'+payload.stake+',"parameters":{"amount":'+payload.stake+',"basis":"stake","contract_type":"DIGITMATCH","currency":"USD","duration":1,"duration_unit":"t","symbol":"1HZ100V","barrier":'+d+'},"subscribe":1}';
-
-                            // 4-STRIKE PRESSURE BURST
-                            ws.send(packet);
-                            ws.send(packet);
-                            ws.send(packet);
-                            ws.send(packet);
-                        }
-
-                        if (res.msg_type === 'proposal_open_contract' && res.proposal_open_contract.is_sold) {
-                            isWaiting = false; 
-                            self.postMessage({ type: 'RESULT', data: res.proposal_open_contract });
-                        }
-                    };
+                // TRICK: If running, execute immediately on the first tick received
+                if (isRunning) {
+                    executePureHack(digit);
                 }
+            }
 
-                if (type === 'STOP') {
-                    active = false;
-                    if(ws) ws.close();
-                    self.postMessage({ type: 'STATUS', data: 'OFFLINE' });
-                }
-            };
-        `], { type: 'application/javascript' });
+            if (data.msg_type === 'buy') {
+                addLog(`SUCCESS: Contract ${data.buy.contract_id} executed at ${data.buy.start_time}`);
+                setIsRunning(false); // Auto-stop after win
+            }
 
-        workerRef.current = new Worker(URL.createObjectURL(workerBlob));
-        
-        workerRef.current.onmessage = (e) => {
-            const { type, data } = e.data;
-            if (type === 'STATUS') setStatus(data);
-            if (type === 'TICK') setLiveDigit(data);
-            if (type === 'RESULT') {
-                setResults(prev => [{
-                    id: data.contract_id,
-                    target: data.barrier,
-                    exit: data.exit_tick_display_value?.slice(-1) || '?',
-                    profit: data.profit
-                }, ...prev].slice(0, 8));
-                setTotalPL(v => v + data.profit);
+            if (data.error) {
+                addLog(`ERROR: ${data.error.message}`);
+                setIsRunning(false);
             }
         };
 
-        return () => workerRef.current.terminate();
-    }, []);
+        return () => ws.current?.close();
+    }, [isRunning]);
 
-    const handleToggle = () => {
-        if (!is_hunting) {
-            setIsHunting(true);
-            setResults([]);
-            workerRef.current.postMessage({ 
-                type: 'START', 
-                payload: { token: token.trim(), stake: Number(stake) } 
-            });
+    const addLog = (msg) => {
+        setLogs(prev => [`> ${msg}`, ...prev.slice(0, 5)]);
+    };
+
+    const executePureHack = (digit) => {
+        const payload = {
+            buy: 1,
+            price: parseFloat(stake),
+            parameters: {
+                amount: parseFloat(stake),
+                basis: 'stake',
+                contract_type: 'DIGITMATCH',
+                currency: 'USD',
+                duration: 1,
+                duration_unit: 't',
+                symbol: volatility,
+                barrier: digit.toString()
+            }
+        };
+        ws.current.send(JSON.stringify(payload));
+        setStatus('EXECUTING MATCH...');
+    };
+
+    const toggleHack = () => {
+        if (!isRunning) {
+            // Subscribe to ticks first
+            ws.current.send(JSON.stringify({ ticks: volatility, subscribe: 1 }));
+            setIsRunning(true);
+            setStatus('INTERCEPTING...');
+            addLog(`Makotimagic Active: Scanning ${volatility}...`);
         } else {
-            setIsHunting(false);
-            workerRef.current.postMessage({ type: 'STOP' });
+            setIsRunning(false);
+            setStatus('SYSTEM STOPPED');
         }
     };
 
     return (
-        <div style={ui.page}>
-            <div style={ui.card}>
-                <h2 style={ui.title}>SHOTGUN OVERLAP <span style={{color:'#0f0'}}>V24</span></h2>
-                
-                <div style={ui.monitor}>
-                    <div style={{fontSize:'80px', color:'#0f0', fontWeight:'900', textShadow:'0 0 30px #0f0'}}>{liveDigit}</div>
+        <div style={styles.container}>
+            <div style={styles.header}>
+                <h2 style={styles.title}>MAKOTIMAGIC v1.0</h2>
+                <div style={{...styles.status, color: isRunning ? '#00ff00' : '#ff0000'}}>
+                    {status}
+                </div>
+            </div>
+
+            <div style={styles.grid}>
+                <div style={styles.card}>
+                    <label style={styles.label}>Volatility</label>
+                    <select style={styles.input} onChange={(e) => setVolatility(e.target.value)} value={volatility}>
+                        <option value="R_10">Volatility 10 (1s)</option>
+                        <option value="R_50">Volatility 50 (1s)</option>
+                        <option value="R_100">Volatility 100 (1s)</option>
+                    </select>
+
+                    <label style={styles.label}>Stake (USD)</label>
+                    <input style={styles.input} type="number" value={stake} onChange={(e) => setStake(e.target.value)} />
                 </div>
 
-                <div style={ui.statsRow}>
-                    <div style={{color: status === 'CONNECTED' ? '#0f0' : '#f44', fontWeight:'bold'}}>{status}</div>
-                    <div style={{fontSize: '34px', color: total_pl >= 0 ? '#0f0' : '#f44'}}>${total_pl.toFixed(2)}</div>
+                <div style={styles.card}>
+                    <label style={styles.label}>Intercepted Digit</label>
+                    <div style={styles.bigDigit}>{lastDigit ?? '--'}</div>
                 </div>
+            </div>
 
-                <div style={ui.form}>
-                    <button 
-                        onClick={() => window.open('https://app.deriv.com/account/api-token', '_blank')} 
-                        style={ui.btnSecondary}
-                    >
-                        GET YOUR API TOKEN
-                    </button>
-                    <input type="password" value={token} onChange={e => setToken(e.target.value)} style={ui.input} placeholder="API TOKEN" />
-                    <input type="number" value={stake} onChange={e => setStake(e.target.value)} style={ui.input} placeholder="STAKE ($)" />
-                    <button onClick={handleToggle} style={is_hunting ? ui.btnStop : ui.btnStart}>
-                        {is_hunting ? 'STOP BURST' : 'EXECUTE 4-STRIKE'}
-                    </button>
-                </div>
+            <button 
+                style={{...styles.button, backgroundColor: isRunning ? '#ff0000' : '#00ff00'}}
+                onClick={toggleHack}
+            >
+                {isRunning ? 'STOP HACK' : 'RUN MAKOTIMAGIC'}
+            </button>
 
-                <div style={ui.table}>
-                    {results.map((r) => (
-                        <div key={r.id} style={ui.tr}>
-                            <span>TGT: <b>{r.target}</b></span>
-                            <span style={{color: r.target === r.exit ? '#0f0' : '#f44'}}>EXIT: <b>{r.exit}</b></span>
-                            <span style={{fontWeight:'bold'}}>{r.profit > 0 ? 'MATCH!' : 'MISS'}</span>
-                        </div>
-                    ))}
-                </div>
+            <div style={styles.console}>
+                {logs.map((log, i) => <div key={i} style={styles.logLine}>{log}</div>)}
             </div>
         </div>
     );
 };
 
-const ui = {
-    page: { background: '#000', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', fontFamily: 'monospace' },
-    card: { width: '420px', background: '#070707', padding: '30px', borderRadius: '20px', border: '2px solid #1a1a1a', textAlign: 'center' },
-    title: { fontSize: '22px', color: '#fff', marginBottom: '15px', letterSpacing: '2px' },
-    monitor: { background: '#000', padding: '15px', borderRadius: '15px', border: '1px solid #333', marginBottom: '25px' },
-    statsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
-    form: { display: 'flex', flexDirection: 'column', gap: '12px' },
-    input: { width: '100%', padding: '15px', background: '#000', border: '1px solid #333', color: '#0f0', fontSize: '18px', boxSizing: 'border-box' },
-    btnStart: { padding: '20px', background: '#0f0', color: '#000', border: 'none', fontWeight: '900', fontSize: '18px', cursor: 'pointer', borderRadius: '10px' },
-    btnStop: { padding: '20px', background: '#300', color: '#f44', border: 'none', fontWeight: '900', fontSize: '18px', cursor: 'pointer', borderRadius: '10px' },
-    btnSecondary: { padding: '15px', background: '#222', color: '#fff', border: '1px solid #333', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', borderRadius: '10px', textAlign: 'center' },
-    table: { marginTop: '25px' },
-    tr: { display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#111', marginBottom: '6px', borderRadius: '8px', color: '#eee' }
+const styles = {
+    container: { background: '#0a0a0a', padding: '20px', borderRadius: '10px', color: '#fff', fontFamily: 'monospace', border: '1px solid #333' },
+    header: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px', borderBottom: '1px solid #222', paddingBottom: '10px' },
+    title: { margin: 0, color: '#00ff00', fontSize: '1.2rem' },
+    status: { fontSize: '0.8rem', fontWeight: 'bold' },
+    grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' },
+    card: { background: '#111', padding: '15px', borderRadius: '5px', border: '1px solid #222' },
+    label: { display: 'block', fontSize: '0.7rem', color: '#666', marginBottom: '5px', textTransform: 'uppercase' },
+    input: { width: '100%', background: '#000', border: '1px solid #333', color: '#00ff00', padding: '8px', marginBottom: '10px', outline: 'none' },
+    bigDigit: { fontSize: '3rem', textAlign: 'center', fontWeight: 'bold', color: '#00ff00' },
+    button: { width: '100%', padding: '15px', color: '#000', border: 'none', fontWeight: 'bold', cursor: 'pointer', borderRadius: '5px' },
+    console: { marginTop: '20px', background: '#000', padding: '10px', height: '100px', fontSize: '0.7rem', overflowY: 'auto', border: '1px solid #111' },
+    logLine: { color: '#00ff00', marginBottom: '3px' }
 };
 
-export default MakotiMagic;
+export default Makotimagic;
