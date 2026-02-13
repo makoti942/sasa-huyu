@@ -1,87 +1,946 @@
+@use 'components/shared/styles/constants' as *;
+@use 'components/shared/styles/mixins' as *;
 
-@use 'components/shared/styles/devices' as *;
+.run-panel {
+    // fix for the RTL issue on tab active line
+    .dc-tabs__active-line {
+        right: auto;
+    }
+}
 
-.dc-tabs {
-    position: relative;
-    display: grid;
+// Removed tabs-shadow to fix mobile edge fading issue
 
-    &--top {
-        grid-template-rows: auto 1fr;
+.main {
+    display: flex;
+    overflow: hidden;
+    width: 100%;
+    height: calc(100vh - 4rem); // Adjusted for larger header (4rem header + navigation)
+    padding: 0; // Remove all padding to eliminate space between header and navigation
+
+    @include mobile-or-tablet-screen {
+        height: calc(100vh - 3.5rem); // Adjusted for larger mobile header (3.5rem header + navigation)
+        padding: 0;
     }
 
-    &--100vw {
-        width: 100vw;
-    }
-
-    &__list {
-        width: 100%;
-        line-height: 38px;
-        display: flex;
+    &__container {
         position: relative;
+        border: none;
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
 
         @include mobile-or-tablet-screen {
-            justify-content: center;
+            padding-bottom: var(--mobile-footer-height, 6rem); // Space for fixed footer
         }
 
-        &--overflow-hidden {
-            overflow-y: hidden;
-            display: block;
+        &.no-scroll {
+            overflow: hidden;
         }
 
-        &--border-bottom {
-            border-bottom: 2px solid var(--general-section-1);
-        }
-
-        &--top {
-            order: 0;
-        }
-
-        &--bottom {
-            order: 1;
-            border-top: 2px solid var(--general-section-1);
-        }
-
-        &--center {
-            justify-content: center;
-            width: fit-content;
-            margin: auto;
-
-            .dc-tabs__item {
-                padding: 0 2.2rem;
+        &--active {
+            // css for onboard tour overlay
+            &:before {
+                content: '';
+                position: fixed;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                background: rgb(0 0 0 / 72%);
+                opacity: 0.7;
+                z-index: 100;
             }
         }
 
-        &--fit-content {
-            @include mobile-or-tablet-screen {
-                width: fit-content;
+        .dc-tabs {
+            &__active-line {
+                display: none !important; // hide default line, we'll draw our own
             }
-        }
 
-        &--header-fit-content {
-            width: fit-content;
+            &__active {
+                background: #FF1493 !important; // Darker pink background for active tab
+                color: #ffffff !important; // White text for active tab
+                position: relative;
+                border-radius: 4px !important;
+                margin: 0 0.25rem !important;
+                padding: 0.5rem 1rem !important;
+                border: none !important;
+                box-shadow: none !important;
 
-            @include mobile-or-tablet-screen {
-                display: flex;
-                justify-content: space-evenly;
+                // active text/icon color - white
+                * {
+                    color: #ffffff !important;
+                }
+
+                // active icons - white
+                svg,
+                svg > path,
+                svg > g > path {
+                    fill: #ffffff !important;
+                }
+
+                // Remove animated underline for Binarytool style
+                &::after {
+                    display: none !important;
+                }
             }
-        }
 
-        &:not(&--header-fit-content) {
-            justify-content: center;
-        }
+            &__list {
+                background: #FF69B4 !important; // Bright pink background
+                justify-content: flex-start; // Start from left like friend's design
+                border-bottom: none !important; // Remove border
+                padding: 0; // Remove all padding to eliminate space
+                margin: 0; // Remove any margins
+                gap: 0; // Remove gaps between items
 
-        &--full-width {
-            width: 100vw;
+                // Override tab width calculation to be more compact
+                .dc-tabs__item {
+                    width: auto !important; // Let tabs size naturally
+                    padding: 0.5rem 1.2rem !important; // Padding for all tabs
+                    margin: 0.25rem 0.25rem !important; // Small margin for spacing
+                    flex-shrink: 0; // Prevent shrinking
+                    border-radius: 8px !important; // Rounded corners for all tabs
+                    transition: background-color 0.2s ease !important; // Smooth transition
+                    color: #ffffff !important; // White text for all navigation items
+                }
+
+                // Override the default justify-content: center from tabs.scss
+                &:not(&--header-fit-content) {
+                    justify-content: flex-start !important; // Start from left like friend's design
+                }
+
+                @include mobile-or-tablet-screen {
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    -ms-overflow-style: none;
+                    scrollbar-width: none;
+
+                    &::-webkit-scrollbar {
+                        display: none;
+                    }
+                }
+
+                &--header {
+                    &--main {
+                        &__tabs {
+                            @include mobile-or-tablet-screen {
+                                width: 100%;
+                                overflow-x: auto;
+                                padding: 0; // Remove padding to eliminate space between header and navigation
+                            }
+                        }
+                    }
+                }
+
+                &--border-bottom {
+                    @include mobile-or-tablet-screen {
+                        border-bottom: 0;
+                    }
+                }
+            }
+
+            &__content {
+                height: 100vh;
+                min-height: 100vh;
+                flex: 1;
+                margin: 0;
+                padding: 0;
+                position: relative;
+                overflow: hidden;
+
+                // Allow scrolling when Strategies component is rendered
+                &:has(.strategies--standalone),
+                &.strategies-tab-active {
+                    overflow-y: auto !important;
+                    overflow-x: hidden !important;
+                    -webkit-overflow-scrolling: touch;
+                    height: 100vh;
+                    max-height: 100vh;
+                }
+
+                .strategies--standalone {
+                    height: auto;
+                    min-height: 100%;
+                    width: 100%;
+                    padding-bottom: 8rem; // Extra padding for scrolling
+                }
+
+                @include mobile-or-tablet-screen {
+                    width: 100%;
+                    overflow-x: auto;
+                    padding-bottom: 6rem; // Space for fixed footer
+
+                    // Allow scrolling for Strategies on mobile
+                    &:has(.strategies--standalone),
+                    &.strategies-tab-active {
+                        overflow-y: auto !important;
+                        overflow-x: hidden !important;
+                        -webkit-overflow-scrolling: touch;
+                        height: calc(100vh - 3.5rem - 6rem) !important; // Account for mobile header (3.5rem) and footer (6rem)
+                        max-height: calc(100vh - 3.5rem - 6rem) !important;
+                        padding-bottom: 0 !important; // Remove padding from container, let content handle it
+                    }
+
+                    .strategies--standalone {
+                        height: auto !important;
+                        min-height: calc(100% + 20rem) !important; // Ensure content extends beyond viewport
+                        width: 100%;
+                        padding-bottom: 25rem !important; // Very large padding to ensure last card button is fully visible
+                        box-sizing: border-box;
+                    }
+
+                    &--no-result {
+                        @include flex-center;
+
+                        flex-direction: column;
+                        justify-content: flex-start;
+                        height: 100vh;
+                        margin-top: 5rem;
+
+                        svg {
+                            margin-bottom: 2.4rem;
+                        }
+
+                        h1 {
+                            margin-bottom: 0.8rem;
+                        }
+
+                        span {
+                            word-break: break-word;
+                            text-align: center;
+                        }
+                    }
+                }
+
+                &--main {
+                    &__tabs {
+                        display: flex;
+                        justify-content: space-between;
+
+                        @include mobile-or-tablet-screen {
+                            flex-direction: column;
+                            background-color: var(--general-section-1);
+                        }
+                    }
+                }
+            }
+
+            &__item {
+                border-top-left-radius: 1rem;
+                border-top-right-radius: 1rem;
+                height: 4.8rem;
+                padding: 0 2rem;
+                width: auto;
+
+                @include flex-center;
+
+                svg {
+                    padding-inline-end: 0;
+                    margin-inline-end: 0.8rem;
+
+                    @include mobile-or-tablet-screen {
+                        margin-inline-end: 0.4rem;
+                    }
+                }
+
+                &__icon {
+                    @include mobile-or-tablet-screen {
+                        padding-top: 0.5rem;
+                    }
+                }
+            }
         }
     }
 
-    &__item {
-        list-style: none;
-        font-size: 14px !important;
-        font-weight: 500 !important; // Medium weight for inactive tabs
+    &__run-strategy-wrapper {
+        inset-inline-end: 1.6rem;
+        top: 1.6rem;
+        z-index: 2;
+
+        @include desktop-screen {
+            position: absolute;
+        }
+
+        .animation {
+            &__button#db-animation {
+                &__run-button {
+                    background-color: var(--purchase-main-1);
+                }
+
+                &__stop-button {
+                    background-color: var(--button-primary-hover);
+                }
+            }
+
+            &__container {
+                background-color: var(--general-main-1);
+            }
+        }
+    }
+
+    &__sidebar-wrapper {
+        &--active {
+            position: fixed;
+            right: 0;
+        }
+
+        &--hidden {
+            display: none;
+        }
+    }
+}
+
+/* Flying rocket next to SpeedBots tab in header */
+.nav-speedbots-rocket {
+    display: inline-block;
+    margin-left: 0.4rem;
+    font-size: 1.2em;
+    animation: rocketFly 2s ease-in-out infinite;
+    filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.8));
+    vertical-align: middle;
+}
+
+/* Bouncing rocket next to SpeedBot tab (in submenu) */
+.nav-rocket {
+    display: inline-block;
+    margin-left: 0.4rem;
+    animation: rocketBounce 1.8s ease-in-out infinite;
+}
+
+@keyframes nav-underline {
+    0% {
+        filter: hue-rotate(0deg);
+    }
+    50% {
+        filter: hue-rotate(30deg);
+    }
+    100% {
+        filter: hue-rotate(0deg);
+    }
+}
+
+/* Crown icon next to Matches tab */
+.nav-crown {
+    display: inline-block;
+    margin-left: 0.4rem;
+    font-size: 1.2em;
+    filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.6));
+    vertical-align: middle; // Prevent upward movement
+    background: transparent !important; // Ensure no white background
+}
+
+/* Matches label styling */
+.nav-matches-label {
+    background: transparent !important; // Ensure no white background
+    vertical-align: middle; // Prevent upward movement
+}
+
+/* SpeedBot label - no background, matches other headings */
+.nav-speedbot-label {
+    display: inline-block;
+    margin-left: 0.2rem;
+}
+
+@keyframes rocketFly {
+    0% {
+        transform: translateY(0) translateX(0) rotate(0deg) scale(1);
+        opacity: 1;
+    }
+    25% {
+        transform: translateY(-8px) translateX(4px) rotate(-15deg) scale(1.1);
+        opacity: 0.9;
+    }
+    50% {
+        transform: translateY(-12px) translateX(8px) rotate(-25deg) scale(1.2);
+        opacity: 0.8;
+    }
+    75% {
+        transform: translateY(-8px) translateX(4px) rotate(-15deg) scale(1.1);
+        opacity: 0.9;
+    }
+    100% {
+        transform: translateY(0) translateX(0) rotate(0deg) scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes rocketBounce {
+    0%,
+    100% {
+        transform: translateY(0) rotate(0deg);
+    }
+    25% {
+        transform: translateY(-3px) rotate(-5deg);
+    }
+    50% {
+        transform: translateY(-6px) rotate(0deg);
+    }
+    75% {
+        transform: translateY(-3px) rotate(5deg);
+    }
+}
+
+.animation__wrapper {
+    .animation {
+        &__button#db-animation {
+            &__run-button {
+                background-color: var(--purchase-main-1);
+            }
+
+            &__stop-button {
+                background-color: var(--button-primary-hover);
+            }
+        }
+    }
+}
+
+.bot-stopped-dialog {
+    @include mobile-or-tablet-screen {
+        padding: 2rem;
+    }
+
+    .dc-dialog {
+        position: relative;
+
+        &__header-wrapper {
+            margin: 0 0 2.4rem;
+        }
+
+        &__content {
+            &__header {
+                display: flex;
+                justify-content: space-between;
+                margin: 0 0 2.4rem;
+
+                .dc-icon {
+                    cursor: pointer;
+                }
+            }
+        }
+
+        @include mobile-or-tablet-screen {
+            &__footer {
+                flex-wrap: unset;
+
+                .dc-dialog__button {
+                    padding: 0;
+                    width: 40%;
+                    min-width: unset;
+                    flex-basis: unset;
+
+                    &:first-child {
+                        margin-right: 1rem;
+                    }
+                }
+            }
+        }
+    }
+}
+
+.dashboard {
+    &__chart-wrapper {
+        position: relative;
+        height: var(--tab-content-height);
+        width: 100%;
+        transition: all 0.4s;
+
+        @include mobile-or-tablet-screen {
+            height: var(--tab-content-height-mobile);
+            padding-bottom: 6rem; // Space for fixed footer
+            background: var(--general-main-1);
+
+            .smartcharts {
+                height: calc(100% - 4rem);
+                z-index: 1;
+
+                &:has(.stxMenuActive) {
+                    z-index: 99;
+                    transition: all 1s ease-out;
+                }
+            }
+        }
+
+        &--expanded {
+            width: calc(100vw - 39.8rem);
+        }
+
+        &--modal {
+            width: 40rem;
+        }
+    }
+
+    &__toolbox {
+        position: absolute;
+        top: 0;
+        inset-inline-start: 0;
+        width: 23.6rem;
+        padding: 0.8rem;
+        background: var(--general-main-1);
+        z-index: 1;
+
+        .db-toolbox {
+            &__title {
+                height: 2.6rem;
+                line-height: 2.6rem;
+                position: relative;
+                cursor: pointer;
+
+                &__chevron {
+                    position: absolute;
+                    inset-inline-end: 0;
+                    top: 0.3rem;
+                    transition: transform 0.3s ease;
+
+                    &--active {
+                        transform: rotate(180deg);
+                        top: -0.2rem;
+                    }
+                }
+            }
+
+            &__content {
+                border: solid 1px var(--general-section-1);
+            }
+
+            &__category-menu {
+                height: calc(100vh - 33.6rem);
+                overflow-y: scroll;
+            }
+
+            &__search {
+                padding: 1.3rem 0.8rem;
+                height: 6rem;
+            }
+
+            &__content-wrapper {
+                height: 0;
+            }
+
+            &__content-wrapper.active {
+                height: 100%;
+            }
+        }
+    }
+
+    &__run-strategy-wrapper {
+        inset-inline-end: 1.6rem;
+        top: 1.6rem;
+        z-index: 2;
+
+        @include desktop-screen {
+            position: absolute;
+        }
+
+        .animation {
+            &__button {
+                background-color: var(--purchase-main-1);
+            }
+
+            &__container {
+                background-color: var(--general-main-1);
+            }
+        }
+    }
+
+    &__sidebar-wrapper {
+        &--active {
+            position: fixed;
+            inset-inline-end: 0;
+        }
+
+        &--hidden {
+            display: none;
+        }
+    }
+}
+
+.bot-builder {
+    position: absolute;
+    top: 6.6rem;
+    inset-inline-start: 1.6rem;
+    z-index: -1;
+    background: var(--general-main-1);
+    height: var(--tab-content-height);
+
+    .injectionDiv {
+        .blocklyTrash {
+            transition: all 0.4s;
+
+            @include mobile-or-tablet-screen {
+                display: none;
+            }
+        }
+    }
+
+    &--tour-active {
+        .blocklyTrash {
+            display: none;
+        }
+    }
+
+    &--active {
+        z-index: 1;
+    }
+
+    &--inactive {
+        display: none;
+    }
+
+    @include mobile-or-tablet-screen {
+        top: 5.6rem;
+        inset-inline-start: 0;
+        width: 100vw;
+        height: var(--tab-content-height-mobile);
+        padding-bottom: 6rem; // Space for fixed footer
+    }
+}
+
+#react-joyride-step-6 {
+    .onboard__label {
+        margin-bottom: 1.6rem;
+    }
+}
+
+#react-joyride-step-4 {
+    .__floater__arrow {
+        span {
+            inset-inline-end: 0;
+        }
+    }
+}
+
+.onboard {
+    &__header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 2.4rem;
+        margin-top: -2rem;
+
+        &--close {
+            cursor: pointer;
+        }
+    }
+
+    &__steps {
+        @media (height <= 730px) {
+            max-height: 40vh;
+            overflow-y: auto;
+        }
+    }
+
+    &__label {
+        text-align: left;
+        margin-bottom: 2.4rem;
+    }
+
+    &__container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        margin-bottom: 2.4rem;
+
+        img {
+            width: 97%;
+        }
+
+        .initial-loader {
+            width: 33rem;
+            height: 18rem;
+        }
+    }
+
+    &__content {
+        text-align: left;
+
+        @include rtl {
+            text-align: right;
+        }
+
+        p {
+            font-size: 1.4rem;
+        }
+
+        &__block {
+            &:first-child {
+                margin-bottom: 2.4rem;
+            }
+        }
+    }
+}
+
+.joyride-content {
+    font-size: 1.4rem;
+
+    @media (height <= 790px) {
+        max-height: 46vh;
+        overflow-y: auto;
+    }
+
+    &__left {
+        text-align: start;
+
+        &__step-three {
+            margin-bottom: 0.8rem;
+        }
+    }
+
+    &__sub-title {
+        margin-top: 1rem;
+    }
+
+    ul {
+        list-style: disc;
+        margin-left: 4rem;
+        margin-top: 1rem;
+
+        li {
+            margin-bottom: 1rem;
+        }
+    }
+
+    video {
+        width: 100%;
+        margin-top: 1rem;
+    }
+
+    &__with-icon {
+        display: flex;
+        margin-bottom: 1rem;
+
+        &__right {
+            margin-left: 0.8rem;
+        }
+
+        &__left {
+            margin: 0.3rem 0 0 1.2rem;
+
+            @include mobile-or-tablet-screen {
+                margin: 0;
+
+                svg {
+                    margin: 0;
+                }
+            }
+        }
+    }
+}
+
+.dbot-slider {
+    @include flex-center(flex-start);
+
+    flex-direction: column;
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100vh;
+    padding: 1.6rem;
+    border-top: solid 1px var(--border-normal);
+    z-index: 1000;
+    background-color: var(--general-main-1);
+
+    &--tour-position {
+        top: 0;
+
+        .progress-bar-circle:first-child {
+            display: none;
+        }
+    }
+
+    &--active {
+        height: auto;
+        min-height: 18rem;
+    }
+
+    &__navbar {
+        display: flex;
+        justify-content: space-between;
+        padding: 0 1.6rem;
+        width: 100%;
+        margin-bottom: 1.8rem;
+    }
+
+    &__title {
+        margin-bottom: 0.8rem;
+    }
+
+    &__label {
+        margin-bottom: 0.8rem;
+    }
+
+    &__content {
         text-align: center;
-        white-space: nowrap;
-        color: #ffffff !important; // White text for all navigation items
+        padding: 0 1.6rem;
+        margin-bottom: 1.6rem;
+
+        @include mobile-or-tablet-screen {
+            line-height: 1.8;
+        }
+
+        &:last-child {
+            margin-bottom: 3rem;
+        }
+    }
+
+    &__image,
+    &__media {
+        background: var(--general-section-1);
+        text-align: center;
+        width: 100%;
+        height: 55%;
+        margin-bottom: 1.6rem;
+    }
+
+    img {
+        height: 100%;
+    }
+
+    video {
+        height: 100%;
+        width: 65%;
+    }
+
+    &__progress-bar {
+        margin: 1.6rem 0;
+    }
+
+    &__status {
+        width: 100%;
+        position: fixed;
+        bottom: 1.6rem;
+    }
+
+    &__button-group {
+        display: flex;
+        padding: 0 1.6rem;
+
+        button {
+            height: 4rem;
+            width: 100%;
+            border: 0.2rem solid $color-grey-1;
+            background: $color-white;
+            border-radius: 0.4rem;
+            outline: none;
+            cursor: pointer;
+            margin-inline-end: 0.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            &.default {
+                background: transparent;
+            }
+
+            &.danger {
+                background: $color-red;
+                border: none;
+                margin-right: 0;
+
+                span {
+                    color: $color-white;
+                }
+            }
+        }
+    }
+
+    &__bot-builder-tour {
+        height: 16rem;
+        background: var(--general-section-1);
+
+        .dbot-slider {
+            width: 100%;
+
+            &__status {
+                @include flex-center(flex-start);
+            }
+
+            &__progress-bar {
+                width: 50%;
+                margin-bottom: unset;
+
+                @include flex-center(flex-start);
+
+                margin-inline-start: 1rem;
+
+                .progress-bar-circle {
+                    opacity: 0.16;
+                }
+            }
+
+            &__button-group {
+                width: 50%;
+                display: flex;
+                justify-content: center;
+
+                .default {
+                    background: transparent;
+
+                    span {
+                        color: var(--text-prominent);
+                    }
+                }
+            }
+        }
+    }
+}
+
+@keyframes blink {
+    0%,
+    100% {
+        border: 1px solid $color-red;
+    }
+
+    50% {
+        border: 1px solid transparent;
+    }
+}
+
+.dbot-tour-blink {
+    animation: blink 1.25s infinite;
+    animation: blink 1.25s ease-in infinite;
+    animation: blink 1.25s ease-in infinite;
+    border-radius: $BORDER-RADIUS * 12.5;
+    height: 2.5rem !important;
+    width: 2.5rem !important;
+    padding: 0.2rem 0;
+
+    @include flex-center;
+}
+
+.beta-server-bot {
+    color: var(--brand-red-coral);
+    margin-left: 8px;
+    padding: 4px 8px;
+    height: 22px;
+    border-radius: 16px;
+    font-size: 1.2rem;
+    border: 2px solid var(--brand-red-coral);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+// Navigation tabs styling to match screenshot - dark blue background, white text, light blue icons
+.main__container .main__tabs .dc-tabs__item {
+    // All navigation items use white text
+    color: #ffffff !important; // White text for all navigation items
+    font-weight: 500 !important;
+    font-family:
+        Arial,
+        Helvetica,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif !important;
+    font-size: 14px !important;
+    background: transparent !important;
+
+    * {
+        color: #ffffff !important;
+        font-weight: 500 !important;
         font-family:
             Arial,
             Helvetica,
@@ -89,13 +948,60 @@
             BlinkMacSystemFont,
             'Segoe UI',
             sans-serif !important;
-        -webkit-touch-callout: none;
-        -webkit-tap-highlight-color: transparent;
+    }
 
-        // Tab text - white for all navigation items
+    span,
+    div,
+    p,
+    label {
+        color: #ffffff !important;
+        font-weight: 500 !important;
+        font-family:
+            Arial,
+            Helvetica,
+            -apple-system,
+            BlinkMacSystemFont,
+            'Segoe UI',
+            sans-serif !important;
+    }
+
+    // Remove glowing effects
+    svg {
+        position: relative;
+        filter: none;
+        fill: #FFB6C1 !important; // Light pink icons // Light brown icons - override any inline fill attributes
+
+        &::before {
+            display: none;
+        }
+    }
+
+    svg,
+    svg > path,
+    svg > g > path,
+    svg > * {
+        fill: #FFB6C1 !important; // Light pink icons // Light brown icons for all navigation items
+        stroke: none !important;
+        filter: none !important;
+    }
+
+    // Active tab - lighter brown background with white text
+    &.dc-tabs__active {
+        background: #FF1493 !important; // Darker pink background for active tab
+        color: #ffffff !important; // White text
+        font-weight: bold !important;
+        font-family:
+            Arial,
+            Helvetica,
+            -apple-system,
+            BlinkMacSystemFont,
+            'Segoe UI',
+            sans-serif !important;
+        font-size: 14px !important;
+
         * {
             color: #ffffff !important;
-            font-weight: 500 !important;
+            font-weight: bold !important;
             font-family:
                 Arial,
                 Helvetica,
@@ -110,7 +1016,7 @@
         p,
         label {
             color: #ffffff !important;
-            font-weight: 500 !important;
+            font-weight: bold !important;
             font-family:
                 Arial,
                 Helvetica,
@@ -120,133 +1026,76 @@
                 sans-serif !important;
         }
 
-        // Tab icons - light brown for all navigation items
         svg {
-            fill: #d8bfd8 !important; // Light purple icons - override any inline fill attributes
+            filter: none;
+            fill: #ffffff !important; // White icons for active tab - override any inline fill attributes
+
+            &::before {
+                display: none;
+            }
         }
 
         svg,
         svg > path,
         svg > g > path,
         svg > * {
-            fill: #d8bfd8 !important; // Light purple icons
+            fill: #ffffff !important; // White icons for active tab
             stroke: none !important;
             filter: none !important;
         }
-
-        &__counter {
-            margin-top: -2rem;
-            vertical-align: middle;
-        }
-
-        &__icon {
-            padding-right: 0.7rem;
-
-            @include mobile-or-tablet-screen {
-                padding-right: 0;
-                padding-top: 0.5rem;
-            }
-        }
-
-        &--header-fit-content {
-            padding: 0 29px;
-        }
-
-        &--is-hidden {
-            display: none;
-        }
-
-        &--is-scrollable-and-active {
-            position: relative;
-
-            &:after {
-                border-bottom: 2px solid var(--brand-red-coral);
-                content: '';
-                position: absolute;
-                left: 0;
-                display: block;
-                width: 100%;
-            }
-        }
-
-        &:not(.dc-tabs__active) {
-            cursor: pointer;
-            color: #ffffff !important; // White text for all navigation items
-
-            // Non-active tab text - white
-            * {
-                color: #ffffff !important;
-                font-weight: 500 !important;
-                font-family:
-                    Arial,
-                    Helvetica,
-                    -apple-system,
-                    BlinkMacSystemFont,
-                    'Segoe UI',
-                    sans-serif !important;
-            }
-
-            span,
-            div,
-            p,
-            label {
-                color: #ffffff !important;
-                font-weight: 500 !important;
-                font-family:
-                    Arial,
-                    Helvetica,
-                    -apple-system,
-                    BlinkMacSystemFont,
-                    'Segoe UI',
-                    sans-serif !important;
-            }
-
-            // Non-active tab icons - light brown
-            svg {
-                fill: #d8bfd8 !important; // Light purple icons - override any inline fill attributes
-            }
-
-            svg,
-            svg > path,
-            svg > g > path,
-            svg > * {
-                fill: #d8bfd8 !important; // Light purple icons
-                stroke: none !important;
-                filter: none !important;
-            }
-
-            &:hover {
-                color: #ffffff !important; // White text
-                background: rgba(255, 255, 255, 0.1) !important; // Slight white hover on dark blue
-
-                * {
-                    color: #ffffff !important;
-                    font-weight: 500 !important;
-                }
-
-                svg {
-                    fill: #d8bfd8 !important; // Light purple icons on hover
-                }
-
-                svg,
-                svg > path,
-                svg > g > path,
-                svg > * {
-                    fill: #d8bfd8 !important; // Light purple icons on hover                    stroke: none !important;
-                    filter: none !important;
-                }
-            }
-        }
-
-        &:not(&--header-fit-content) {
-            width: var(--tab-width);
-        }
     }
 
-    &__active {
-        font-weight: bold !important;
-        color: #ffffff !important; // White text
-        background-color: #8A2BE2 !important; // Bright purple background for active tab
+    // Hover effect for inactive tabs
+    &:hover:not(.dc-tabs__active) {
+        color: #ffffff !important;
+        background: rgba(255, 255, 255, 0.1) !important; // Slight white hover on dark brown
+        transition: all 0.2s ease;
+
+        * {
+            color: #ffffff !important;
+            font-weight: 500 !important;
+        }
+
+        span,
+        div,
+        p,
+        label {
+            color: #ffffff !important;
+            font-weight: 500 !important;
+        }
+
+        svg {
+            filter: none;
+        }
+
+        svg,
+        svg > path,
+        svg > g > path {
+            fill: #FFB6C1 !important; // Light pink icons // Light brown icons on hover
+            stroke: none !important;
+            filter: none !important;
+        }
+    }
+}
+
+// Force all tab text and icons - override any default styles to match screenshot
+.dc-tabs__item {
+    color: #ffffff !important; // White text for all navigation items
+    font-family:
+        Arial,
+        Helvetica,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+
+    span,
+    div,
+    p,
+    * {
+        color: #ffffff !important;
         font-family:
             Arial,
             Helvetica,
@@ -254,226 +1103,111 @@
             BlinkMacSystemFont,
             'Segoe UI',
             sans-serif !important;
-        font-size: 14px !important;
+        font-weight: 500 !important;
+    }
 
-        // Active tab text - white and bold
-        * {
-            color: #ffffff !important;
-            font-weight: bold !important;
-            font-family:
-                Arial,
-                Helvetica,
-                -apple-system,
-                BlinkMacSystemFont,
-                'Segoe UI',
-                sans-serif !important;
+    svg {
+        position: relative;
+        filter: none;
+        fill: #FFB6C1 !important; // Light pink icons // Light brown icons - override any inline fill attributes
+
+        &::before {
+            display: none;
         }
+    }
+
+    svg,
+    svg *,
+    svg > path,
+    svg > g > path {
+        fill: #FFB6C1 !important; // Light pink icons // Light brown icons for all navigation items
+        stroke: none !important;
+        filter: none !important;
+    }
+
+    // Active tab styling
+    &.dc-tabs__active {
+        color: #ffffff !important;
+        font-weight: bold !important;
+        background: #FF1493 !important; // Darker pink background for active tab
 
         span,
         div,
         p,
-        label {
+        * {
             color: #ffffff !important;
             font-weight: bold !important;
-            font-family:
-                Arial,
-                Helvetica,
-                -apple-system,
-                BlinkMacSystemFont,
-                'Segoe UI',
-                sans-serif !important;
         }
 
-        // Override any theme-based active states
-        &:hover {
-            color: #ffffff !important;
-            background-color: #9370DB !important; // Darker purple on hover
-
-            * {
-                color: #ffffff !important;
-                font-weight: bold !important;
-            }
-
-            span,
-            div,
-            p,
-            label {
-                color: #ffffff !important;
-                font-weight: bold !important;
-            }
-        }
-
-        // Active tab icons - white
         svg {
-            fill: #ffffff !important; // White icons - override any inline fill attributes
+            fill: #ffffff !important; // White icons for active tab - override any inline fill attributes
         }
 
         svg,
+        svg *,
         svg > path,
-        svg > g > path,
-        svg > * {
-            fill: #ffffff !important; // White icons
-            stroke: none !important;
-        }
-    }
-
-    &__active-line {
-        display: block;
-        position: absolute;
-
-        /* rtl:begin:ignore */
-        left: 0;
-
-        /* rtl:end:ignore */
-        height: 2px;
-        background: var(--text-prominent) !important;
-        transition: all ease-in-out 0.3s;
-
-        &--top {
-            bottom: -2px;
-        }
-
-        &--bottom {
-            top: -2px;
-        }
-
-        &--is-hidden {
-            display: none;
-        }
-
-        &--fit-content {
-            @include mobile-or-tablet-screen {
-                width: 120px;
-            }
-        }
-
-        &:not(&--header-fit-content) {
-            width: var(--tab-width);
+        svg > g > path {
+            fill: #ffffff !important; // White icons for active tab
         }
     }
 }
 
-// Force theme-responsive text for run panel tabs - highest specificity
-.run-panel .dc-tabs__item,
-.run-panel .dc-tabs__active,
-.run-panel .dc-tabs__item:not(.dc-tabs__active) {
-    color: var(--text-prominent) !important;
-    font-weight: bold !important;
-
-    * {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
-    }
+// Override any theme-based colors to match screenshot
+body.theme--light .dc-tabs__item,
+body.theme--dark .dc-tabs__item {
+    color: #ffffff !important; // White text for all navigation items
 
     span,
     div,
     p,
-    label {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
-    }
-}
-
-// Specifically target non-active tabs in run panel
-.run-panel .dc-tabs__item:not(.dc-tabs__active) {
-    color: var(--text-prominent) !important;
-    font-weight: bold !important;
-
     * {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
+        color: #ffffff !important;
+        font-family:
+            Arial,
+            Helvetica,
+            -apple-system,
+            BlinkMacSystemFont,
+            'Segoe UI',
+            sans-serif !important;
+        font-weight: 500 !important;
     }
 
-    span,
-    div,
-    p,
-    label {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
-    }
-}
-
-// Specifically target ACTIVE tabs in run panel - highest priority
-.run-panel .dc-tabs__item.dc-tabs__active {
-    color: var(--text-prominent) !important;
-    font-weight: bold !important;
-
-    * {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
+    svg {
+        fill: #FFB6C1 !important; // Light pink icons // Light brown icons - override any inline fill attributes
     }
 
-    span,
-    div,
-    p,
-    label {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
+    svg,
+    svg *,
+    svg > path,
+    svg > g > path {
+        fill: #FFB6C1 !important; // Light pink icons // Light brown icons for all navigation items
+        stroke: none !important;
+        filter: none !important;
     }
 
-    // Override any active state styling
-    &:hover,
-    &:focus,
-    &:active {
-        color: var(--text-prominent) !important;
-
-        * {
-            color: var(--text-prominent) !important;
-            font-weight: bold !important;
-        }
+    // Active tab
+    &.dc-tabs__active {
+        color: #ffffff !important;
+        font-weight: bold !important;
+        background: #FF1493 !important; // Darker pink background for active tab
 
         span,
         div,
         p,
-        label {
-            color: var(--text-prominent) !important;
-            font-weight: bold !important;
-        }
-    }
-}
-
-// Force theme-responsive text for reset button - highest specificity
-.run-panel__footer-button,
-.run-panel__clear-button,
-.run-panel .dc-btn--secondary {
-    color: var(--text-prominent) !important;
-    font-weight: bold !important;
-
-    * {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
-    }
-
-    .dc-btn__text,
-    .dc-btn__icon,
-    span,
-    div,
-    p,
-    label {
-        color: var(--text-prominent) !important;
-        font-weight: bold !important;
-    }
-
-    // Override all button states
-    &:hover,
-    &:focus,
-    &:active,
-    &:visited {
-        color: var(--text-prominent) !important;
-
         * {
-            color: var(--text-prominent) !important;
+            color: #ffffff !important;
             font-weight: bold !important;
         }
 
-        .dc-btn__text,
-        .dc-btn__icon,
-        span,
-        div,
-        p,
-        label {
-            color: var(--text-prominent) !important;
-            font-weight: bold !important;
+        svg {
+            fill: #ffffff !important; // White icons for active tab - override any inline fill attributes
+        }
+
+        svg,
+        svg *,
+        svg > path,
+        svg > g > path {
+            fill: #ffffff !important; // White icons for active tab
         }
     }
 }
