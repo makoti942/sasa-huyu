@@ -136,7 +136,7 @@ function drawGridOnce() {
         const y = BOTTOM_Y - i * STEP;
         const line = document.createElementNS(ns, 'line');
         line.setAttribute('x1', '80');
-        line.setAttribute('x2', '520');
+        line.setAttribute('x2', '380');
         line.setAttribute('y1', String(y));
         line.setAttribute('y2', String(y));
         line.setAttribute('class', 'grid-line');
@@ -161,7 +161,7 @@ function drawOuGridOnce() {
         const y = BOTTOM_Y - i * STEP;
         const line = document.createElementNS(ns, 'line');
         line.setAttribute('x1', '80');
-        line.setAttribute('x2', '520');
+        line.setAttribute('x2', '380');
         line.setAttribute('y1', String(y));
         line.setAttribute('y2', String(y));
         line.setAttribute('class', 'grid-line');
@@ -186,7 +186,7 @@ function drawMdHistGridOnce() {
         const y = BOTTOM_Y - i * STEP;
         const line = document.createElementNS(ns, 'line');
         line.setAttribute('x1', '50');
-        line.setAttribute('x2', '560');
+        line.setAttribute('x2', '380');
         line.setAttribute('y1', String(y));
         line.setAttribute('y2', String(y));
         line.setAttribute('class', 'grid-line');
@@ -199,7 +199,7 @@ function drawMdHistGridOnce() {
         mdHistChart.appendChild(label);
     }
     const title = document.createElementNS(ns, 'text');
-    title.setAttribute('x', '300');
+    title.setAttribute('x', '215');
     title.setAttribute('y', '20');
     title.setAttribute('class', 'grid-label');
     title.setAttribute('text-anchor', 'middle');
@@ -218,7 +218,7 @@ function drawRfGridOnce() {
         const y = BOTTOM_Y - i * STEP;
         const line = document.createElementNS(ns, 'line');
         line.setAttribute('x1', '80');
-        line.setAttribute('x2', '520');
+        line.setAttribute('x2', '380');
         line.setAttribute('y1', String(y));
         line.setAttribute('y2', String(y));
         line.setAttribute('class', 'grid-line');
@@ -301,13 +301,15 @@ function updateOverUnder() {
     function renderSeries(chartEl, values, title) {
         if (!chartEl) return;
         if (!chartEl.__gridDrawn) {
+            const chartWidth = chartEl.getBoundingClientRect().width;
+            const right = chartWidth - 20;
             const HEIGHT = H;
             const STEP = HEIGHT / 10;
             for (let i = 0; i <= 10; i++) {
                 const y = BOTTOM_Y - i * STEP;
                 const line = document.createElementNS(ns, 'line');
                 line.setAttribute('x1', '50');
-                line.setAttribute('x2', '560');
+                line.setAttribute('x2', String(right));
                 line.setAttribute('y1', String(y));
                 line.setAttribute('y2', String(y));
                 line.setAttribute('class', 'grid-line');
@@ -320,7 +322,7 @@ function updateOverUnder() {
                 chartEl.appendChild(label);
             }
             const t = document.createElementNS(ns, 'text');
-            t.setAttribute('x', '300');
+            t.setAttribute('x', String(chartWidth / 2));
             t.setAttribute('y', '20');
             t.setAttribute('class', 'grid-label');
             t.setAttribute('text-anchor', 'middle');
@@ -335,12 +337,13 @@ function updateOverUnder() {
             chartEl.__barsGroup = barsGroup;
         }
         while (barsGroup.firstChild) barsGroup.removeChild(barsGroup.firstChild);
+        const chartWidth = chartEl.getBoundingClientRect().width;
         const left = 60,
-            right = 540,
+            right = chartWidth - 20,
             width = right - left;
         const slot = width / 10;
-        const gap = 10;
-        const barW = Math.max(6, slot - gap);
+        const gap = 8;
+        const barW = Math.max(4, slot - gap);
         for (let t = 0; t <= 9; t++) {
             const v = values[t];
             const pct = total > 0 ? (v / total) * 100 : 0;
@@ -352,17 +355,18 @@ function updateOverUnder() {
             rect.setAttribute('y', String(y));
             rect.setAttribute('width', String(barW));
             rect.setAttribute('height', String(h));
-            rect.setAttribute('rx', '4');
-            rect.setAttribute('ry', '4');
+            rect.setAttribute('rx', '3');
+            rect.setAttribute('ry', '3');
             rect.setAttribute('class', title === 'Over' ? 'bar-rect-odd' : 'bar-rect-even');
             barsGroup.appendChild(rect);
             const label = document.createElementNS(ns, 'text');
             const xCenter = x + barW / 2;
-            const dx = t % 2 === 0 ? -10 : 10;
+            const dx = t % 2 === 0 ? -8 : 8;
             label.setAttribute('x', String(xCenter + dx));
-            label.setAttribute('y', String(Math.max(TOP_Y + 12, y - 6)));
+            label.setAttribute('y', String(Math.max(TOP_Y + 10, y - 5)));
             label.setAttribute('class', 'bar-perc');
-            label.textContent = `${pct.toFixed(2)}%`;
+            label.style.fontSize = '10px';
+            label.textContent = `${pct.toFixed(1)}%`;
             barsGroup.appendChild(label);
             const tickLabel = document.createElementNS(ns, 'text');
             tickLabel.setAttribute('x', String(x + barW / 2));
@@ -411,7 +415,7 @@ function updateMatchDiffer() {
             BOTTOM_Y = 250;
         const SCALE_MAX = 20;
         const left = 60,
-            right = 540,
+            right = 380,
             width = right - left;
         const slot = width / 10;
         const gap = 10;
@@ -751,5 +755,7 @@ window.addEventListener('resize', () => {
     if (window.innerWidth >= 768) {
         closeMobileMenu();
     }
+    updateOverUnder();
+    updateMatchDiffer();
 });
 connect();
