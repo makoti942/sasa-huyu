@@ -121,14 +121,14 @@
 
         // Tab icons - light brown for all navigation items
         svg {
-            fill: #FFB6C1 !important; // Light pink icons - override any inline fill attributes
+            fill: #b39ddb !important; // Light purple icons - override any inline fill attributes
         }
 
         svg,
         svg > path,
         svg > g > path,
         svg > * {
-            fill: #FFB6C1 !important; // Light pink icons
+            fill: #b39ddb !important; // Light purple icons
             stroke: none !important;
             filter: none !important;
         }
@@ -202,14 +202,14 @@
 
             // Non-active tab icons - light brown
             svg {
-                fill: #FFB6C1 !important; // Light pink icons - override any inline fill attributes
+                fill: #b39ddb !important; // Light purple icons - override any inline fill attributes
             }
 
             svg,
             svg > path,
             svg > g > path,
             svg > * {
-                fill: #FFB6C1 !important; // Light pink icons
+                fill: #b39ddb !important; // Light purple icons
                 stroke: none !important;
                 filter: none !important;
             }
@@ -224,14 +224,14 @@
                 }
 
                 svg {
-                    fill: #FFB6C1 !important; // Light pink icons on hover
+                    fill: #b39ddb !important; // Light purple icons on hover
                 }
 
                 svg,
                 svg > path,
                 svg > g > path,
                 svg > * {
-                    fill: #FFB6C1 !important; // Light pink icons on hover                    stroke: none !important;
+                    fill: #b39ddb !important; // Light purple icons on hover                    stroke: none !important;
                     filter: none !important;
                 }
             }
@@ -245,7 +245,7 @@
     &__active {
         font-weight: bold !important;
         color: #ffffff !important; // White text
-        background-color: #FF1493 !important; // Bright pink background for active tab
+        background-color: #722fe4 !important; // Purple background for active tab
         font-family:
             Arial,
             Helvetica,
@@ -286,7 +286,7 @@
         // Override any theme-based active states
         &:hover {
             color: #ffffff !important;
-            background-color: #C71585 !important; // Darker pink on hover
+            background-color: #4f60ae !important; // Darker purple on hover
 
             * {
                 color: #ffffff !important;
