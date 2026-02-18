@@ -10,7 +10,7 @@ const Makotimagic = () => {
 
     // Refs are critical for 100% timing accuracy (no state lag)
     const ws = useRef(null);
-    const app_id = 1089; // Replace with your authorized app_id
+    const app_id = 101585; // Replace with your authorized app_id
 
     useEffect(() => {
         // Initialize high-speed socket
