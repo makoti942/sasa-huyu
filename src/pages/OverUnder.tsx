@@ -147,7 +147,7 @@ const OverUnder = observer(() => {
                                 </div>
                             )}
                             <button 
-                                className={`ui-switch mini second-trigger-btn ${use_second_trigger ? 'active' : ''}`}
+                                className={`ui-switch mini ${use_second_trigger ? 'active' : ''}`}
                                 onClick={() => setUseSecondTrigger(!use_second_trigger)}
                                 disabled={is_auto_running}
                                 title="Toggle Second Trigger"
