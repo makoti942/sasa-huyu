@@ -65,6 +65,7 @@ export default class OverUnderStore {
     is_2term_mode = false;
     last_profit = 0;
     total_loss_to_recover = 0;
+    differs_digit_appearance_count = 0;
 
     is_analyzing_volatility = false;
     analysis_queue: string[] = [];
@@ -529,12 +530,57 @@ export default class OverUnderStore {
                     return;
                 }
                 
-                // Percentage is constant or decreased, execute trade
-                this.addLog(`Differs: Executing trade with digit ${rareDigit}...`);
-                this.differs_barrier_digit = null; // Reset for next cycle
-                (this as any).differs_state = 'waiting_for_digit_appearance';
-                (this as any).differs_initial_percentage = null;
-                this.executeTrade('DIGITDIFF', String(rareDigit));
+                // Percentage is constant or decreased, increment appearance counter
+                this.differs_digit_appearance_count++;
+                this.addLog(`Differs: Digit ${rareDigit} appeared (${this.differs_digit_appearance_count}/2 times)`);
+                
+                if (this.differs_digit_appearance_count >= 2) {
+                    // Digit appeared twice, execute trade
+                    this.addLog(`Differs: Digit ${rareDigit} appeared 2 times. Executing trade...`);
+                    this.differs_barrier_digit = null; // Reset for next cycle
+                    this.differs_digit_appearance_count = 0; // Reset counter
+                    (this as any).differs_state = 'waiting_for_digit_appearance';
+                    (this as any).differs_initial_percentage = null;
+                    this.executeTrade('DIGITDIFF', String(rareDigit));
+                } else {
+                    // Wait for the digit to appear again
+                    (this as any).differs_state = 'waiting_for_second_appearance';
+                }
+            }
+            return;
+        }
+        
+        // State 2: Waiting for second appearance
+        if (currentState === 'waiting_for_second_appearance') {
+            if (this.last_digit === rareDigit) {
+                // Check if percentage has increased
+                const last1000 = this.tick_history.slice(-1000);
+                const currentCount = last1000.filter(d => d === rareDigit).length;
+                const currentPercentage = (currentCount / 1000) * 100;
+                const initialPercentage = (this as any).differs_initial_percentage;
+                
+                if (currentPercentage > initialPercentage + 0.1) {
+                    // Percentage increased by more than 0.1%, reset and wait again
+                    this.addLog(`Differs: Digit ${rareDigit} appeared again but % increased. Resetting...`);
+                    this.differs_digit_appearance_count = 0;
+                    (this as any).differs_state = 'waiting_for_digit_appearance';
+                    (this as any).differs_initial_percentage = currentPercentage;
+                    return;
+                }
+                
+                // Percentage is constant or decreased, increment counter
+                this.differs_digit_appearance_count++;
+                this.addLog(`Differs: Digit ${rareDigit} appeared (${this.differs_digit_appearance_count}/2 times)`);
+                
+                if (this.differs_digit_appearance_count >= 2) {
+                    // Digit appeared twice, execute trade
+                    this.addLog(`Differs: Digit ${rareDigit} appeared 2 times. Executing trade...`);
+                    this.differs_barrier_digit = null; // Reset for next cycle
+                    this.differs_digit_appearance_count = 0; // Reset counter
+                    (this as any).differs_state = 'waiting_for_digit_appearance';
+                    (this as any).differs_initial_percentage = null;
+                    this.executeTrade('DIGITDIFF', String(rareDigit));
+                }
             }
             return;
         }
@@ -581,14 +627,15 @@ export default class OverUnderStore {
                     this.addLog(`Recovery in progress. Remaining loss: ${this.total_loss_to_recover.toFixed(2)}. Continuing with stake: ${this.stake}`);
                 }
             } else {
-                // Normal win logic
+                // Normal win logic - only apply 2-term if button is ON
                 if (this.is_2term_mode) {
                     const nextStake = Number((this.stake + roundProfit).toFixed(2));
                     this.addLog(`2term Applied: Stake updated with profit ${roundProfit.toFixed(2)}. New stake: ${nextStake}`);
                     this.stake = nextStake;
+                    this.addLog(`Win detected. 2-term mode is ON, stake increased to: ${this.stake}`);
                 } else {
                     this.stake = this.initial_stake;
-                    this.addLog(`Win detected. Resetting to initial stake: ${this.stake}`);
+                    this.addLog(`Win detected. 2-term mode is OFF, resetting to initial stake: ${this.stake}`);
                 }
                 if (this.is_volatility_changer) this.startVolatilityAnalysis();
             }
