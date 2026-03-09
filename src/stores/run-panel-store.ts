@@ -488,10 +488,24 @@ export default class RunPanelStore {
     clearStat = () => {
         const { journal, summary_card, transactions } = this.root_store;
 
-        this.onCloseDialog();
-        journal.clear();
-        summary_card.clear();
-        transactions.clear();
+        // Minimal clear operation - avoid API calls that trigger Deriv throttling
+        runInAction(() => {
+            // Close dialog first
+            this.onCloseDialog();
+            
+            // Only clear data - don't trigger API calls
+            if (journal && journal.unfiltered_messages) {
+                journal.unfiltered_messages = [];
+            }
+            if (summary_card) {
+                summary_card.clear();
+            }
+            if (transactions && transactions.transactions) {
+                transactions.transactions = [];
+            }
+        });
+        
+        console.log('[Run Panel] Trade history cleared successfully');
     };
 
     toggleStatisticsInfoModal = () => {
