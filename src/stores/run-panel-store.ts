@@ -488,22 +488,24 @@ export default class RunPanelStore {
     clearStat = () => {
         const { journal, summary_card, transactions } = this.root_store;
 
-        this.is_dialog_open = false;
+        this.onCloseDialog();
         
         // Call the proper clear methods - they handle MobX reactivity and localStorage correctly
         try {
-            if (journal) {
-                journal.clear();
-                console.log('[Run Panel] Journal cleared');
-            }
-            if (summary_card) {
-                summary_card.clear();
-                console.log('[Run Panel] Summary card cleared');
-            }
-            if (transactions) {
-                transactions.clear();
-                console.log('[Run Panel] Transactions cleared');
-            }
+            runInAction(() => {
+                if (journal) {
+                    journal.clear();
+                    console.log('[Run Panel] Journal cleared');
+                }
+                if (summary_card) {
+                    summary_card.clear();
+                    console.log('[Run Panel] Summary card cleared');
+                }
+                if (transactions) {
+                    transactions.clear();
+                    console.log('[Run Panel] Transactions cleared');
+                }
+            });
             console.log('[Run Panel] ✅ All trade history cleared successfully');
         } catch (error) {
             console.error('[Run Panel] ❌ Error clearing statistics:', error);
