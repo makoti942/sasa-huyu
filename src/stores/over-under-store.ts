@@ -1,5 +1,5 @@
 
-import { action, makeObservable, observable, reaction } from 'mobx';
+import { action, makeObservable, observable, reaction, runInAction } from 'mobx';
 import { TStores } from '@/types/stores.types';
 import RootStore from './root-store';
 import { getAppId, getSocketURL } from '@/components/shared';
@@ -81,6 +81,10 @@ export default class OverUnderStore {
     private _boundAuthHandler: (event: MessageEvent) => void;
     private _loginReaction: () => void;
     private _accountReaction: () => void;
+    private _purchaseTimeout: NodeJS.Timeout | null = null;
+    private _analysisTimeout: NodeJS.Timeout | null = null;
+    private readonly PURCHASE_TIMEOUT_MS = 30_000;
+    private readonly ANALYSIS_TIMEOUT_MS = 60_000;
 
     constructor(root_store: RootStore) {
         makeObservable(this, {
@@ -180,38 +184,65 @@ export default class OverUnderStore {
     }
 
     initializeWorker() {
-        this.volatilityAnalyzer = new Worker(new URL('../workers/volatility-analyzer.ts', import.meta.url));
-        this.volatilityAnalyzer.onmessage = (event) => {
-            const { score } = event.data;
-            this.addLog(`Analysis for ${this.current_analyzing_symbol}: Score ${score.toFixed(2)}`);
-            if (score < this.best_score) {
-                this.best_score = score;
-                this.best_symbol = this.current_analyzing_symbol;
-                this.addLog(`New best volatility: ${this.best_symbol} (Score: ${score.toFixed(2)})`);
-            }
-            this.processAnalysisQueue();
-        };
+        try {
+            this.volatilityAnalyzer = new Worker(new URL('../workers/volatility-analyzer.ts', import.meta.url));
+            this.volatilityAnalyzer.onmessage = (event) => {
+                const { score } = event.data;
+                this.addLog(`Analysis for ${this.current_analyzing_symbol}: Score ${score.toFixed(2)}`);
+                if (score < this.best_score) {
+                    this.best_score = score;
+                    this.best_symbol = this.current_analyzing_symbol;
+                    this.addLog(`New best volatility: ${this.best_symbol} (Score: ${score.toFixed(2)})`);
+                }
+                this.processAnalysisQueue();
+            };
+            this.volatilityAnalyzer.onerror = (err) => {
+                this.addLog(`⚠️ Volatility worker error: ${err.message}. Aborting analysis.`);
+                runInAction(() => {
+                    this.is_analyzing_volatility = false;
+                    this.current_analyzing_symbol = null;
+                    this.analysis_queue = [];
+                });
+                this._clearAnalysisTimeout();
+                // Recreate the worker so it can be used again
+                this.volatilityAnalyzer?.terminate();
+                this.initializeWorker();
+            };
+        } catch (e) {
+            this.addLog(`⚠️ Could not create volatility worker: ${e?.message}`);
+        }
     }
 
     startVolatilityAnalysis() {
         if (!this.is_volatility_changer || this.is_analyzing_volatility) return;
-        this.is_analyzing_volatility = true;
-        this.analysis_queue = Object.keys(pip_sizes);
-        this.best_score = Infinity;
-        this.best_symbol = null;
+        runInAction(() => {
+            this.is_analyzing_volatility = true;
+            this.analysis_queue = Object.keys(pip_sizes);
+            this.best_score = Infinity;
+            this.best_symbol = null;
+        });
         this.addLog('Volatility analysis started...');
+        this._armAnalysisTimeout();
         this.processAnalysisQueue();
     }
 
     processAnalysisQueue() {
         if (this.analysis_queue.length > 0) {
-            this.current_analyzing_symbol = this.analysis_queue.shift();
-            if (this.current_analyzing_symbol) {
-                this.ws?.send(JSON.stringify({ ticks_history: this.current_analyzing_symbol, count: 1000, end: 'latest', style: 'ticks' }));
+            const sym = this.analysis_queue.shift()!;
+            runInAction(() => { this.current_analyzing_symbol = sym; });
+            if (this.ws?.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ ticks_history: sym, count: 1000, end: 'latest', style: 'ticks' }));
+            } else {
+                // WebSocket not ready — skip this symbol and continue
+                this.addLog(`⚠️ WS not open during analysis, skipping ${sym}.`);
+                this.processAnalysisQueue();
             }
         } else {
-            this.is_analyzing_volatility = false;
-            this.current_analyzing_symbol = null;
+            this._clearAnalysisTimeout();
+            runInAction(() => {
+                this.is_analyzing_volatility = false;
+                this.current_analyzing_symbol = null;
+            });
             if (this.best_symbol) {
                 this.addLog(`Analysis complete. Best volatility: ${this.best_symbol}`);
                 this.setSelectedSymbol(this.best_symbol);
@@ -227,14 +258,46 @@ export default class OverUnderStore {
     addLog(msg: string) {
         const timestamp = new Date().toLocaleTimeString();
         const new_log = `[${timestamp}] ${msg}`;
-        // Use action to update observable array efficiently
-        action(() => {
+        runInAction(() => {
             this.debug_info.unshift(new_log);
-            if (this.debug_info.length > 20) this.debug_info.pop();
-        })();
+            if (this.debug_info.length > 200) this.debug_info.pop();
+        });
         if (this.root_store.journal) {
             this.root_store.journal.pushMessage(msg, MessageTypes.NOTIFY);
         }
+    }
+
+    // ── Safety timeouts ── prevent flags getting permanently stuck ────────
+    private _armPurchaseTimeout() {
+        if (this._purchaseTimeout) clearTimeout(this._purchaseTimeout);
+        this._purchaseTimeout = setTimeout(() => {
+            if (this.is_purchasing) {
+                this.addLog('⚠️ Purchase timeout — resetting purchase lock.');
+                this.is_purchasing = false;
+            }
+        }, this.PURCHASE_TIMEOUT_MS);
+    }
+
+    private _clearPurchaseTimeout() {
+        if (this._purchaseTimeout) { clearTimeout(this._purchaseTimeout); this._purchaseTimeout = null; }
+    }
+
+    private _armAnalysisTimeout() {
+        if (this._analysisTimeout) clearTimeout(this._analysisTimeout);
+        this._analysisTimeout = setTimeout(() => {
+            if (this.is_analyzing_volatility) {
+                this.addLog('⚠️ Volatility analysis timeout — aborting analysis.');
+                runInAction(() => {
+                    this.is_analyzing_volatility = false;
+                    this.current_analyzing_symbol = null;
+                    this.analysis_queue = [];
+                });
+            }
+        }, this.ANALYSIS_TIMEOUT_MS);
+    }
+
+    private _clearAnalysisTimeout() {
+        if (this._analysisTimeout) { clearTimeout(this._analysisTimeout); this._analysisTimeout = null; }
     }
 
     clearDebug() { this.debug_info = []; }
@@ -327,8 +390,8 @@ export default class OverUnderStore {
         try {
             this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
             this.ws.onopen = () => {
+                runInAction(() => { this.connection_status = STATUS_LIVE; });
                 this.addLog(`Connection opened (App ID: ${app_id}). Requesting authorization...`);
-                this.connection_status = STATUS_LIVE;
                 if (window.self !== window.top) {
                     window.parent.postMessage({ name: 'request_auth_token' }, '*');
                 } else {
@@ -361,11 +424,11 @@ export default class OverUnderStore {
                             return;
                         }
                         this.addLog('No token found in storage. Proceeding with public ticks.');
-                        this.is_authorizing = false;
+                        runInAction(() => { this.is_authorizing = false; });
                         this.subscribeToTicks(this.selected_symbol);
                     } catch (e) {
                         this.addLog(`Token retrieval error: ${e.message}. Proceeding with public ticks.`);
-                        this.is_authorizing = false;
+                        runInAction(() => { this.is_authorizing = false; });
                         this.subscribeToTicks(this.selected_symbol);
                     }
                 }
