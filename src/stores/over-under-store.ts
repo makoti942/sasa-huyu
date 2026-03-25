@@ -590,7 +590,7 @@ export default class OverUnderStore {
 
         const macd_length = slow_ema.length;
         const fast_offset = fast_ema.length - macd_length;
-        const macd_line: number[] = [];
+        const macd_.line: number[] = [];
         for (let i = 0; i < macd_length; i++) {
             macd_line.push(fast_ema[fast_offset + i] - slow_ema[i]);
         }
@@ -640,60 +640,44 @@ export default class OverUnderStore {
     analyzeAndExecuteDiffers() {
         if (this._tick_prices.length < 5 || this.is_purchasing) return;
 
-        // --- Exaggerated Pushback Strategy (stateless) ---
-        // On every tick, look directly at the price history to verify the pattern:
-        //   1. The current tick reversed direction vs the previous tick.
-        //   2. The ticks BEFORE that were ALL moving in the opposite (surge) direction,
-        //      with 3+ consecutive same-direction ticks in a row (no mixing allowed).
-
         const prices = this._tick_prices;
         const n = prices.length;
-
         const curr_price = prices[n - 1];
         const prev_price = prices[n - 2];
 
-        // No movement on this tick – nothing to evaluate
         if (curr_price === prev_price) return;
 
         const curr_direction: 'up' | 'down' = curr_price > prev_price ? 'up' : 'down';
         const surge_direction: 'up' | 'down' = curr_direction === 'up' ? 'down' : 'up';
 
-        // Walk backwards through price history counting strictly consecutive surge-direction ticks.
-        // Any flat tick (no movement) or opposite-direction tick immediately ends the streak.
         let surge_count = 0;
         for (let i = n - 2; i >= 1; i--) {
-            if (prices[i] === prices[i - 1]) break; // flat tick – streak broken (not skipped)
+            if (prices[i] === prices[i - 1]) break;
             const tick_dir: 'up' | 'down' = prices[i] > prices[i - 1] ? 'up' : 'down';
             if (tick_dir === surge_direction) {
                 surge_count++;
             } else {
-                break; // direction mixed – surge ended here
+                break;
             }
         }
 
         if (surge_count >= 3) {
             const rejection_digit = this.last_digit;
-
-            // Use the last 1000 ticks for analysis, as per the strategy rule.
             const history = this.tick_history.slice(-1000);
             const totalTicks = history.length;
-
-            // Build per-digit counts once for all checks
             const digitCounts = Array(10).fill(0) as number[];
             history.forEach(d => { if (d >= 0 && d <= 9) digitCounts[d]++; });
 
             const digitCount = digitCounts[rejection_digit!];
             const digitPct = totalTicks > 0 ? (digitCount / totalTicks) * 100 : 0;
 
-            // ── Restriction 1: digit must not exceed 10% in the analysis window ──
-            if (digitPct > 10) {
+            if (digitPct > 9.8) {
                 this.addLog(
-                    `Differs: SKIP digit ${rejection_digit} — too frequent (${digitPct.toFixed(1)}% in last ${totalTicks} ticks, limit 10%). Re-analyzing...`
+                    `Differs: SKIP digit ${rejection_digit} — too frequent (${digitPct.toFixed(1)}% in last ${totalTicks} ticks, limit 9.8%). Re-analyzing...`
                 );
                 return;
             }
 
-            // ── Restriction 2: digit must not be the least-appearing digit ──
             const minCount = Math.min(...digitCounts.filter((_, i) => digitCounts[i] > 0));
             if (digitCount === minCount && totalTicks > 0) {
                 this.addLog(
@@ -702,7 +686,6 @@ export default class OverUnderStore {
                 return;
             }
 
-            // ── Restriction 3: digit must not appear more than 3 times in last 10 ticks ──
             const last10 = history.slice(-10);
             const recentCount = last10.filter(d => d === rejection_digit).length;
 
@@ -713,11 +696,6 @@ export default class OverUnderStore {
                 return;
             }
 
-            // ── Prediction Engine Filter ──────────────────────────────────
-            // Run all prediction strategies against recent tick history to get
-            // the top 4 most-likely-to-appear digits. If our selected digit
-            // is among them, the market is predicted to hit it — a Differs
-            // trade on it would likely lose — so we skip.
             const predictionInput = this.tick_history.slice(-200);
             const prediction = predictNextDigits(predictionInput);
             runInAction(() => { this.differs_predicted_top4 = prediction.top4Digits; });
