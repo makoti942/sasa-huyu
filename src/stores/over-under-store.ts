@@ -590,7 +590,7 @@ export default class OverUnderStore {
 
         const macd_length = slow_ema.length;
         const fast_offset = fast_ema.length - macd_length;
-        const macd_.line: number[] = [];
+        const macd_line: number[] = [];
         for (let i = 0; i < macd_length; i++) {
             macd_line.push(fast_ema[fast_offset + i] - slow_ema[i]);
         }
