@@ -27,6 +27,7 @@ import SpeedBotFloatingStop from '../../components/speedbot-floating-stop';
 import ChartModal from '../chart/chart-modal';
 import Dashboard from '../dashboard';
 import RunStrategy from '../dashboard/run-strategy';
+import TradingBots from '../free-bots/trading-bots';
 import './main.scss';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
@@ -37,7 +38,6 @@ const Strategies = lazy(() => import('../free-bots/strategies'));
 const Dtrader = lazy(() => import('../dtrader'));
 const OverUnder = lazy(() => import('../OverUnder'));
 const MakotiMagic = lazy(() => import('../MakotiMagic'));
-const TradingBots = lazy(() => import('../free-bots/trading-bots'));
 
 const AppWrapper = observer(() => {
     const { connectionStatus } = useApiBase();
@@ -122,7 +122,7 @@ const AppWrapper = observer(() => {
                             <Suspense fallback={<ChunkLoader message={localize('Please wait, loading chart...')} />}><ChartWrapper show_digits_stats={false} /></Suspense>
                         </div>
                         <div label={<><LabelPairedPuzzlePieceTwoCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Trading Bots' /></>} id='id-trading-bots'>
-                            <Suspense fallback={<ChunkLoader message={localize('Please wait, loading Trading Bots...')} />}><TradingBots /></Suspense>
+                            <TradingBots />
                         </div>
                         <div label={<><LabelPairedPlayCaptionBoldIcon height='24px' width='24px' /><Localize i18n_default_text='Over/Under' /></>} id='over_under'>
                             <Suspense fallback={<ChunkLoader message={localize('Please wait, loading Over/Under...')} />}><OverUnder /></Suspense>
