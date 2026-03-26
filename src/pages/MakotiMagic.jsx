@@ -45,9 +45,18 @@ const MakotiMagic = observer(() => {
 
     const confidencePercent = prediction?.confidence ? (prediction.confidence * 100).toFixed(0) : '0';
     const showLoadButton = prediction && prediction.predictedDigit !== null && prediction.predictedDigit !== undefined && !is_loading;
+    const hasPrediction = prediction && prediction.predictedDigit !== null && prediction.predictedDigit !== undefined;
 
     return (
         <div className='makoti-magic'>
+            <div className='mm-matrix-bg'>
+                {Array.from({ length: 100 }).map((_, i) => (
+                    <span key={i} className='mm-matrix-char' style={{ animationDelay: `${Math.random() * 5}s` }}>
+                        {Math.floor(Math.random() * 10)}
+                    </span>
+                ))}
+            </div>
+
             <header className='mm-header'>
                 <div className='mm-header__left'>
                     <div className='mm-header__icon'><Zap size={17} /></div>
@@ -99,10 +108,10 @@ const MakotiMagic = observer(() => {
 
                     <div className='mm-prediction'>
                         <div className='mm-prediction__title'>Predicted Digit</div>
-                        <div className='mm-prediction__digit'>
-                            {prediction && prediction.predictedDigit !== null && prediction.predictedDigit !== undefined ? prediction.predictedDigit : '-'}
+                        <div className={`mm-prediction__digit ${hasPrediction ? 'mm-prediction__digit--active' : ''}`}>
+                            {hasPrediction ? prediction.predictedDigit : '-'}
                         </div>
-                        {prediction && prediction.predictedDigit !== null && prediction.predictedDigit !== undefined && (
+                        {hasPrediction && (
                             <div className='mm-prediction__meta'>
                                 <div className='mm-confidence'>
                                     <TrendingUp size={12} />
@@ -111,26 +120,11 @@ const MakotiMagic = observer(() => {
                                     </span>
                                 </div>
                                 <div className='mm-tick-range'>
-                                    Valid for {prediction?.tickRange} ticks
+                                    Valid for {prediction.tickRange} ticks
                                 </div>
                             </div>
                         )}
                     </div>
-
-                    {prediction?.rankedDigits && prediction.rankedDigits.length > 0 && (
-                        <div className='mm-rankings'>
-                            <div className='mm-rankings__title'>Top Predictions</div>
-                            <div className='mm-rankings__list'>
-                                {prediction.rankedDigits.slice(0, 5).map((item, idx) => (
-                                    <div key={item.digit} className={`mm-ranking-item ${idx === 0 ? 'mm-ranking-item--top' : ''}`}>
-                                        <span className='mm-ranking-item__rank'>#{idx + 1}</span>
-                                        <span className='mm-ranking-item__digit'>{item.digit}</span>
-                                        <span className='mm-ranking-item__score'>{(item.score * 100).toFixed(0)}%</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                     <div className='mm-cta-wrap'>
                         <motion.button className='mm-cta' onClick={runScan} disabled={is_loading}>

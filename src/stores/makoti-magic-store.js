@@ -70,14 +70,6 @@ class MakotiMagicStore {
         this.last_digit = digit;
         this.tick_history = [...this.tick_history.slice(-MAX_TICKS + 1), digit];
         this.tick_prices = [...this.tick_prices.slice(-MAX_TICKS + 1), price];
-
-        if (this.scan_count > 0 && this.last_scan_time) {
-            const elapsed = Date.now() - this.last_scan_time;
-            if (elapsed >= this.scan_interval_ms) {
-                this.last_scan_time = Date.now();
-                this.performPrediction();
-            }
-        }
     }
 
     performPrediction = () => {
