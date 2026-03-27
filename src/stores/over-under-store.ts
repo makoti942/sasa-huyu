@@ -827,22 +827,16 @@ export default class OverUnderStore {
 
         const autoSwitchOn = this.is_volatility_changer && this.is_analyzing_volatility;
         const hasPlacedTrade = this.differs_v2_predicted_digit !== null;
-        const inCooldown = hasPlacedTrade && !autoSwitchOn && this.differs_v2_post_trade_ticks < 7;
         
-        if (inCooldown) {
-            const predictionInput = this.tick_history.slice(-200);
-            const prediction = predictNextDigits(predictionInput);
-            
-            if (prediction.rankedDigits.length > 0) {
-                const top9Digits = prediction.rankedDigits.slice(0, 9).map(d => d.digit);
-                runInAction(() => { 
-                    this.differs_predicted_top4 = top9Digits; 
-                });
-            }
+        if (hasPlacedTrade && this.differs_v2_5s_analysis_pending) {
+            return;
+        }
+        
+        if (hasPlacedTrade && !autoSwitchOn && this.differs_v2_post_trade_ticks < 7) {
             return;
         }
 
-        if (!this.differs_v2_analysis_ready && !autoSwitchOn && !this.differs_v2_5s_analysis_pending) {
+        if (!this.differs_v2_analysis_ready && !this.differs_v2_5s_analysis_pending) {
             return;
         }
 

@@ -426,6 +426,59 @@ export function predictNextDigits(history: number[]): PredictionResult {
         };
     }
 
+    // ── 21. Immediate Next Tick Strategy ─────────────────────────────────────
+    function immediateNextTickStrategy(history: number[]): StrategyResult {
+        const scores = Array(10).fill(0) as number[];
+        if (history.length < 5) return { scores: normaliseScores(scores), confidence: 0, name: 'immediate', tier: 1 };
+
+        const last3 = history.slice(-3);
+        const last5 = history.slice(-5);
+        
+        const pattern1 = last3.join(',');
+        const counts1: Record<string, number> = {};
+        for (let i = 0; i <= history.length - 4; i++) {
+            const key = history.slice(i, i + 3).join(',');
+            counts1[key] = (counts1[key] || 0) + 1;
+        }
+        if (counts1[pattern1]) {
+            for (let i = 0; i <= history.length - 4; i++) {
+                if (history.slice(i, i + 3).join(',') === pattern1) {
+                    const next = history[i + 3];
+                    if (next >= 0 && next <= 9) scores[next] += counts1[pattern1] * 3;
+                }
+            }
+        }
+
+        const last = history[history.length - 1];
+        const secondLast = history[history.length - 2];
+        
+        for (let i = 1; i < history.length - 1; i++) {
+            if (history[i] === secondLast && history[i-1] === last) {
+                const next = history[i + 1];
+                if (next >= 0 && next <= 9) scores[next] += 2;
+            }
+        }
+
+        const reverseLast3 = [...last3].reverse().join(',');
+        const countsReverse: Record<string, number> = {};
+        for (let i = 0; i <= history.length - 4; i++) {
+            const key = [...history.slice(i, i + 3)].reverse().join(',');
+            countsReverse[key] = (countsReverse[key] || 0) + 1;
+        }
+        if (countsReverse[reverseLast3]) {
+            const targetPattern = [...last3].reverse().join(',');
+            for (let i = 0; i <= history.length - 4; i++) {
+                const revSlice = [...history.slice(i, i + 3)].reverse().join(',');
+                if (revSlice === targetPattern) {
+                    const next = history[i + 3];
+                    if (next >= 0 && next <= 9) scores[next] += countsReverse[reverseLast3] * 2;
+                }
+            }
+        }
+
+        return { scores: normaliseScores(scores), confidence: Math.max(...scores) / 10, name: 'immediate', tier: 1 };
+    }
+
     const strategies: StrategyResult[] = [
         nGramStrategy(history, 1),
         nGramStrategy(history, 2),
@@ -447,6 +500,7 @@ export function predictNextDigits(history: number[]): PredictionResult {
         gapAnalysisStrategy(history),
         distributionBalanceStrategy(history),
         trendFollowingStrategy(history),
+        immediateNextTickStrategy(history),
     ];
 
     const combined = Array(10).fill(0) as number[];
@@ -493,12 +547,20 @@ export function predictNextDigits(history: number[]): PredictionResult {
 
     const final = normaliseScores(combined);
 
+    const last3Freq = getRecentFrequency(history, 3);
+    const last5Freq = getRecentFrequency(history, 5);
     const last10Freq = getRecentFrequency(history, 10);
     const last20Freq = getRecentFrequency(history, 20);
     
     const recencyBoost = Array(10).fill(0) as number[];
+    last3Freq.forEach((count, digit) => {
+        if (count > 0) recencyBoost[digit] += count * 8.0;
+    });
+    last5Freq.forEach((count, digit) => {
+        if (count > 0) recencyBoost[digit] += count * 4.0;
+    });
     last10Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 2.5;
+        if (count > 0) recencyBoost[digit] += count * 2.0;
     });
     last20Freq.forEach((count, digit) => {
         if (count > 0) recencyBoost[digit] += count * 1.0;
@@ -508,7 +570,7 @@ export function predictNextDigits(history: number[]): PredictionResult {
     if (recencySum > 0) {
         const recencyNorm = recencyBoost.map(v => v / recencySum);
         final.forEach((score, digit) => {
-            final[digit] = score * 0.7 + recencyNorm[digit] * 0.3;
+            final[digit] = score * 0.5 + recencyNorm[digit] * 0.5;
         });
     }
 
