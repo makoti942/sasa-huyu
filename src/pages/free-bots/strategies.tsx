@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Localize } from '@deriv-com/translations';
+import { Localize, localize } from '@deriv-com/translations';
 import OverUnderStrategy from './strategies/over-under-strategy';
 import OddStrategy from './strategies/odd-strategy';
 import EvenStrategy from './strategies/even-strategy';

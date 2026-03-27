@@ -71,6 +71,7 @@ export default class OverUnderStore {
     differs_predicted_top4: number[] = [];
     differs_v2_predicted_digit: number | null = null;
     differs_v2_post_trade_ticks = 0;
+    differs_v2_analysis_ready = false;
     private _tick_prices: number[] = [];
     total_loss_to_recover = 0;
     differs_digit_appearance_count = 0;
@@ -130,6 +131,7 @@ export default class OverUnderStore {
             differs_predicted_top4: observable,
             differs_v2_predicted_digit: observable,
             differs_v2_post_trade_ticks: observable,
+            differs_v2_analysis_ready: observable,
             setStake: action.bound,
             setIsRiseFallMode: action.bound,
             setIs2termMode: action.bound,
@@ -288,6 +290,20 @@ export default class OverUnderStore {
             if (this.best_symbol) {
                 this.addLog(`Analysis complete. Best volatility: ${this.best_symbol}`);
                 this.setSelectedSymbol(this.best_symbol);
+                
+                if (this.is_differs_v2_mode && this.is_auto_running) {
+                    this.addLog("Differs V2: Analyzing new symbol data (5s)...");
+                    setTimeout(() => {
+                        if (this.is_auto_running && this.is_differs_v2_mode && this.is_analyzing_volatility === false) {
+                            runInAction(() => {
+                                this.differs_v2_analysis_ready = true;
+                            });
+                            this.addLog("Differs V2: Analysis complete. Predicting & executing...");
+                            this.analyzeAndExecuteDiffersV2();
+                        }
+                    }, 5000);
+                    return;
+                }
             } else {
                 this.addLog('Analysis complete. No suitable volatility found.');
             }
@@ -401,14 +417,24 @@ export default class OverUnderStore {
             this.initial_stake = this.stake;
             this.setIsRecoveryActive(false);
             this.differs_v2_post_trade_ticks = 0;
+            this.differs_v2_analysis_ready = false;
             
             if (this.is_differs_v2_mode) {
                 runInAction(() => {
                     this.differs_predicted_top4 = [];
                     this.differs_v2_predicted_digit = null;
                 });
-                this.addLog("Tool started. Differs V2: Predicting & executing immediately...");
-                this.analyzeAndExecuteDiffersV2();
+                this.addLog("Tool started. Differs V2: Analyzing historical data (5s)...");
+                
+                setTimeout(() => {
+                    if (this.is_auto_running && this.is_differs_v2_mode) {
+                        runInAction(() => {
+                            this.differs_v2_analysis_ready = true;
+                        });
+                        this.addLog("Differs V2: Analysis complete. Predicting & executing...");
+                        this.analyzeAndExecuteDiffersV2();
+                    }
+                }, 5000);
             } else {
                 this.addLog("Tool started. Waiting for trigger...");
                 if (this.is_volatility_changer) this.startVolatilityAnalysis();
@@ -801,6 +827,10 @@ export default class OverUnderStore {
                     this.differs_predicted_top4 = top9Digits; 
                 });
             }
+            return;
+        }
+
+        if (!this.differs_v2_analysis_ready && !autoSwitchOn) {
             return;
         }
 
