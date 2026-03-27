@@ -884,15 +884,17 @@ export default class OverUnderStore {
             });
         }
 
-        let differsDigit: number | null = null;
-        let bestDiffersScore = -1;
+        const predictedDigit = prediction.rankedDigits[0].digit;
         
         const last30 = this.tick_history.slice(-30);
         const freqMap = Array(10).fill(0);
         last30.forEach(d => { if (d >= 0 && d <= 9) freqMap[d]++; });
         
+        let differsDigit: number | null = null;
+        let bestDiffersScore = -1;
+        
         for (let d = 0; d <= 9; d++) {
-            if (!top9Digits.includes(d)) {
+            if (d !== predictedDigit) {
                 const score = 10 - freqMap[d];
                 if (score > bestDiffersScore) {
                     bestDiffersScore = score;
@@ -907,14 +909,14 @@ export default class OverUnderStore {
         }
 
         runInAction(() => {
-            this.differs_v2_predicted_digit = top9Digits[0];
+            this.differs_v2_predicted_digit = predictedDigit;
             this.differs_v2_post_trade_ticks = 0;
             this.differs_v2_analysis_ready = false;
             this.differs_v2_5s_analysis_pending = true;
             this.differs_v2_confidence_wait_start = null;
         });
 
-        this.addLog(`DiffersV2: Next tick prediction → DIFFER on ${differsDigit}`);
+        this.addLog(`DiffersV2: Predict ${predictedDigit} will appear → DIFFER on ${differsDigit} (win if ${predictedDigit} appears)`);
 
         this.executeTrade('DIGITDIFF', String(differsDigit));
     }
