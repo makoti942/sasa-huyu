@@ -11,7 +11,6 @@ To generate a build:
 npm run build
 ```
 ## Deploying to Cloudflare Pages
-
 In order to generate a deployment to Cloudflare Pages, ensure that the following secrets are set in the Github Actions:
 
 ```bash
