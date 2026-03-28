@@ -12,11 +12,11 @@ import './over-under.scss';
 type Strategy = 'over_under' | 'differs' | 'differs_v2' | 'rise_fall' | 'manual';
 
 const STRAT_META: Record<Strategy, { label: string; color: string; glow: string; desc: string }> = {
-    over_under:  { label: 'Over 5 / Under 4', color: '#3b82f6', glow: 'rgba(59,130,246,0.4)',  desc: 'Fires Over 5 & Under 4 simultaneously on trigger digit' },
-    differs:     { label: 'Differs',           color: '#a855f7', glow: 'rgba(168,85,247,0.4)',  desc: 'Detects pushback reversal pattern (3+ ticks + reversal)' },
-    differs_v2:  { label: 'Differs V2',       color: '#ec4899', glow: 'rgba(236,72,153,0.4)',  desc: 'Predicts 9 digit → bets DIFFER with opposite digit → waits 3 ticks (auto-switch executes immediately)' },
-    rise_fall:   { label: 'Rise / Fall',      color: '#10b981', glow: 'rgba(16,185,129,0.4)',  desc: 'MACD-based trend momentum — places Rise or Fall contract' },
-    manual:      { label: 'Manual',           color: '#f97316', glow: 'rgba(249,115,22,0.4)',  desc: 'You choose contract type, barrier digit and trigger' },
+    over_under: { label: 'Over 5 / Under 4', color: '#3b82f6', glow: 'rgba(59,130,246,0.4)', desc: 'Fires Over 5 & Under 4 simultaneously on trigger digit' },
+    differs:    { label: 'Differs', color: '#a855f7', glow: 'rgba(168,85,247,0.4)', desc: 'Detects pushback reversal pattern (3+ ticks + reversal)' },
+    differs_v2: { label: 'Differs V2', color: '#ec4899', glow: 'rgba(236,72,153,0.4)', desc: 'Predicts 9 digit → bets DIFFER with opposite digit → waits 3 ticks (auto-switch executes immediately)' },
+    rise_fall:  { label: 'Rise / Fall', color: '#10b981', glow: 'rgba(16,185,129,0.4)', desc: 'MACD-based trend momentum — places Rise or Fall contract' },
+    manual:     { label: 'Manual', color: '#f97316', glow: 'rgba(249,115,22,0.4)', desc: 'You choose contract type, barrier digit and trigger' },
 };
 
 const Toggle = ({ on, onToggle, disabled, color = '#3b82f6' }: {
@@ -38,7 +38,7 @@ const OverUnder = observer(() => {
     const {
         connection_status, tick_history, last_digit, is_auto_running,
         stake, martingale, is_volatility_changer,
-        is_differs_mode, is_differs_v2_mode, is_2term_mode, is_rise_fall_mode, is_automate,
+        is_differs_mode, is_differs_v2_mode, is_all_vol_mode, is_2term_mode, is_rise_fall_mode, is_automate,
         use_second_trigger, is_manual_mode, manual_contract_type, manual_barrier,
         recovery_contract_type, recovery_barrier, use_recovery_delay, is_recovery_enabled,
         recovery_entry_digit, recovery_second_entry_digit,
@@ -46,7 +46,7 @@ const OverUnder = observer(() => {
         debug_info, is_analyzing_volatility, is_authorizing,
         differs_predicted_top4,
         setStake, setMartingale, setIsVolatilityChanger,
-        setIsDiffersMode, setIsDiffersV2Mode, setIs2termMode, setIsRiseFallMode, setIsAutomate,
+        setIsDiffersMode, setIsDiffersV2Mode, setIsAllVolMode, setIs2termMode, setIsRiseFallMode, setIsAutomate,
         setUseSecondTrigger, setIsManualMode, setManualContractType, setManualBarrier,
         setRecoveryContractType, setRecoveryBarrier, setUseRecoveryDelay, setIsRecoveryEnabled,
         setRecoveryEntryDigit, setRecoverySecondEntryDigit,
@@ -98,16 +98,16 @@ const OverUnder = observer(() => {
     const totalTicks = tick_history.length || 1;
 
     const volatilityOptions = [
-        { label: 'V 10 Index',  value: 'R_10' },
-        { label: 'V 25 Index',  value: 'R_25' },
-        { label: 'V 50 Index',  value: 'R_50' },
-        { label: 'V 75 Index',  value: 'R_75' },
+        { label: 'V 10 Index', value: 'R_10' },
+        { label: 'V 25 Index', value: 'R_25' },
+        { label: 'V 50 Index', value: 'R_50' },
+        { label: 'V 75 Index', value: 'R_75' },
         { label: 'V 100 Index', value: 'R_100' },
-        { label: 'V 10 (1s)',   value: '1HZ10V' },
-        { label: 'V 25 (1s)',   value: '1HZ25V' },
-        { label: 'V 50 (1s)',   value: '1HZ50V' },
-        { label: 'V 75 (1s)',   value: '1HZ75V' },
-        { label: 'V 100 (1s)',  value: '1HZ100V' },
+        { label: 'V 10 (1s)', value: '1HZ10V' },
+        { label: 'V 25 (1s)', value: '1HZ25V' },
+        { label: 'V 50 (1s)', value: '1HZ50V' },
+        { label: 'V 75 (1s)', value: '1HZ75V' },
+        { label: 'V 100 (1s)', value: '1HZ100V' },
     ];
 
     const connState = is_authorizing ? 'pulse'
@@ -170,13 +170,13 @@ const OverUnder = observer(() => {
                             </div>
                             <div className='ou-modal__body'>
                                 {([
-                                    { c: 'blue',   t: 'Market Settings',   items: ['<b>Index</b> — Volatility market to trade (10 available).', '<b>Volatility Changer</b> — Auto-scans all indices and picks the best one for your strategy.'] },
-                                    { c: 'blue',   t: 'Over 5 / Under 4',  items: ['Fires Over 5 + Under 4 simultaneously when trigger digit appears.', '<b>2ND</b> — Two consecutive trigger digits required.', '<b>Turbo</b> — Re-fires immediately after each settled round.'] },
-                                    { c: 'purple', t: 'Differs',           items: ['3+ ticks in one direction → reversal tick → bot places Differs on reversal digit.', '<b>2-Term Compound</b> — Adds profit onto next stake.', '<b>Auto Cycle</b> — Loops after each round.'] },
-                                    { c: 'pink',   t: 'Differs V2',        items: ['Predicts most likely 9 digit → bets DIFFER with the digit that has NOT appeared.', 'Waits 3 ticks after trade settles before predicting again.', '<b>Auto Switch ON</b> — Executes immediately on new symbol after scanning (no 3-tick wait).', 'No trigger digit required.'] },
-                                    { c: 'green',  t: 'Rise / Fall',       items: ['MACD momentum detection on live ticks → Rise or Fall contract.'] },
-                                    { c: 'orange', t: 'Manual',            items: ['Choose Contract Type (Over/Under/Differs), Barrier, and Trigger Digit yourself.'] },
-                                    { c: 'red',    t: 'Recovery System',   items: ['After a loss, Martingale stake with Recovery settings until loss is recovered.', '<b>Trigger Wait</b> — Waits for trigger before recovery trade.'] },
+                                    { c: 'blue', t: 'Market Settings', items: ['<b>Index</b> — Volatility market to trade (10 available).', '<b>Volatility Changer</b> — Auto-scans all indices and picks the best one for your strategy.'] },
+                                    { c: 'blue', t: 'Over 5 / Under 4', items: ['Fires Over 5 + Under 4 simultaneously when trigger digit appears.', '<b>2ND</b> — Two consecutive trigger digits required.', '<b>Turbo</b> — Re-fires immediately after each settled round.'] },
+                                    { c: 'purple', t: 'Differs', items: ['3+ ticks in one direction → reversal tick → bot places Differs on reversal digit.', '<b>2-Term Compound</b> — Adds profit onto next stake.', '<b>Auto Cycle</b> — Loops after each round.', '<b>All Vol Mode</b> — Runs the strategy on all volatility indices at once.'] },
+                                    { c: 'pink', t: 'Differs V2', items: ['Predicts most likely 9 digit → bets DIFFER with the digit that has NOT appeared.', 'Waits 3 ticks after trade settles before predicting again.', '<b>Auto Switch ON</b> — Executes immediately on new symbol after scanning (no 3-tick wait).', '<b>All Vol Mode</b> — Runs the strategy on all volatility indices at once.'] },
+                                    { c: 'green', t: 'Rise / Fall', items: ['MACD momentum detection on live ticks → Rise or Fall contract.'] },
+                                    { c: 'orange', t: 'Manual', items: ['Choose Contract Type (Over/Under/Differs), Barrier, and Trigger Digit yourself.'] },
+                                    { c: 'red', t: 'Recovery System', items: ['After a loss, Martingale stake with Recovery settings until loss is recovered.', '<b>Trigger Wait</b> — Waits for trigger before recovery trade.'] },
                                 ] as const).map(s => (
                                     <div key={s.t} className='ou-modal__sec'>
                                         <div className={`ou-modal__sh ou-modal__sh--${s.c}`}>{s.t}</div>
@@ -252,7 +252,7 @@ const OverUnder = observer(() => {
                             <div className='ou-f ou-f--grow'>
                                 <span className='ou-fl'>Index</span>
                                 <select className='ou-sel' value={selected_symbol}
-                                    onChange={e => setSelectedSymbol(e.target.value)} disabled={disabled}>
+                                    onChange={e => setSelectedSymbol(e.target.value)} disabled={disabled || is_all_vol_mode}>
                                     {volatilityOptions.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
                                 </select>
                             </div>
@@ -336,6 +336,13 @@ const OverUnder = observer(() => {
                                                 <span className={`ou-sw-lbl${is_automate ? ' on' : ''}`} style={is_automate ? { color: '#a855f7' } : {}}>{is_automate ? 'ON' : 'OFF'}</span>
                                             </div>
                                         </div>
+                                        <div className='ou-f'>
+                                            <span className='ou-fl'>All Vol Mode</span>
+                                            <div className='ou-sw-row'>
+                                                <Toggle on={is_all_vol_mode} onToggle={() => setIsAllVolMode(!is_all_vol_mode)} disabled={disabled} color='#a855f7' />
+                                                <span className={`ou-sw-lbl${is_all_vol_mode ? ' on' : ''}`} style={is_all_vol_mode ? { color: '#a855f7' } : {}}>{is_all_vol_mode ? 'ON' : 'OFF'}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -356,6 +363,13 @@ const OverUnder = observer(() => {
                                             <div className='ou-sw-row'>
                                                 <Toggle on={is_automate} onToggle={() => setIsAutomate(!is_automate)} disabled={disabled} color='#ec4899' />
                                                 <span className={`ou-sw-lbl${is_automate ? ' on' : ''}`} style={is_automate ? { color: '#ec4899' } : {}}>{is_automate ? 'ON' : 'OFF'}</span>
+                                            </div>
+                                        </div>
+                                        <div className='ou-f'>
+                                            <span className='ou-fl'>All Vol Mode</span>
+                                            <div className='ou-sw-row'>
+                                                <Toggle on={is_all_vol_mode} onToggle={() => setIsAllVolMode(!is_all_vol_mode)} disabled={disabled} color='#ec4899' />
+                                                <span className={`ou-sw-lbl${is_all_vol_mode ? ' on' : ''}`} style={is_all_vol_mode ? { color: '#ec4899' } : {}}>{is_all_vol_mode ? 'ON' : 'OFF'}</span>
                                             </div>
                                         </div>
                                     </div>

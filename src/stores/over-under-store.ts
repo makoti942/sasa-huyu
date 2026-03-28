@@ -45,6 +45,7 @@ export default class OverUnderStore {
     is_volatility_changer = false;
     is_differs_mode = false;
     is_differs_v2_mode = false;
+    is_all_vol_mode = false;
     is_automate = false;
     use_second_trigger = true;
     is_manual_mode = false;
@@ -85,6 +86,8 @@ export default class OverUnderStore {
     best_score = Infinity;
     best_symbol: string | null = null;
     current_analyzing_symbol: string | null = null;
+
+    symbol_data: { [key: string]: { tick_history: number[], last_digit: number | null, last_last_digit: number | null, _tick_prices: number[] } } = {};
 
     private is_purchasing = false;
     private is_processing_round = false;
@@ -134,6 +137,7 @@ export default class OverUnderStore {
             is_2term_mode: observable,
             is_rise_fall_mode: observable,
             is_differs_v2_mode: observable,
+            is_all_vol_mode: observable,
             differs_predicted_top4: observable,
             differs_v2_predicted_digit: observable,
             differs_v2_post_trade_ticks: observable,
@@ -147,6 +151,7 @@ export default class OverUnderStore {
             setIsVolatilityChanger: action.bound,
             setIsDiffersMode: action.bound,
             setIsDiffersV2Mode: action.bound,
+            setIsAllVolMode: action.bound,
             setIsAutomate: action.bound,
             setUseSecondTrigger: action.bound,
             setIsManualMode: action.bound,
@@ -365,6 +370,7 @@ export default class OverUnderStore {
     setIsVolatilityChanger(value: boolean) { this.is_volatility_changer = value; }
     setIsDiffersMode(value: boolean) { this.is_differs_mode = value; }
     setIsDiffersV2Mode(value: boolean) { this.is_differs_v2_mode = value; }
+    setIsAllVolMode(value: boolean) { this.is_all_vol_mode = value; }
     setIs2termMode(value: boolean) { this.is_2term_mode = value; }
     setIsRiseFallMode(value: boolean) { this.is_rise_fall_mode = value; }
     setIsAutomate(value: boolean) { this.is_automate = value; }
@@ -452,14 +458,26 @@ export default class OverUnderStore {
 
     subscribeToTicks(symbol: string) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-        if (this.active_subscription_id) {
-            this.ws.send(JSON.stringify({ forget: this.active_subscription_id }));
-            this.active_subscription_id = null;
+        if (this.is_all_vol_mode) {
+            if (this.active_subscription_id) {
+                this.ws.send(JSON.stringify({ forget_all: 'ticks' }));
+                this.active_subscription_id = null;
+            }
+            for (const sym in pip_sizes) {
+                this.addLog(`Subscribing to: ${sym}`);
+                this.ws.send(JSON.stringify({ ticks_history: sym, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
+                this.symbol_data[sym] = { tick_history: [], last_digit: null, last_last_digit: null, _tick_prices: [] };
+            }
+        } else {
+            if (this.active_subscription_id) {
+                this.ws.send(JSON.stringify({ forget: this.active_subscription_id }));
+                this.active_subscription_id = null;
+            }
+            this.addLog(`Subscribing to: ${symbol}`);
+            this.ws.send(JSON.stringify({ ticks_history: symbol, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
+            this.tick_history = [];
+            this.last_digit = null;
         }
-        this.addLog(`Subscribing to: ${symbol}`);
-        this.ws.send(JSON.stringify({ ticks_history: symbol, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
-        this.tick_history = [];
-        this.last_digit = null;
     }
 
     connectWebSocket() {
@@ -531,7 +549,16 @@ export default class OverUnderStore {
                     }
                     switch (data.msg_type) {
                         case 'history':
-                            if (data.echo_req.subscribe === 1) {
+                            if (this.is_all_vol_mode) {
+                                const symbol = data.echo_req.ticks_history;
+                                const pip_size = pip_sizes[symbol] || 2;
+                                const prices = data.history.prices;
+                                const digits = prices.map((p: string | number) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
+                                this.symbol_data[symbol].tick_history = digits;
+                                this.symbol_data[symbol]._tick_prices = prices.map((p: string | number) => Number(p));
+                                if (digits.length > 0) this.symbol_data[symbol].last_digit = digits[digits.length - 1];
+                                this.addLog(`Loaded ${digits.length} historical ticks for ${symbol}.`);
+                            } else if (data.echo_req.subscribe === 1) {
                                 const pip_size = pip_sizes[this.selected_symbol] || 2;
                                 const prices = data.history.prices;
                                 const digits = prices.map((p: string | number) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
@@ -600,12 +627,22 @@ export default class OverUnderStore {
                             }
                             break;
                         case 'tick':
+                            const symbol = data.tick.symbol;
                             const quote_str = data.tick.quote.toFixed(data.tick.pip_size);
                             const digit = parseInt(quote_str.slice(-1), 10);
-                            this.last_last_digit = this.last_digit;
-                            this.last_digit = digit;
-                            this.tick_history = [...this.tick_history.slice(-MAX_TICKS + 1), digit];
-                            this._tick_prices = [...this._tick_prices.slice(-MAX_TICKS + 1), Number(data.tick.quote)];
+
+                            if (this.is_all_vol_mode) {
+                                const current_symbol_data = this.symbol_data[symbol];
+                                current_symbol_data.last_last_digit = current_symbol_data.last_digit;
+                                current_symbol_data.last_digit = digit;
+                                current_symbol_data.tick_history = [...current_symbol_data.tick_history.slice(-MAX_TICKS + 1), digit];
+                                current_symbol_data._tick_prices = [...current_symbol_data._tick_prices.slice(-MAX_TICKS + 1), Number(data.tick.quote)];
+                            } else {
+                                this.last_last_digit = this.last_digit;
+                                this.last_digit = digit;
+                                this.tick_history = [...this.tick_history.slice(-MAX_TICKS + 1), digit];
+                                this._tick_prices = [...this._tick_prices.slice(-MAX_TICKS + 1), Number(data.tick.quote)];
+                            }
                             
                             if (this.is_differs_v2_mode && !this.is_differs_recovery_mode && !this.is_recovery_active && this.differs_v2_predicted_digit !== null) {
                                 this.differs_v2_post_trade_ticks++;
@@ -615,9 +652,9 @@ export default class OverUnderStore {
                                 if (this.is_rise_fall_mode) {
                                     this.analyzeAndExecuteRiseFall();
                                 } else if (this.is_differs_mode && !this.is_differs_recovery_mode && !this.is_recovery_active) {
-                                    this.analyzeAndExecuteDiffers();
+                                    this.analyzeAndExecuteDiffers(this.is_all_vol_mode ? symbol : undefined);
                                 } else if (this.is_differs_v2_mode && !this.is_differs_recovery_mode && !this.is_recovery_active) {
-                                    this.analyzeAndExecuteDiffersV2();
+                                    this.analyzeAndExecuteDiffersV2(this.is_all_vol_mode ? symbol : undefined);
                                 } else {
                                     // Recovery mode with trigger wait
                                     if (this.is_recovery_active && this.use_recovery_delay) {
@@ -741,10 +778,13 @@ export default class OverUnderStore {
         }));
     }
 
-    analyzeAndExecuteDiffers() {
-        if (this.tick_history.length < 5 || this.is_purchasing) return;
+    analyzeAndExecuteDiffers(symbol?: string) {
+        const current_symbol = symbol || this.selected_symbol;
+        const data = this.is_all_vol_mode ? this.symbol_data[current_symbol] : this;
 
-        const digits = this.tick_history;
+        if (data.tick_history.length < 5 || this.is_purchasing) return;
+
+        const digits = data.tick_history;
         const n = digits.length;
         const curr_digit = digits[n - 1];
         const prev_digit = digits[n - 2];
@@ -766,8 +806,8 @@ export default class OverUnderStore {
         }
 
         if (surge_count >= 2) {
-            const rejection_digit = this.last_digit;
-            const history = this.tick_history.slice(-1000);
+            const rejection_digit = data.last_digit;
+            const history = data.tick_history.slice(-1000);
             const totalTicks = history.length;
             const digitCounts = Array(10).fill(0) as number[];
             history.forEach(d => { if (d >= 0 && d <= 9) digitCounts[d]++; });
@@ -777,7 +817,7 @@ export default class OverUnderStore {
 
             if (digitPct > 9.8) {
                 this.addLog(
-                    `Differs: SKIP digit ${rejection_digit} — too frequent (${digitPct.toFixed(1)}% in last ${totalTicks} ticks, limit 9.8%). Re-analyzing...`
+                    `Differs: SKIP digit ${rejection_digit} on ${current_symbol} — too frequent (${digitPct.toFixed(1)}% in last ${totalTicks} ticks, limit 9.8%). Re-analyzing...`
                 );
                 return;
             }
@@ -785,7 +825,7 @@ export default class OverUnderStore {
             const minCount = Math.min(...digitCounts.filter((_, i) => digitCounts[i] > 0));
             if (digitCount === minCount && totalTicks > 0) {
                 this.addLog(
-                    `Differs: SKIP digit ${rejection_digit} — least appearing digit (${digitCount} times). Re-analyzing...`
+                    `Differs: SKIP digit ${rejection_digit} on ${current_symbol} — least appearing digit (${digitCount} times). Re-analyzing...`
                 );
                 return;
             }
@@ -795,19 +835,19 @@ export default class OverUnderStore {
 
             if (recentCount > 3) {
                 this.addLog(
-                    `Differs: SKIP digit ${rejection_digit} — rapidly increasing (appeared ${recentCount}x in last 10 ticks, limit 3). Re-analyzing...`
+                    `Differs: SKIP digit ${rejection_digit} on ${current_symbol} — rapidly increasing (appeared ${recentCount}x in last 10 ticks, limit 3). Re-analyzing...`
                 );
                 return;
             }
 
-            const predictionInput = this.tick_history.slice(-200);
+            const predictionInput = data.tick_history.slice(-200);
             const prediction = predictNextDigits(predictionInput);
             runInAction(() => { this.differs_predicted_top4 = prediction.top4Digits; });
-            this.addLog(`Prediction Engine: ${prediction.summary}`);
+            this.addLog(`Prediction Engine on ${current_symbol}: ${prediction.summary}`);
 
             if (prediction.top4Digits.includes(rejection_digit!)) {
                 this.addLog(
-                    `Differs: BLOCKED digit ${rejection_digit} — prediction engine flagged it as likely to appear (top4: [${prediction.top4Digits.join(',')}]). Skipping trade.`
+                    `Differs: BLOCKED digit ${rejection_digit} on ${current_symbol} — prediction engine flagged it as likely to appear (top4: [${prediction.top4Digits.join(',')}]). Skipping trade.`
                 );
                 return;
             }
@@ -816,26 +856,29 @@ export default class OverUnderStore {
 
             this.addLog(
                 `Differs: PATTERN! ${surge_count}x ${surge_direction} surge → ` +
-                `${curr_direction} reversal. Digit ${rejection_digit} (${digitPct.toFixed(1)}%, ${recentCount}x recent). ` +
+                `${curr_direction} reversal. Digit ${rejection_digit} on ${current_symbol} (${digitPct.toFixed(1)}%, ${recentCount}x recent). ` +
                 `Prediction engine cleared. DIFFER!`
             );
 
-            this.executeTrade('DIGITDIFF', String(rejection_digit));
+            this.executeTrade('DIGITDIFF', String(rejection_digit), current_symbol);
         } else {
-            this.addLog(`Differs: Watching... ${surge_count}x ${surge_direction} (need 2+ consecutive)`);
+            this.addLog(`Differs on ${current_symbol}: Watching... ${surge_count}x ${surge_direction} (need 2+ consecutive)`);
         }
     }
 
-    analyzeAndExecuteDiffersV2() {
-        if (this.tick_history.length < 5 || this.is_purchasing) return;
+    analyzeAndExecuteDiffersV2(symbol?: string) {
+        const current_symbol = symbol || this.selected_symbol;
+        const data = this.is_all_vol_mode ? this.symbol_data[current_symbol] : this;
 
-        const history = this.tick_history;
-        const lastTick = this.last_digit;
+        if (data.tick_history.length < 5 || this.is_purchasing) return;
+
+        const history = data.tick_history;
+        const lastTick = data.last_digit;
         const secondLastTick = history[history.length - 2];
         
         if (lastTick === secondLastTick) {
             const barrier_digit = lastTick;
-            const history_1000 = this.tick_history.slice(-1000);
+            const history_1000 = data.tick_history.slice(-1000);
             const totalTicks = history_1000.length;
             const digitCounts = Array(10).fill(0);
             history_1000.forEach(d => { if (d >= 0 && d <= 9) digitCounts[d]++; });
@@ -845,20 +888,20 @@ export default class OverUnderStore {
 
             if (digitPct > 10.4) {
                 this.addLog(
-                    `DiffersV2: SKIP digit ${barrier_digit} — too frequent (${digitPct.toFixed(1)}% in last ${totalTicks} ticks, limit 10.4%). Re-analyzing...`
+                    `DiffersV2: SKIP digit ${barrier_digit} on ${current_symbol} — too frequent (${digitPct.toFixed(1)}% in last ${totalTicks} ticks, limit 10.4%). Re-analyzing...`
                 );
                 return;
             }
 
             runInAction(() => {
                 this.differs_v2_predicted_digit = lastTick;
-                this.differs_predicted_top4 = [lastTick];
+                this.differs_predicted_top4 = [lastTick!];
             });
             
-            this.addLog(`DiffersV2: ${lastTick},${lastTick} detected → DIFFER on ${lastTick}`);
-            this.executeTrade('DIGITDIFF', String(lastTick));
+            this.addLog(`DiffersV2: ${lastTick},${lastTick} detected on ${current_symbol} → DIFFER on ${lastTick}`);
+            this.executeTrade('DIGITDIFF', String(lastTick), current_symbol);
         } else {
-            this.addLog(`DiffersV2: Waiting for double... Last: ${secondLastTick},${lastTick}`);
+            this.addLog(`DiffersV2 on ${current_symbol}: Waiting for double... Last: ${secondLastTick},${lastTick}`);
         }
     }
 
@@ -981,15 +1024,16 @@ export default class OverUnderStore {
         } else { this.addLog("Waiting for next trigger..."); }
     }
 
-    executeTrade(contract_type: string, barrier: string) {
+    executeTrade(contract_type: string, barrier: string, symbol?: string) {
         if (this.is_purchasing) return;
         const is_logged_in = this.is_authorized || this.root_store.client.is_logged_in || !!localStorage.getItem('active_loginid');
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !is_logged_in) return;
         this.is_purchasing = true;
         // Use initial_stake for recovery trades, otherwise use current stake
         const tradeAmount = this.is_recovery_active ? Number(this.initial_stake) : Number(this.stake);
-        this.addLog(`Trade: ${contract_type} ${barrier} @ ${tradeAmount}`);
-        this.ws.send(JSON.stringify({ buy: 1, price: tradeAmount, parameters: { amount: tradeAmount, basis: 'stake', currency: 'USD', duration: 1, duration_unit: 't', symbol: this.selected_symbol, contract_type, barrier } }));
+        const tradeSymbol = symbol || this.selected_symbol;
+        this.addLog(`Trade: ${contract_type} ${barrier} on ${tradeSymbol} @ ${tradeAmount}`);
+        this.ws.send(JSON.stringify({ buy: 1, price: tradeAmount, parameters: { amount: tradeAmount, basis: 'stake', currency: 'USD', duration: 1, duration_unit: 't', symbol: tradeSymbol, contract_type, barrier } }));
     }
 
     executeMultiTrade() {
