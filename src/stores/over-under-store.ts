@@ -921,7 +921,11 @@ export default class OverUnderStore {
             const digitPct = totalTicks > 0 ? (digitCount / totalTicks) * 100 : 0;
     
             const reasons_to_skip: string[] = [];
-    
+
+            if (barrier_digit === 0 || barrier_digit === 9) {
+                reasons_to_skip.push('digit is 0 or 9');
+            }
+
             if (digitPct >= 10.3) {
                 reasons_to_skip.push(`too frequent (${digitPct.toFixed(1)}%)`);
             }
@@ -937,12 +941,12 @@ export default class OverUnderStore {
                 const count = hist.filter(d => d === digit).length;
                 return (count / hist.length) * 100;
             };
-            const old_history = data.tick_history.slice(0, -35);
+            const old_history = data.tick_history.slice(0, -27);
             const new_history = data.tick_history;
             const oldPct = getPct(barrier_digit!, old_history);
             const newPct = getPct(barrier_digit!, new_history);
             const increase = newPct - oldPct;
-            if (increase > 0.5) {
+            if (increase > 0.4) {
                 reasons_to_skip.push(`rapidly increasing (+${increase.toFixed(2)}%)`);
             }
     
