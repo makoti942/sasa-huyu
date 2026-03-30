@@ -1,4 +1,3 @@
-'''
 import { action, makeObservable, observable, reaction, runInAction } from 'mobx';
 import { TStores } from '@/types/stores.types';
 import RootStore from './root-store';
@@ -1181,4 +1180,3 @@ export default class OverUnderStore {
         this.volatilityAnalyzer?.terminate();
     }
 }
-''
