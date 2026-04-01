@@ -706,6 +706,10 @@ export default class OverUnderStore {
                                 } else {
                                     // INSTANT WIN
                                     this.addLog(`⚡ Instant Result on ${tick_symbol}: WON (Digit: ${last_digit_for_check}, Barrier: ${barrier})`);
+                                     if (!this.is_2term_mode) {
+                                        this.stake = this.initial_stake;
+                                        this.addLog(`⚡ Stake reset to initial: ${this.initial_stake}`)
+                                    }
                                     delete this.pending_instant_result_check[tick_symbol];
                                 }
                                 return; // IMPORTANT: Stop further processing of this tick to avoid conflicts.
