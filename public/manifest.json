@@ -4,14 +4,14 @@
     "description": "Create profitable trading bots without coding. Professional Deriv trading bot builder with copy trading, free bots, and advanced strategies.",
     "icons": [
         {
-            "src": "/makoti-logo.jpg",
-            "type": "image/jpeg",
+            "src": "/favicon.png",
+            "type": "image/png",
             "sizes": "192x192",
             "purpose": "any maskable"
         },
         {
-            "src": "/makoti-logo.jpg",
-            "type": "image/jpeg",
+            "src": "/favicon.png",
+            "type": "image/png",
             "sizes": "512x512",
             "purpose": "any maskable"
         }
