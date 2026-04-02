@@ -33,26 +33,51 @@ const Toggle = ({ on, onToggle, disabled, color = '#3b82f6' }: {
     </button>
 );
 
+// Memoize TriggerInput to prevent re-renders on every tick
+const TriggerInput = React.memo(({ field = 'primary', over_under, disabled }: {
+    field?: 'primary' | 'secondary';
+    over_under: any;
+    disabled: boolean;
+}) => {
+    const val = field === 'primary' ? over_under.entry_digit : over_under.second_entry_digit;
+    const isLit = field === 'primary'
+        ? over_under.last_digit === over_under.entry_digit
+        : over_under.last_last_digit === over_under.entry_digit && over_under.last_digit === over_under.second_entry_digit;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const setter = field === 'primary' ? over_under.setEntryDigit : over_under.setSecondEntryDigit;
+        setter(Number(e.target.value));
+    };
+
+    return (
+        <div className='ou-dbox'>
+            <input
+                type='number' min='0' max='9' value={val}
+                onChange={handleChange}
+                disabled={disabled}
+            />
+            <span className={`ou-led ${isLit ? 'ou-led--on' : ''}`} />
+        </div>
+    );
+});
+
 const OverUnder = observer(() => {
     const { over_under } = useStore();
     const {
-        connection_status, tick_history, last_digit, is_auto_running,
-        stake, martingale, is_volatility_changer,
+        connection_status, tick_history, last_digit,
+        is_auto_running, stake, martingale, is_volatility_changer,
         is_differs_mode, is_differs_v2_mode, is_tatu_bora_mode, is_nne_kwisha_mode, is_all_vol_mode, is_2term_mode, is_rise_fall_mode, is_automate,
         use_second_trigger, is_manual_mode, manual_contract_type, manual_barrier,
         recovery_contract_type, recovery_barrier, use_recovery_delay, is_recovery_enabled,
         recovery_entry_digit, recovery_second_entry_digit,
-        entry_digit, second_entry_digit, is_turbo, selected_symbol,
-        debug_info, is_analyzing_volatility, is_authorizing,
-        differs_predicted_top4,
-        is_digit_occurrence_filter_active, is_rebounce_active,
+        is_turbo, selected_symbol, debug_info, is_analyzing_volatility, is_authorizing,
+        differs_predicted_top4, is_digit_occurrence_filter_active, is_rebounce_active,
         setStake, setMartingale, setIsVolatilityChanger,
         setIsDiffersMode, setIsDiffersV2Mode, setIsTatuBoraMode, setIsNneKwishaMode, setIsAllVolMode, setIs2termMode, setIsRiseFallMode, setIsAutomate,
         setUseSecondTrigger, setIsManualMode, setManualContractType, setManualBarrier,
         setRecoveryContractType, setRecoveryBarrier, setUseRecoveryDelay, setIsRecoveryEnabled,
         setRecoveryEntryDigit, setRecoverySecondEntryDigit,
-        setEntryDigit, setSecondEntryDigit, setIsTurbo, setSelectedSymbol,
-        connectWebSocket, handleStartStop, clearDebug,
+        setIsTurbo, setSelectedSymbol, connectWebSocket, handleStartStop, clearDebug,
         setIsDigitOccurrenceFilterActive, setIsRebounceActive,
     } = over_under;
 
@@ -127,26 +152,6 @@ const OverUnder = observer(() => {
         if (is_auto_running) return is_analyzing_volatility ? 'SCANNING…' : 'STOP BOT';
         return 'START BOT';
     }, [is_auto_running, is_analyzing_volatility, is_authorizing]);
-
-    /* ── helpers ── */
-    const TriggerInput = ({ field = 'primary' }: { field?: 'primary' | 'secondary' }) => {
-        const val = field === 'primary' ? entry_digit : second_entry_digit;
-        const isLit = field === 'primary'
-            ? over_under.last_digit === entry_digit
-            : over_under.last_last_digit === entry_digit && over_under.last_digit === second_entry_digit;
-        return (
-            <div className='ou-dbox'>
-                <input
-                    type='number' min='0' max='9' value={val}
-                    onChange={e => field === 'primary'
-                        ? setEntryDigit(Number(e.target.value))
-                        : setSecondEntryDigit(Number(e.target.value))}
-                    disabled={disabled}
-                />
-                <span className={`ou-led ${isLit ? 'ou-led--on' : ''}`} />
-            </div>
-        );
-    };
 
     return (
         <div className='ou-root'>
@@ -306,8 +311,8 @@ const OverUnder = observer(() => {
                                      <div className='ou-f'>
                                          <span className='ou-fl'>Digit</span>
                                          <div className='ou-trig-row'>
-                                             <TriggerInput field='primary' />
-                                             {use_second_trigger && <TriggerInput field='secondary' />}
+                                             <TriggerInput field='primary' over_under={over_under} disabled={disabled} />
+                                             {use_second_trigger && <TriggerInput field='secondary' over_under={over_under} disabled={disabled} />}
                                              <button className={`ou-chip${use_second_trigger ? ' on' : ''}`}
                                                  onClick={() => setUseSecondTrigger(!use_second_trigger)} disabled={disabled}>
                                                  2ND
@@ -449,8 +454,8 @@ const OverUnder = observer(() => {
                                         <div className='ou-f'>
                                             <span className='ou-fl'>Trigger</span>
                                             <div className='ou-trig-row'>
-                                                <TriggerInput field='primary' />
-                                                {use_second_trigger && <TriggerInput field='secondary' />}
+                                               <TriggerInput field='primary' over_under={over_under} disabled={disabled} />
+                                                {use_second_trigger && <TriggerInput field='secondary' over_under={over_under} disabled={disabled} />}
                                                 <button className={`ou-chip${use_second_trigger ? ' on' : ''}`}
                                                     onClick={() => setUseSecondTrigger(!use_second_trigger)} disabled={disabled}>
                                                     2ND
