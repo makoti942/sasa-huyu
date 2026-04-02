@@ -96,6 +96,11 @@ export default class OverUnderStore {
     private is_purchasing = false;
     private pending_instant_result_check: { [symbol: string]: { barrier: string, stake: number, contract_type: string } } = {};
 
+    // New feature flags
+    is_digit_occurrence_filter_active = false;
+    is_rebounce_active = false;
+    private rebounce_sequences: { [symbol: string]: boolean } = {};
+
 
     private _boundAuthHandler: (event: MessageEvent) => void;
     private _loginReaction: () => void;
@@ -151,6 +156,8 @@ export default class OverUnderStore {
             differs_v2_analysis_ready: observable,
             differs_v2_5s_analysis_pending: observable,
             differs_v2_confidence_wait_start: observable,
+            is_digit_occurrence_filter_active: observable,
+            is_rebounce_active: observable,
             setStake: action.bound,
             setIsRiseFallMode: action.bound,
             setIs2termMode: action.bound,
@@ -182,6 +189,8 @@ export default class OverUnderStore {
             handleStartStop: action.bound,
             addLog: action.bound,
             clearDebug: action.bound,
+            setIsDigitOccurrenceFilterActive: action.bound,
+            setIsRebounceActive: action.bound,
         });
         this.root_store = root_store;
         this.initializeWorker();
@@ -409,6 +418,8 @@ export default class OverUnderStore {
     setEntryDigit(digit: number) { this.entry_digit = digit; }
     setSecondEntryDigit(digit: number) { this.second_entry_digit = digit; }
     setIsTurbo(is_turbo: boolean) { this.is_turbo = is_turbo; }
+    setIsDigitOccurrenceFilterActive(value: boolean) { this.is_digit_occurrence_filter_active = value; }
+    setIsRebounceActive(value: boolean) { this.is_rebounce_active = value; }
 
     setSelectedSymbol(symbol: string) {
         if (this.selected_symbol === symbol) return;
@@ -432,6 +443,7 @@ export default class OverUnderStore {
         }
         this.is_purchasing = false;
         this.pending_instant_result_check = {};
+        this.rebounce_sequences = {};
     }
 
     handleStartStop() {
@@ -730,14 +742,7 @@ export default class OverUnderStore {
                                     } else if (this.is_differs_v2_mode) {
                                         this.analyzeAndExecuteDiffersV2(active_symbol);
                                     } else if (!this.is_rise_fall_mode && !this.is_manual_mode) {
-                                        const is_triggered = this.use_second_trigger
-                                            ? (symbol_data.last_digit === this.entry_digit && symbol_data.last_last_digit === this.second_entry_digit)
-                                            : (symbol_data.last_digit === this.entry_digit);
-
-                                        if (is_triggered) {
-                                            this.addLog(`Trigger: O5/U4 on ${active_symbol}`);
-                                            this.executeMultiTrade(active_symbol);
-                                        }
+                                        this.handleOverUnderLogic(symbol_data);
                                     }
                                 } else {
                                     if (this.symbol_locks[this.selected_symbol]) return;
@@ -749,17 +754,7 @@ export default class OverUnderStore {
                                     } else if (this.is_differs_v2_mode) {
                                         this.analyzeAndExecuteDiffersV2();
                                     } else {
-                                        // Standard Over/Under and Manual modes (no fast recovery)
-                                        const is_triggered = this.use_second_trigger ? (this.last_digit === this.entry_digit && this.last_last_digit === this.second_entry_digit) : (this.last_digit === this.entry_digit);
-                                        if (is_triggered) {
-                                            if (this.is_manual_mode) {
-                                                this.addLog(`Trigger: Manual ${this.manual_contract_type} ${this.manual_barrier}`);
-                                                this.executeTrade(this.manual_contract_type, this.manual_barrier);
-                                            } else {
-                                                this.addLog(`Trigger: O5/U4`);
-                                                this.executeMultiTrade();
-                                            }
-                                        }
+                                        this.handleOverUnderLogic();
                                     }
                                 }
                             }
@@ -777,6 +772,43 @@ export default class OverUnderStore {
             this.ws.onerror = (e) => this.addLog(`Connection Error: ${e.type}`);
         } catch (e) { this.addLog(`Connection failed to initialize: ${e.message}`); this.is_authorizing = false; }
     }
+
+    handleOverUnderLogic(symbol_data?: any) {
+        const data = symbol_data || this;
+        const symbol = this.is_all_vol_mode && symbol_data ? Object.keys(this.symbol_data).find(key => this.symbol_data[key] === data) : this.selected_symbol;
+    
+        if (!symbol) return; // Should not happen
+
+        if (this.is_rebounce_active && this.use_second_trigger) {
+            if (this.rebounce_sequences[symbol]) {
+                if (data.last_digit === 4 || data.last_digit === 5) {
+                    this.addLog(`Rebounce: Condition met on ${symbol}. Executing trade.`);
+                    this.executeMultiTrade(symbol);
+                } else {
+                    this.addLog(`Rebounce: Resetting on ${symbol}. Last digit was ${data.last_digit}.`);
+                }
+                this.rebounce_sequences[symbol] = false;
+            } else {
+                const is_triggered = data.last_digit === this.entry_digit && data.last_last_digit === this.second_entry_digit;
+                if (is_triggered) {
+                    this.addLog(`Rebounce: Initial trigger detected on ${symbol}. Waiting for 4 or 5.`);
+                    this.rebounce_sequences[symbol] = true;
+                }
+            }
+        } else {
+            const is_triggered = this.use_second_trigger ? (data.last_digit === this.entry_digit && data.last_last_digit === this.second_entry_digit) : (data.last_digit === this.entry_digit);
+            if (is_triggered) {
+                if (this.is_manual_mode) {
+                    this.addLog(`Trigger: Manual ${this.manual_contract_type} ${this.manual_barrier} on ${symbol}`);
+                    this.executeTrade(this.manual_contract_type, this.manual_barrier, symbol);
+                } else {
+                    this.addLog(`Trigger: O5/U4 on ${symbol}`);
+                    this.executeMultiTrade(symbol);
+                }
+            }
+        }
+    }
+    
 
     calculateEMA(prices: number[], period: number): number[] {
         if (prices.length < period) return [];
@@ -1173,14 +1205,30 @@ export default class OverUnderStore {
 
     executeMultiTrade(symbol?: string) {
         const tradeSymbol = symbol || this.selected_symbol;
+        const data = this.is_all_vol_mode ? this.symbol_data[tradeSymbol] : this;
+
         if (this.symbol_locks[tradeSymbol]) return;
+
+        if (this.is_digit_occurrence_filter_active) {
+            const history = data.tick_history.slice(-100);
+            const losing_digits_count = history.filter(d => d === 4 || d === 5).length;
+            const occurrence_percentage = (losing_digits_count / history.length) * 100;
+            if (occurrence_percentage > 25) {
+                this.addLog(`Trade on ${tradeSymbol} skipped. Losing digits (4,5) occurred ${occurrence_percentage.toFixed(1)}% in last 100 ticks.`);
+                return;
+            }
+        }
+
         const is_logged_in = this.is_authorized || this.root_store.client.is_logged_in || !!localStorage.getItem('active_loginid');
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !is_logged_in) return;
+        
         this.is_purchasing = true;
         this.symbol_locks[tradeSymbol] = true;
         this._armPurchaseTimeout(tradeSymbol);
+        
         const tradeAmount = Number(this.stake.toFixed(2));
         this.addLog(`Trade: O5/U4 on ${tradeSymbol} @ ${tradeAmount}`);
+        
         const baseParams = { amount: tradeAmount, basis: 'stake', currency: 'USD', duration: 1, duration_unit: 't', symbol: tradeSymbol };
         this.ws.send(JSON.stringify({ buy: 1, price: tradeAmount, parameters: { ...baseParams, contract_type: 'DIGITOVER', barrier: '5' } }));
         this.ws.send(JSON.stringify({ buy: 1, price: tradeAmount, parameters: { ...baseParams, contract_type: 'DIGITUNDER', barrier: '4' } }));

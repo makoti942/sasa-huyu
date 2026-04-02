@@ -45,6 +45,7 @@ const OverUnder = observer(() => {
         entry_digit, second_entry_digit, is_turbo, selected_symbol,
         debug_info, is_analyzing_volatility, is_authorizing,
         differs_predicted_top4,
+        is_digit_occurrence_filter_active, is_rebounce_active,
         setStake, setMartingale, setIsVolatilityChanger,
         setIsDiffersMode, setIsDiffersV2Mode, setIsTatuBoraMode, setIsNneKwishaMode, setIsAllVolMode, setIs2termMode, setIsRiseFallMode, setIsAutomate,
         setUseSecondTrigger, setIsManualMode, setManualContractType, setManualBarrier,
@@ -52,6 +53,7 @@ const OverUnder = observer(() => {
         setRecoveryEntryDigit, setRecoverySecondEntryDigit,
         setEntryDigit, setSecondEntryDigit, setIsTurbo, setSelectedSymbol,
         connectWebSocket, handleStartStop, clearDebug,
+        setIsDigitOccurrenceFilterActive, setIsRebounceActive,
     } = over_under;
 
     const [showGuide, setShowGuide] = useState(false);
@@ -319,6 +321,22 @@ const OverUnder = observer(() => {
                                              <span className={`ou-sw-lbl${is_all_vol_mode ? ' on' : ''}`}>{is_all_vol_mode ? 'ON' : 'OFF'}</span>
                                          </div>
                                      </div>
+                                     <div className='ou-f'>
+                                        <span className='ou-fl'>Digit Filter</span>
+                                        <div className='ou-sw-row'>
+                                            <Toggle on={is_digit_occurrence_filter_active} onToggle={() => setIsDigitOccurrenceFilterActive(!is_digit_occurrence_filter_active)} disabled={disabled} />
+                                            <span className={`ou-sw-lbl${is_digit_occurrence_filter_active ? ' on' : ''}`}>{is_digit_occurrence_filter_active ? 'ON' : 'OFF'}</span>
+                                        </div>
+                                    </div>
+                                    {use_second_trigger && (
+                                        <div className='ou-f'>
+                                            <span className='ou-fl'>Rebounce</span>
+                                            <div className='ou-sw-row'>
+                                                <Toggle on={is_rebounce_active} onToggle={() => setIsRebounceActive(!is_rebounce_active)} disabled={disabled} />
+                                                <span className={`ou-sw-lbl${is_rebounce_active ? ' on' : ''}`}>{is_rebounce_active ? 'ON' : 'OFF'}</span>
+                                            </div>
+                                        </div>
+                                    )}
                                  </div>
                              </div>
                             )}
