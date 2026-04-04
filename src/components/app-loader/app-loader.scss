@@ -2,164 +2,177 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap');
 
 .gta-loader {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: #000;
-  overflow: hidden;
-  z-index: 9999;
-  font-family: 'Poppins', sans-serif;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-
-  &::before {
-    content: '';
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 50%, rgba(0,0,0,0.9) 100%);
-    z-index: 2;
-  }
+    background-color: #000;
+    overflow: hidden;
+    z-index: 9999;
+    font-family: 'Poppins', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .scene {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  transform-style: preserve-3d;
-  animation: dolly-zoom 10s ease-out forwards;
-}
-
-@keyframes dolly-zoom {
-  from {
-    transform: scale(1) translateZ(0px);
-  }
-  to {
-    transform: scale(1.5) translateZ(150px);
-  }
-}
-
-.asphalt {
-  position: absolute;
-  width: 200%;
-  height: 200%;
-  background-image: url('https://www.textures.com/system/gallery/photos/Roads/Asphalt/Pavement/51299/PavementAsphalt0202_1_1200.jpg');
-  background-size: 512px 512px;
-  background-repeat: repeat;
-  transform: rotateX(85deg) translateY(250px) translateZ(-100px);
-  filter: brightness(0.4);
-
-  &::after {
-    content: '';
     position: absolute;
-    top: 0;
-    left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 20%);
-  }
+    transform-style: preserve-3d;
 }
 
 .siren-light {
-  position: absolute;
-  top: -50%;
-  width: 150%;
-  height: 200%;
-  opacity: 0;
+    position: absolute;
+    top: -60%;
+    width: 200%;
+    height: 250%;
+    filter: blur(50px); /* Bokeh Effect */
+    opacity: 0;
 
-  &.blue {
-    left: -100%;
-    background: radial-gradient(ellipse at center, rgba(50, 100, 255, 0.5) 0%, rgba(50, 100, 255, 0) 60%);
-    animation: flash-blue 2s infinite steps(1);
-    animation-delay: 1s;
-  }
+    &.blue {
+        left: -120%;
+        background: radial-gradient(ellipse at center, rgba(50, 100, 255, 0.6) 0%, rgba(50, 100, 255, 0) 50%);
+        animation: flash-blue 1s infinite steps(1), sweep-blue 4s infinite linear;
+        animation-delay: 1.5s;
+    }
 
-  &.red {
-    right: -100%;
-    background: radial-gradient(ellipse at center, rgba(255, 50, 50, 0.5) 0%, rgba(255, 50, 50, 0) 60%);
-    animation: flash-red 2s infinite steps(1);
-  }
+    &.red {
+        right: -120%;
+        background: radial-gradient(ellipse at center, rgba(255, 50, 50, 0.6) 0%, rgba(255, 50, 50, 0) 50%);
+        animation: flash-red 1s infinite steps(1), sweep-red 4s infinite linear;
+        animation-delay: 1s;
+    }
 }
 
 @keyframes flash-red {
-  0%, 49.9% { opacity: 0.8; }
-  50%, 100% { opacity: 0; }
+    0%, 49.9% { opacity: 0.8; }
+    50%, 100% { opacity: 0; }
 }
 
 @keyframes flash-blue {
-  0%, 49.9% { opacity: 0.8; }
-  50%, 100% { opacity: 0; }
+    0%, 49.9% { opacity: 0; }
+    50%, 100% { opacity: 0.8; }
+}
+
+@keyframes sweep-red {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(-50px); }
+}
+
+@keyframes sweep-blue {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(50px); }
+}
+
+.wet-ground {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    height: 30%;
+    background: url('https://www.transparenttextures.com/patterns/wet-snow.png') repeat;
+    mix-blend-mode: overlay;
+    opacity: 0.2;
+    transform: perspective(100px) rotateX(30deg);
+    filter: brightness(0.8);
 }
 
 .logo-container {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 10;
-  opacity: 0;
-  animation: fade-in 1s forwards;
-  animation-delay: 2s;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1);
+    z-index: 10;
+    animation: dolly-in 10s ease-out forwards, logo-glitch 3.5s infinite alternate;
+    animation-delay: 1.5s;
+    opacity: 0; /* Starts invisible */
 }
-
 
 .logo-text {
-  color: #fff;
-  font-size: 5rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.2rem;
-  text-shadow: 
-    0 0 5px #fff,
-    0 0 10px #fff,
-    0 0 20px #0ff,
-    0 0 30px #0ff,
-    0 0 40px #0ff;
-    position: relative;
-    color: transparent;
-    display: inline-block;
+    color: #fff;
+    font-size: 5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.2rem;
+    text-shadow: 
+        0 0 5px #fff,
+        0 0 15px #fff,
+        0 0 30px #0ff,
+        0 0 50px #0ff;
+    animation: logo-flash 10s forwards;
+    animation-delay: 1.5s;
 }
 
-.logo-text::before {
-    content: attr(data-text);
+@keyframes logo-flash {
+    0% { opacity: 1; }
+    0.2% { opacity: 0; } 
+    100% { opacity: 1; }
+}
+
+
+@keyframes dolly-in {
+    from {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+    to {
+        transform: translate(-50%, -50%) scale(1.08);
+        opacity: 1;
+    }
+}
+
+@keyframes logo-glitch {
+    0%, 100% { text-shadow: 
+        0 0 5px #fff,
+        0 0 15px #fff,
+        0 0 30px #0ff,
+        0 0 50px #0ff; 
+    }
+    49% { text-shadow: 
+        0 0 5px #fff,
+        0 0 15px #fff,
+        0 0 30px #0ff,
+        0 0 50px #0ff; 
+    }
+    50% {
+        text-shadow: 
+            -2px 0 5px #f0f,
+            2px 0 5px #0ff;
+    }
+    51% { text-shadow: 
+        0 0 5px #fff,
+        0 0 15px #fff,
+        0 0 30px #0ff,
+        0 0 50px #0ff; 
+    }
+}
+
+.film-grain {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    color: white;
-    overflow: hidden;
-    animation: gta-reveal 2s ease-out forwards;
-    animation-delay: 2.5s;
+    background-image: url('https://www.transparenttextures.com/patterns/noise.png');
+    opacity: 0.1;
+    z-index: 15;
+    pointer-events: none;
+    animation: grain-flicker 0.5s infinite;
 }
 
-@keyframes fade-in {
-    to { opacity: 1; }
+@keyframes grain-flicker {
+    0%, 100% { opacity: 0.08; }
+    50% { opacity: 0.12; }
 }
 
-@keyframes gta-reveal {
-    from {
-        width: 0;
-    }
-    to {
-        width: 100%;
-    }
-}
-
-
-.film-grain {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image: url('https://www.transparenttextures.com/patterns/noise.png');
-  opacity: 0.08;
-  z-index: 1;
-  pointer-events: none;
+.vignette {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    box-shadow: inset 0 0 200px #000;
+    z-index: 16;
+    pointer-events: none;
 }

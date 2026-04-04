@@ -13,32 +13,35 @@ const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
     const logoText = "MAKOTI TRADERS";
 
     useEffect(() => {
-        // Attempt to play sounds automatically
+        // --- SOUND INITIALIZATION ---
         try {
             sirenSoundRef.current = new Audio('/assets/media/siren.mp3');
             sirenSoundRef.current.loop = true;
-            sirenSoundRef.current.volume = 0.3;
-            sirenSoundRef.current.play().catch(e => console.warn("Audio autoplay was blocked. User interaction is required to hear sound."));
-        } catch (e) {
+            sirenSoundRef.current.volume = 0.2;
+        } catch (e) { 
             console.error('Siren sound not found. Place it in /public/assets/media/siren.mp3');
         }
 
         try {
             clangSoundRef.current = new Audio('/assets/media/clang.mp3');
-            clangSoundRef.current.volume = 0.5;
+            clangSoundRef.current.volume = 0.6;
         } catch (e) {
             console.error('Clang sound not found. Place it in /public/assets/media/clang.mp3');
         }
 
-        // Sound synchronization
-        const soundInterval = setInterval(() => {
-            clangSoundRef.current?.play().catch(() => {});
-        }, 1000);
+        // --- TIMED SOUND EVENTS ---
+        const clangTimer = setTimeout(() => {
+            clangSoundRef.current?.play().catch(e => console.warn('Clang sound blocked'));
+        }, 1500); // The "Black Out" Start
 
-        // Sequence completion
+        const sirenTimer = setTimeout(() => {
+            sirenSoundRef.current?.play().catch(e => console.warn('Siren sound autoplay blocked.'));
+        }, 1500);
+
+        // --- SEQUENCE COMPLETION ---
         const sequenceTimer = setTimeout(() => {
             setShow(false);
-            // Fade out sounds
+            // Fade out siren sound
             if (sirenSoundRef.current) {
                 let vol = sirenSoundRef.current.volume;
                 const fadeOut = setInterval(() => {
@@ -52,11 +55,13 @@ const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
                 }, 100);
             }
             onLoadingComplete();
-        }, 9000); // Total duration of the cinematic sequence
+        }, 10000); // Total duration of the cinematic sequence
 
+        // --- CLEANUP --- 
         return () => {
+            clearTimeout(clangTimer);
+            clearTimeout(sirenTimer);
             clearTimeout(sequenceTimer);
-            clearInterval(soundInterval);
             sirenSoundRef.current?.pause();
             clangSoundRef.current?.pause();
         };
@@ -67,16 +72,17 @@ const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
     return (
         <div className='gta-loader'>
             <div className='scene'>
-                <div className='asphalt'></div>
                 <div className='siren-light red'></div>
                 <div className='siren-light blue'></div>
+                <div className='wet-ground'></div>
             </div>
 
             <div className='logo-container'>
-                <h1 className='logo-text' data-text={logoText}>{logoText}</h1>
+                <h1 className='logo-text'>{logoText}</h1>
             </div>
 
             <div className='film-grain'></div>
+            <div className='vignette'></div>
         </div>
     );
 };
