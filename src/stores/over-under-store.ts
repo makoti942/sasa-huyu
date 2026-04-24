@@ -1091,11 +1091,41 @@ export default class OverUnderStore {
         const sc = signal_line[signal_line.length - 1];
         const sp = signal_line[signal_line.length - 2];
 
+        // Reject crosses where the two lines were already hugging each other
+        // before the crossover. We require the gap on the bar BEFORE the
+        // cross to be at least 40 % of the average absolute histogram value
+        // over the previous 10 bars — this guarantees the lines were
+        // meaningfully apart and the cross is a genuine reversal, not a
+        // tiny wobble of two near-identical lines.
+        const sig_len = signal_line.length;
+        const lookback = Math.min(10, sig_len - 1);
+        let avg_abs_gap = 0;
+        if (lookback > 0) {
+            let total = 0;
+            for (let i = 1; i <= lookback; i++) {
+                const m_i = macd_line[macd_line.length - i];
+                const s_i = signal_line[sig_len - i];
+                total += Math.abs(m_i - s_i);
+            }
+            avg_abs_gap = total / lookback;
+        }
+        const prev_gap = Math.abs(mp - sp);
+        const min_gap = avg_abs_gap * 0.4;
+        const has_clear_separation = prev_gap >= min_gap;
+
         if (mp > sp && mc < sc && mc > 0 && sc > 0) {
-            this.addLog(`Rise/Fall: MACD crossed BELOW signal ABOVE zero (mc=${mc.toFixed(6)}, sc=${sc.toFixed(6)}). FALL!`);
+            if (!has_clear_separation) {
+                this.addLog(`Rise/Fall: SKIP cross — lines were too close before crossing (gap ${prev_gap.toFixed(6)} < min ${min_gap.toFixed(6)}).`);
+                return;
+            }
+            this.addLog(`Rise/Fall: MACD crossed BELOW signal ABOVE zero (mc=${mc.toFixed(6)}, sc=${sc.toFixed(6)}, prev gap=${prev_gap.toFixed(6)}). FALL!`);
             this.executeRiseFallTrade('PUT');
         } else if (mp < sp && mc > sc && mc < 0 && sc < 0) {
-            this.addLog(`Rise/Fall: MACD crossed ABOVE signal BELOW zero (mc=${mc.toFixed(6)}, sc=${sc.toFixed(6)}). RISE!`);
+            if (!has_clear_separation) {
+                this.addLog(`Rise/Fall: SKIP cross — lines were too close before crossing (gap ${prev_gap.toFixed(6)} < min ${min_gap.toFixed(6)}).`);
+                return;
+            }
+            this.addLog(`Rise/Fall: MACD crossed ABOVE signal BELOW zero (mc=${mc.toFixed(6)}, sc=${sc.toFixed(6)}, prev gap=${prev_gap.toFixed(6)}). RISE!`);
             this.executeRiseFallTrade('CALL');
         }
     }
