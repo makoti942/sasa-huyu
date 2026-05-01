@@ -1296,33 +1296,35 @@ export default class OverUnderStore {
         const isAboveZero = currentBar > 0;
         const isBelowZero = currentBar < 0;
 
-        // ── UPWARD MOMENTUM (overbought reversion) ──────────────────────────────
-        // When histogram is above 0 and growing upward, price is overbought → expect FALL
+        // ── FALL (Overbought Reversion) ──────────────────────────────
+        // Histogram above 0 and growing upward (0.1 → 0.2 → 0.3 → 0.4)
+        // Momentum exhaustion: expect reversal DOWN → place FALL
         if (isAboveZero && currentBar > prevBar) {
             // Growth sequence is valid only if we were already above 0 last tick
             if (prevBar > 0) {
                 this.rise_fall_v2_growth_counters[symbol]++;
-                this.addLog(`Rise/Fall V2 [${symbol}]: Upward momentum ${this.rise_fall_v2_growth_counters[symbol]}/4 (hist=${currentBar.toExponential(3)})`);
+                this.addLog(`Rise/Fall V2 [${symbol}]: FALL growth ${this.rise_fall_v2_growth_counters[symbol]}/4 (hist=${currentBar.toExponential(3)})`);
                 if (this.rise_fall_v2_growth_counters[symbol] >= 4) {
-                    this.addLog(`Rise/Fall V2 [${symbol}]: 4 consecutive upward momentum bars detected. Placing RISE (overbought reversal).`);
+                    this.addLog(`Rise/Fall V2 [${symbol}]: 4 consecutive FALL growth bars detected. Placing FALL contract (overbought exhaustion).`);
                     this.rise_fall_v2_growth_counters[symbol] = 0;
-                    this.executeRiseFallV2Trade('CALL', symbol);
+                    this.executeRiseFallV2Trade('PUT', symbol);
                 }
             } else {
                 // Crossed zero — reset
                 this.rise_fall_v2_growth_counters[symbol] = 1;
             }
-        // ── DOWNWARD MOMENTUM (oversold reversion) ───────────────────────────────
-        // When histogram is below 0 and growing downward, price is oversold → expect RISE
+        // ── RISE (Oversold Reversion) ──────────────────────────────
+        // Histogram below 0 and growing downward (-0.1 → -0.2 → -0.3 → -0.4)
+        // Momentum exhaustion: expect reversal UP → place RISE
         } else if (isBelowZero && currentBar < prevBar) {
             // Growth sequence is valid only if we were already below 0 last tick
             if (prevBar < 0) {
                 this.rise_fall_v2_growth_counters[symbol]++;
-                this.addLog(`Rise/Fall V2 [${symbol}]: Downward momentum ${this.rise_fall_v2_growth_counters[symbol]}/4 (hist=${currentBar.toExponential(3)})`);
+                this.addLog(`Rise/Fall V2 [${symbol}]: RISE growth ${this.rise_fall_v2_growth_counters[symbol]}/4 (hist=${currentBar.toExponential(3)})`);
                 if (this.rise_fall_v2_growth_counters[symbol] >= 4) {
-                    this.addLog(`Rise/Fall V2 [${symbol}]: 4 consecutive downward momentum bars detected. Placing FALL (oversold reversal).`);
+                    this.addLog(`Rise/Fall V2 [${symbol}]: 4 consecutive RISE growth bars detected. Placing RISE contract (oversold exhaustion).`);
                     this.rise_fall_v2_growth_counters[symbol] = 0;
-                    this.executeRiseFallV2Trade('PUT', symbol);
+                    this.executeRiseFallV2Trade('CALL', symbol);
                 }
             } else {
                 // Crossed zero — reset
