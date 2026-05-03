@@ -26,9 +26,7 @@ export const isTestLink = () => {
 export const isLocal = () => /localhost(:\d+)?$/i.test(window.location.hostname);
 
 const getDefaultServerURL = () => {
-    const server = 'ws';
-    const server_url = `${server}.derivws.com`;
-    return server_url;
+    return window.location.host;
 };
 
 /**

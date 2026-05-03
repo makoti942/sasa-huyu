@@ -12,7 +12,7 @@ let currentConnectionAppId = null;
  * @param {number} specificAppId - Optional specific app_id to use. If not provided, uses getAppId()
  */
 export const generateDerivApiInstance = (specificAppId = null) => {
-    const cleanedServer = getSocketURL().replace(/[^a-zA-Z0-9.]/g, '');
+    const cleanedServer = getSocketURL().replace(/[^a-zA-Z0-9.:-]/g, '');
     const appId = specificAppId !== null ? specificAppId : getAppId(); // Use specific app_id or read from localStorage
     const cleanedAppId = appId?.toString()?.replace?.(/[^a-zA-Z0-9]/g, '') ?? appId?.toString();
 
@@ -29,7 +29,7 @@ export const generateDerivApiInstance = (specificAppId = null) => {
         console.log(`🔗 [WEBSOCKET] Creating connection with specific App ID ${appId}`);
     }
 
-    const socket_url = `wss://${cleanedServer}/websockets/v3?app_id=${cleanedAppId}&l=${getInitialLanguage()}&brand=${website_name.toLowerCase()}`;
+    const socket_url = `wss://${cleanedServer}/api/v3?app_id=${cleanedAppId}&l=${getInitialLanguage()}&brand=${website_name.toLowerCase()}`;
 
     const deriv_socket = new WebSocket(socket_url);
     const deriv_api = new DerivAPIBasic({

@@ -1,8 +1,10 @@
 {
     "version": 2,
-    "buildCommand": "npm run build",
-    "outputDirectory": "dist",
     "rewrites": [
+        {
+            "source": "/api/v3/:path*",
+            "destination": "https://ws.derivws.com/websockets/v3/:path*"
+        },
         {
             "source": "/((?!assets|static|js|css|images|fonts|videos|media|xml|circles|pro-tools|service-worker.js).*)",
             "destination": "/index.html"
@@ -33,10 +35,6 @@
                 {
                     "key": "Content-Security-Policy",
                     "value": "frame-ancestors *"
-                },
-                {
-                    "key": "Access-Control-Allow-Origin",
-                    "value": "*"
                 }
             ]
         }
