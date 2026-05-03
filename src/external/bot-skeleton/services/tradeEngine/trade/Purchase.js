@@ -260,10 +260,14 @@ export default Engine =>
                 console.log('[Purchase] 📨 Subscribing to contract updates for:', buy.contract_id);
                 console.log('[Purchase] 📨 Current API account:', currentApiAccount);
                 console.log('[Purchase] 📨 Contract ID:', buy.contract_id);
-                console.log('[Purchase] 📨 Transaction ID:', buy.transaction_id                // Ensure subscription is set up - use doUntilDone to retry if needed
+                console.log('[Purchase] 📨 Transaction ID:', buy.transaction_id);
+                
+                let subscriptionPromise = null;
+                
+                // Ensure subscription is set up - use doUntilDone to retry if needed
                 try {
                     // CRITICAL: Send subscription request immediately with retry logic
-                    const subscriptionPromise = doUntilDone(() => {
+                    subscriptionPromise = doUntilDone(() => {
                         console.log('[Purchase] 📡 Sending contract subscription request...');
                         return api_base.api.send({ proposal_open_contract: 1, contract_id: buy.contract_id });
                     }, ['PriceMoved']);
@@ -288,7 +292,11 @@ export default Engine =>
                         if (originalAfterPromise) originalAfterPromise();
                     };
                 }
-            };criptionPromise,
+
+                // Handle subscription promise with timeout
+                if (subscriptionPromise) {
+                    Promise.all([
+                        subscriptionPromise,
                         new Promise((_, reject) => setTimeout(() => reject(new Error('Subscription timeout')), 5000))
                     ])
                         .then(() => {
@@ -307,15 +315,6 @@ export default Engine =>
                                 }
                             }, 500);
                         });
-                } catch (error) {
-                    console.error('[Purchase] ❌ Error setting up subscription:', error);
-                    // Last resort: try sending directly
-                    try {
-                        api_base.api.send({ proposal_open_contract: 1, contract_id: buy.contract_id });
-                        console.log('[Purchase] ✅ Contract subscription sent (fallback)');
-                    } catch (fallbackErr) {
-                        console.error('[Purchase] ❌ Fallback subscription failed:', fallbackErr);
-                    }
                 }
 
                 if (this.is_proposal_subscription_required) {
