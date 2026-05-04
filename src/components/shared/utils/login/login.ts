@@ -29,7 +29,7 @@ export const loginUrl = ({ language, is_new_account = false }: TLoginUrl & { is_
     const server_url = LocalStore.get('config.server_url');
     const getOAuthUrl = () => {
         const redirect_uri = `${window.location.origin}/callback`;
-        const endpoint = is_new_account ? 'auth.deriv.com/oauth2/auth' : 'oauth.deriv.com/oauth2/authorize';
+        const endpoint = is_new_account ? 'auth.deriv.com/oauth2/authorize' : 'oauth.deriv.com/oauth2/authorize';
         return `https://${endpoint}?app_id=${getAppId()}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home`;
     };
 

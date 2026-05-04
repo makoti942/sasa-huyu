@@ -113,9 +113,9 @@ export const generateOAuthURL = (is_new_account = false, state = '') => {
         return `https://${server_url}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
     }
 
-    // New accounts: auth.deriv.com/oauth2/auth
+    // New accounts: auth.deriv.com/oauth2/authorize
     if (is_new_account) {
-        return `https://auth.deriv.com/oauth2/auth?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
+        return `https://auth.deriv.com/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
     }
 
     // Old accounts: oauth.deriv.com/oauth2/authorize
