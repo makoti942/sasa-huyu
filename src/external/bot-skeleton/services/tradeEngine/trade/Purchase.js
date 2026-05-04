@@ -1,3 +1,4 @@
+import { localize } from '@deriv-com/translations';
 import { LogTypes } from '../../../constants/messages';
 import { api_base } from '../../api/api-base';
 import ApiHelpers from '../../api/api-helpers';
