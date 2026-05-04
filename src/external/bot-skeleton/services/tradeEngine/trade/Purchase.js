@@ -168,7 +168,7 @@ export default Engine =>
                 buy_price: contract.ask_price,
                 sell_price: contract.profit > 0 ? contract.payout : 0,
                 transaction_ids: { buy: virtual_id, sell: virtual_id + 1 },
-                display_transaction_ids: { buy: `V${virtual_id}`, sell: `V${virtual_id + 1}` },
+                display_transaction_ids: { buy: String(virtual_id), sell: String(virtual_id + 1) },
                 entry_tick: contract.entry_spot,
                 exit_tick: contract.exit_spot,
                 entry_tick_time: now - 1,
@@ -177,6 +177,8 @@ export default Engine =>
                 display_name: win ? localize('Virtual Win') : localize('Virtual Loss'),
                 is_virtual: true,
                 is_completed: true,
+                symbol: this.tradeOptions.symbol,
+                underlying: this.tradeOptions.symbol,
             };
 
             // Update internal statistics so martingale logic can see the virtual results
