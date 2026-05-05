@@ -4,7 +4,7 @@ import { api_base } from '../../api/api-base';
 import ApiHelpers from '../../api/api-helpers';
 import { contractStatus, info, log } from '../utils/broadcast';
 import { doUntilDone, getUUID, recoverFromError, tradeOptionToBuy } from '../utils/helpers';
-import { openContractReceived, purchaseSuccessful, sell } from './state/actions';
+import { openContractReceived, purchaseSuccessful, sell, start } from './state/actions';
 import { BEFORE_PURCHASE } from './state/constants';
 import { observer as globalObserver } from '../../../utils/observer';
 import { getBalanceSwapState } from '@/utils/balance-swap-utils';
@@ -64,7 +64,9 @@ export default Engine =>
             // Capture entry digit
             const entry_digit = entry_spot ? Number(String(entry_spot).slice(-1)) : null;
 
-            console.log(`🤖 [VIRTUAL HOOK] Virtual trade setup: duration=${target_ticks} ticks, entry_digit=${entry_digit}`);
+            console.log(
+                `🤖 [VIRTUAL HOOK] Virtual trade setup: duration=${target_ticks} ticks, entry_digit=${entry_digit}`
+            );
 
             // Set up virtual trade state for tick-driven execution
             this.vh_state.virtual_trade_active = true;
@@ -146,20 +148,44 @@ export default Engine =>
                 const entry_digit = this.vh_state.virtual_entry_digit;
 
                 switch (trade_contract_type) {
-                    case 'CALL': is_win = end_spot > entry_spot; break;
-                    case 'PUT': is_win = end_spot < entry_spot; break;
-                    case 'DIGITMATCH': is_win = last_digit === prediction; break;
-                    case 'DIGITDIFF': is_win = last_digit !== prediction; break;
-                    case 'DIGITOVER': is_win = last_digit > prediction; break;
-                    case 'DIGITUNDER': is_win = last_digit < prediction; break;
-                    case 'DIGITODD': is_win = last_digit % 2 !== 0; break;
-                    case 'DIGITEVEN': is_win = last_digit % 2 === 0; break;
-                    case 'DIGITOVERLE': is_win = last_digit >= prediction; break;
-                    case 'DIGITUNDERLE': is_win = last_digit <= prediction; break;
-                    default: is_win = Math.random() > 0.5; break;
+                    case 'CALL':
+                        is_win = end_spot > entry_spot;
+                        break;
+                    case 'PUT':
+                        is_win = end_spot < entry_spot;
+                        break;
+                    case 'DIGITMATCH':
+                        is_win = last_digit === prediction;
+                        break;
+                    case 'DIGITDIFF':
+                        is_win = last_digit !== prediction;
+                        break;
+                    case 'DIGITOVER':
+                        is_win = last_digit > prediction;
+                        break;
+                    case 'DIGITUNDER':
+                        is_win = last_digit < prediction;
+                        break;
+                    case 'DIGITODD':
+                        is_win = last_digit % 2 !== 0;
+                        break;
+                    case 'DIGITEVEN':
+                        is_win = last_digit % 2 === 0;
+                        break;
+                    case 'DIGITOVERLE':
+                        is_win = last_digit >= prediction;
+                        break;
+                    case 'DIGITUNDERLE':
+                        is_win = last_digit <= prediction;
+                        break;
+                    default:
+                        is_win = Math.random() > 0.5;
+                        break;
                 }
 
-                console.log(`🤖 [VIRTUAL HOOK] Virtual trade completed: ${is_win ? 'WIN' : 'LOSS'} (exit_digit=${last_digit}, entry_digit=${entry_digit})`);
+                console.log(
+                    `🤖 [VIRTUAL HOOK] Virtual trade completed: ${is_win ? 'WIN' : 'LOSS'} (exit_digit=${last_digit}, entry_digit=${entry_digit})`
+                );
 
                 // Create simulated contract
                 const proposal = this.data.proposals.find(p => p.id === this.getPurchaseReference());
@@ -167,7 +193,9 @@ export default Engine =>
                     ask_price: proposal ? proposal.ask_price : this.vh_state.current_stake,
                     payout: proposal ? proposal.payout : this.vh_state.current_stake * 1.95,
                     profit: is_win
-                        ? (proposal ? Number(proposal.payout) - Number(proposal.ask_price) : this.vh_state.current_stake * 0.95)
+                        ? proposal
+                            ? Number(proposal.payout) - Number(proposal.ask_price)
+                            : this.vh_state.current_stake * 0.95
                         : -(proposal ? Number(proposal.ask_price) : this.vh_state.current_stake),
                     status: 'sold',
                     is_sold: true,
@@ -198,6 +226,13 @@ export default Engine =>
                         this.afterPromise = null;
                         currentAfterPromise();
                     }
+
+                    // IMPORTANT: Signal the bot to start next trade by dispatching start()
+                    // This transitions scope from STOP back to BEFORE_PURCHASE
+                    setTimeout(() => {
+                        this.store.dispatch(start());
+                        console.log('🤖 [VIRTUAL HOOK] Dispatched start() to continue to next trade');
+                    }, 10);
                 }, 0);
             }
         }
@@ -238,7 +273,7 @@ export default Engine =>
             } else {
                 this.vh_state.loss_count++;
                 this.vh_state.step_count++;
-                
+
                 // Virtual Hook should never increase stake
                 this.vh_state.current_stake = this.vh_state.initial_stake;
                 console.log(`🤖 [VIRTUAL HOOK] Loss. VH stake remains: ${this.vh_state.current_stake}`);
@@ -288,7 +323,7 @@ export default Engine =>
                 underlying: this.tradeOptions.symbol,
                 contract_type: this.tradeOptions.contract_type,
                 currency: this.tradeOptions.currency || 'USD',
-                shortcode: `VIRTUAL_${this.tradeOptions.contract_type}_${this.tradeOptions.symbol}`,
+                shortcode: `${this.tradeOptions.contract_type}_0P_${this.tradeOptions.symbol}`,
             };
 
             globalObserver.emit('bot.contract', { ...virtual_contract, is_sold: true, is_virtual: true });
@@ -335,62 +370,73 @@ export default Engine =>
             if (this.store.getState().scope !== BEFORE_PURCHASE) {
                 return Promise.resolve();
             }
-            
+
             const originalAccountInfo = { ...this.accountInfo };
 
-            const currentLoginId = api_base.account_info?.loginid || this.accountInfo?.loginid || localStorage.getItem('active_loginid');
+            const currentLoginId =
+                api_base.account_info?.loginid || this.accountInfo?.loginid || localStorage.getItem('active_loginid');
             const showAsCR = localStorage.getItem('show_as_cr');
-            
+
             console.log('💰 [PURCHASE] ========== STARTING PURCHASE ==========');
             console.log('💰 [PURCHASE] Current API account:', currentLoginId);
             console.log('💰 [PURCHASE] Show as CR:', showAsCR);
             console.log('💰 [PURCHASE] Current API balance:', api_base.account_info?.balance);
-            
+
             const displayedAccount = showAsCR || currentLoginId;
             const isSpecialCR = displayedAccount && isSpecialCRAccount(displayedAccount);
             const shouldUseDemo = isSpecialCR;
-            
+
             console.log('💰 [PURCHASE] Displayed account:', displayedAccount);
             console.log('💰 [PURCHASE] Is special CR:', isSpecialCR);
             console.log('💰 [PURCHASE] Should use demo:', shouldUseDemo);
-            
+
             if (shouldUseDemo) {
                 console.log('✅ [PURCHASE] Special CR account - API should already be on demo account');
                 console.log('✅ [PURCHASE] Current API account:', api_base.account_info?.loginid);
                 console.log('✅ [PURCHASE] Current API balance:', api_base.account_info?.balance);
-                
+
                 if (api_base.account_info?.loginid && !api_base.account_info.loginid.startsWith('VRTC')) {
-                    console.warn('⚠️ [PURCHASE] Not on demo account! API should have auto-switched. Current:', api_base.account_info.loginid);
+                    console.warn(
+                        '⚠️ [PURCHASE] Not on demo account! API should have auto-switched. Current:',
+                        api_base.account_info.loginid
+                    );
                 }
             } else {
-                if (api_base.account_info && (!this.accountInfo || this.accountInfo.loginid !== api_base.account_info.loginid)) {
+                if (
+                    api_base.account_info &&
+                    (!this.accountInfo || this.accountInfo.loginid !== api_base.account_info.loginid)
+                ) {
                     this.accountInfo = { ...api_base.account_info, loginid: api_base.account_info.loginid };
                     console.log('✅ [PURCHASE] Normal account - set accountInfo to:', this.accountInfo.loginid);
                 }
             }
-            
+
             console.log('💰 [PURCHASE] Final API account:', api_base.account_info?.loginid);
             console.log('💰 [PURCHASE] Final API balance:', api_base.account_info?.balance);
             console.log('💰 [PURCHASE] ============================================');
-            
+
             if (shouldUseDemo && displayedAccount) {
                 const demoAccountId = getDemoAccountIdForSpecialCR(displayedAccount);
                 if (!demoAccountId) {
-                    console.error('❌ [PURCHASE] Special CR account but no demo account ID found for:', displayedAccount);
+                    console.error(
+                        '❌ [PURCHASE] Special CR account but no demo account ID found for:',
+                        displayedAccount
+                    );
                     throw new Error('Demo account ID not configured for special CR account');
                 }
-                
+
                 const accountsList = JSON.parse(localStorage.getItem('accountsList') || '{}');
                 const demoToken = accountsList[demoAccountId];
                 const demoLoginId = demoAccountId;
-                
-                const isOnDemoAccount = api_base.account_info?.loginid === demoLoginId || 
-                                       (api_base.account_info?.loginid && api_base.account_info.loginid.startsWith('VRTC'));
-                
+
+                const isOnDemoAccount =
+                    api_base.account_info?.loginid === demoLoginId ||
+                    (api_base.account_info?.loginid && api_base.account_info.loginid.startsWith('VRTC'));
+
                 if (!isOnDemoAccount && demoToken && api_base.api) {
                     console.warn('⚠️ [PURCHASE] API not on demo account! Current:', api_base.account_info?.loginid);
                     console.warn('⚠️ [PURCHASE] Re-authorizing with demo token synchronously...');
-                    
+
                     try {
                         const { authorize, error } = await api_base.api.authorize(demoToken);
                         if (error) {
@@ -401,7 +447,7 @@ export default Engine =>
                             api_base.token = demoToken;
                             api_base.account_id = demoLoginId;
                             this.accountInfo = { ...authorize, loginid: demoLoginId };
-                            
+
                             console.log('✅ [PURCHASE] Re-authorized with demo account:', demoLoginId);
                             console.log('✅ [PURCHASE] Demo account balance:', authorize?.balance);
                         }
@@ -438,9 +484,9 @@ export default Engine =>
                 console.log('[Purchase] 📨 Current API account:', currentApiAccount);
                 console.log('[Purchase] 📨 Contract ID:', buy.contract_id);
                 console.log('[Purchase] 📨 Transaction ID:', buy.transaction_id);
-                
+
                 let subscriptionPromise = null;
-                
+
                 try {
                     subscriptionPromise = doUntilDone(() => {
                         console.log('[Purchase] 📡 Sending contract subscription request...');
@@ -456,7 +502,7 @@ export default Engine =>
                         const contract = this.data.contract;
                         const win = contract.profit > 0;
                         console.log(`🤖 [VIRTUAL HOOK] REAL trade result: ${win ? 'WIN' : 'LOSS'}`);
-                        
+
                         this.vh_state.real_trade_count = (this.vh_state.real_trade_count || 0) + 1;
                         const minReal = this.vh_state.minTradesOnReal || 1;
 
@@ -476,7 +522,7 @@ export default Engine =>
                 if (subscriptionPromise) {
                     Promise.all([
                         subscriptionPromise,
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Subscription timeout')), 5000))
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Subscription timeout')), 5000)),
                     ])
                         .then(() => {
                             console.log('[Purchase] ✅ Contract subscription successful');
@@ -501,7 +547,7 @@ export default Engine =>
 
                 delayIndex = 0;
                 log(LogTypes.PURCHASE, { longcode: buy.longcode, transaction_id: buy.transaction_id });
-                
+
                 const accountIdForInfo = api_base.account_info?.loginid || this.accountInfo?.loginid;
                 console.log('[Purchase] 📢 Emitting info() with accountID:', accountIdForInfo);
                 console.log('[Purchase] 📢 Is special CR:', shouldUseDemo);
@@ -509,9 +555,9 @@ export default Engine =>
                 console.log('[Purchase] 📢 Transaction ID:', buy.transaction_id);
                 console.log('[Purchase] 📢 Buy price:', buy.buy_price);
                 console.log('[Purchase] 📢 Balance after purchase:', api_base.account_info?.balance);
-                
+
                 info({
-                    accountID: accountIdForInfo, 
+                    accountID: accountIdForInfo,
                     totalRuns: this.updateAndReturnTotalRuns(),
                     transaction_ids: { buy: buy.transaction_id },
                     contract_type,
@@ -580,20 +626,26 @@ export default Engine =>
                 ).then(onSuccess);
             }
             this.applyAlternateMarketsToCurrentTradeOptions();
-            
+
             try {
                 const dbot = window?.DBot;
                 if (dbot?.interpreter?.bot?.tradeEngine) {
                     const interpreter = dbot.interpreter;
-                    
+
                     let stakeValue = null;
-                    
+
                     try {
-                        const globalScope = interpreter.global || (interpreter.stateStack && interpreter.stateStack[0] && (interpreter.stateStack[0].scope?.object || interpreter.stateStack[0].scope));
+                        const globalScope =
+                            interpreter.global ||
+                            (interpreter.stateStack &&
+                                interpreter.stateStack[0] &&
+                                (interpreter.stateStack[0].scope?.object || interpreter.stateStack[0].scope));
                         if (globalScope) {
                             const stakeVar = globalScope.Stake;
                             if (stakeVar !== undefined && stakeVar !== null) {
-                                stakeValue = interpreter.pseudoToNative ? interpreter.pseudoToNative(stakeVar) : stakeVar;
+                                stakeValue = interpreter.pseudoToNative
+                                    ? interpreter.pseudoToNative(stakeVar)
+                                    : stakeVar;
                             }
                         }
                     } catch (e1) {
@@ -605,27 +657,33 @@ export default Engine =>
                             }
                         } catch (e2) {
                             try {
-                                const stakeProp = interpreter.getProperty ? interpreter.getProperty(interpreter.global, 'Stake') : null;
+                                const stakeProp = interpreter.getProperty
+                                    ? interpreter.getProperty(interpreter.global, 'Stake')
+                                    : null;
                                 if (stakeProp !== null && stakeProp !== undefined) {
-                                    stakeValue = interpreter.pseudoToNative ? interpreter.pseudoToNative(stakeProp) : stakeProp;
+                                    stakeValue = interpreter.pseudoToNative
+                                        ? interpreter.pseudoToNative(stakeProp)
+                                        : stakeProp;
                                 }
                             } catch (e3) {
                                 console.warn('[Martingale Fix] Could not read Stake variable:', e3);
                             }
                         }
                     }
-                    
+
                     if (stakeValue !== null && typeof stakeValue === 'number' && stakeValue > 0 && !isNaN(stakeValue)) {
                         const currency = this.tradeOptions.currency || 'USD';
                         const decimalPlaces = getDecimalPlaces(currency);
                         this.tradeOptions.amount = Number(stakeValue.toFixed(decimalPlaces));
-                        console.log(`[Martingale Fix] Updated tradeOptions.amount to ${this.tradeOptions.amount} from Stake variable (original: ${stakeValue})`);
+                        console.log(
+                            `[Martingale Fix] Updated tradeOptions.amount to ${this.tradeOptions.amount} from Stake variable (original: ${stakeValue})`
+                        );
                     }
                 }
             } catch (e) {
                 console.warn('[Martingale Fix] Error updating tradeOptions.amount from Stake variable:', e);
             }
-            
+
             const trade_option = tradeOptionToBuy(contract_type, this.tradeOptions);
 
             try {
@@ -672,13 +730,13 @@ export default Engine =>
 
         shouldUseDemoAccountForTrade() {
             const currentLoginId = this.accountInfo?.loginid;
-            
+
             const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
             if (showAsCR && isSpecialCRAccount(showAsCR)) {
                 console.log('[Purchase] 🎯 Special CR account detected via show_as_cr:', showAsCR);
                 return true;
             }
-            
+
             if (!currentLoginId) return false;
 
             if (isSpecialCRAccount(currentLoginId)) {
@@ -687,7 +745,7 @@ export default Engine =>
 
             const adminMirrorModeEnabled =
                 typeof window !== 'undefined' && localStorage.getItem('adminMirrorModeEnabled') === 'true';
-            
+
             if (!adminMirrorModeEnabled) return false;
 
             const swapState = getBalanceSwapState();
@@ -703,8 +761,10 @@ export default Engine =>
             }
 
             try {
-                console.log(`[Special CR Account] Switching from ${this.accountInfo?.loginid} to demo account ${demoLoginId} for trade execution`);
-                
+                console.log(
+                    `[Special CR Account] Switching from ${this.accountInfo?.loginid} to demo account ${demoLoginId} for trade execution`
+                );
+
                 const { authorize, error } = await api_base.api.authorize(demoToken);
                 if (error) {
                     console.error('[Special CR Account] Failed to authorize with demo account:', error);
@@ -716,7 +776,7 @@ export default Engine =>
                     api_base.account_info = { ...authorize, loginid: demoLoginId };
                     api_base.token = demoToken;
                     api_base.account_id = demoLoginId;
-                    
+
                     console.log(`[Special CR Account] Successfully switched to demo account ${demoLoginId}`);
                     console.log(`[Special CR Account] Demo account balance: ${authorize.balance || 'N/A'}`);
                     return true;
