@@ -49,8 +49,11 @@
         }
 
         &-content {
-            height: 18px;
+            min-height: 18px;
+            height: auto;
             margin-bottom: 4px;
+            overflow: visible;
+            white-space: nowrap;
 
             @include typeface(--small-center-normal-black, none);
         }
@@ -116,15 +119,16 @@
 
     &__footer {
         text-align: center;
-
-        @include flex-center(space-between);
-
-        flex-direction: column;
+        display: flex;
+        align-items: center;
+        justify-content: center;
 
         &-button {
-            width: 318px;
+            width: auto;
+            min-width: 12rem;
             height: 32px !important;
-            margin: 12px 24px;
+            padding: 0 2.4rem;
+            margin: 10px auto;
 
             // Make reset button text theme-responsive - multiple overrides
             color: var(--text-prominent) !important;
