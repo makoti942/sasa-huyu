@@ -30,7 +30,7 @@ export default Engine =>
             // tradeOptions object (it stores contractTypes as a plural array instead).
             // Using the wrong source caused virtual_contract_type to always be undefined,
             // which made the win/loss switch fall to its default (is_win = false) every time.
-            const { duration, duration_unit, symbol, prediction } = this.tradeOptions;
+            const { duration, duration_unit, symbol } = this.tradeOptions;
 
             let target_ticks = 0;
             if (duration_unit === 't') {
@@ -40,15 +40,37 @@ export default Engine =>
                 target_ticks = Math.ceil(duration_seconds);
             }
 
+            // Resolve the actual prediction/barrier in order of priority:
+            //  1. window.BinaryBotCustomPrediction — set dynamically by the "set custom prediction" block
+            //  2. The matching proposal's barrier — what Deriv actually accepted for this contract type
+            //  3. this.tradeOptions.prediction — the static value from the Trade Definition block
+            const matching_proposal = this.data.proposals.find(
+                p => p.contract_type === contract_type && p.purchase_reference === this.getPurchaseReference()
+            );
+            const proposal_barrier =
+                matching_proposal?.barrier !== undefined ? Number(matching_proposal.barrier) : undefined;
+
+            const custom_prediction =
+                typeof window !== 'undefined' && window.BinaryBotCustomPrediction !== undefined
+                    ? Number(window.BinaryBotCustomPrediction)
+                    : undefined;
+
+            const resolved_prediction =
+                custom_prediction !== undefined
+                    ? custom_prediction
+                    : proposal_barrier !== undefined
+                    ? proposal_barrier
+                    : this.tradeOptions.prediction;
+
             console.log(
-                `🤖 [VIRTUAL HOOK] Initiating trade: type=${contract_type}, duration=${target_ticks} ticks. Waiting for entry tick.`
+                `🤖 [VIRTUAL HOOK] Initiating trade: type=${contract_type}, prediction=${resolved_prediction}, duration=${target_ticks} ticks.`
             );
 
             this.vh_state.virtual_trade_active = true;
             this.vh_state.virtual_tick_count = 0;
             this.vh_state.virtual_target_duration = target_ticks;
             this.vh_state.virtual_contract_type = contract_type;
-            this.vh_state.virtual_prediction = prediction;
+            this.vh_state.virtual_prediction = resolved_prediction;
             this.vh_state.virtual_entry_spot = 0;
             this.vh_state.entry_spot_captured = false;
             this.vh_state.last_tick_epoch = null;
