@@ -209,14 +209,16 @@ export default Engine =>
                 }. Rationale: ${result_details}`
             );
             
-            const proposal = this.data.proposals.find(p => p.id === this.getPurchaseReference());
+            // Virtual trades no longer use proposals — calculate profit directly from stake.
+            // Win:  net profit = ~95% of stake (you get back 1.95x, net gain is 0.95x)
+            // Loss: net profit = -stake (you lose what you staked)
+            // NOTE: The old code had `stake * 0.95 - stake = -0.05 * stake` for wins,
+            // which is negative — causing updateVirtualTotals to count every win as a loss.
+            const stake = this.vh_state.current_stake || this.tradeOptions.amount || 1;
             const simulated_contract = {
-                ask_price: proposal ? proposal.ask_price : this.vh_state.current_stake,
-                payout: proposal ? proposal.payout : this.vh_state.current_stake * 1.95,
-                profit: is_win
-                    ? (proposal ? Number(proposal.payout) : this.vh_state.current_stake * 0.95) -
-                      (proposal ? Number(proposal.ask_price) : this.vh_state.current_stake)
-                    : -(proposal ? Number(proposal.ask_price) : this.vh_state.current_stake),
+                ask_price: stake,
+                payout: stake * 1.95,
+                profit: is_win ? stake * 0.95 : -stake,
                 status: 'sold',
                 is_sold: true,
                 // Store the formatted strings so the run log preserves trailing zeros
