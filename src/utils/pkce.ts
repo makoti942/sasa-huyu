@@ -69,6 +69,7 @@ export async function redirectToNewAccountsLogin() {
     new_auth_url.searchParams.set('state', state);
     new_auth_url.searchParams.set('code_challenge', challenge);
     new_auth_url.searchParams.set('code_challenge_method', 'S256');
+    new_auth_url.searchParams.set('prompt', 'consent');
 
     window.location.assign(new_auth_url.toString());
 }
