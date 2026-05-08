@@ -27,6 +27,7 @@ export default defineConfig({
         include: [/node_modules\/@deriv-com\/translations/],
         define: {
             'process.env': {
+                NODE_ENV: JSON.stringify(process.env.NODE_ENV || 'development'),
                 TRANSLATIONS_CDN_URL: JSON.stringify(process.env.TRANSLATIONS_CDN_URL),
                 R2_PROJECT_NAME: JSON.stringify(process.env.R2_PROJECT_NAME),
                 CROWDIN_BRANCH_NAME: JSON.stringify(process.env.CROWDIN_BRANCH_NAME),
@@ -55,6 +56,36 @@ export default defineConfig({
                 './src/components/shims/ui-submenu/index.js'
             ),
             '../Submenu /index.js': path.resolve(__dirname, './src/components/shims/ui-submenu/index.js'),
+            // Redirect quill-icons sub-paths to the complete nested copy inside @deriv-com/quill-ui
+            '@deriv/quill-icons/Legacy': path.resolve(
+                __dirname,
+                'node_modules/@deriv-com/quill-ui/node_modules/@deriv/quill-icons/dist/esm/react/Legacy'
+            ),
+            '@deriv/quill-icons/LabelPaired': path.resolve(
+                __dirname,
+                'node_modules/@deriv-com/quill-ui/node_modules/@deriv/quill-icons/dist/esm/react/LabelPaired'
+            ),
+            '@deriv/quill-icons/Standalone': path.resolve(
+                __dirname,
+                'node_modules/@deriv-com/quill-ui/node_modules/@deriv/quill-icons/dist/esm/react/Standalone'
+            ),
+            '@deriv/quill-icons/Flags': path.resolve(
+                __dirname,
+                'node_modules/@deriv-com/quill-ui/node_modules/@deriv/quill-icons/dist/esm/react/Flags'
+            ),
+            '@deriv/quill-icons/Illustration': path.resolve(
+                __dirname,
+                'node_modules/@deriv-com/quill-ui/node_modules/@deriv/quill-icons/dist/esm/react/Illustration'
+            ),
+            '@deriv/quill-icons/Logo': path.resolve(
+                __dirname,
+                'node_modules/@deriv-com/quill-ui/node_modules/@deriv/quill-icons/dist/esm/react/Logo'
+            ),
+            // Stub object.fromentries to avoid pulling in broken es-abstract/2024 dependencies
+            'object.fromentries': path.resolve(
+                __dirname,
+                'src/components/shims/object-fromentries/index.js'
+            ),
             '@/external': path.resolve(__dirname, './src/external'),
             '@/components': path.resolve(__dirname, './src/components'),
             '@/hooks': path.resolve(__dirname, './src/hooks'),

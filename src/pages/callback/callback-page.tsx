@@ -45,24 +45,21 @@ const PkceCallbackHandler = () => {
                 if (!code) throw new Error('No authorization code found in URL.');
                 if (!verifier) throw new Error('PKCE verifier missing. Please try logging in again.');
 
-                const tokenRes = await fetch('https://auth.deriv.com/oauth2/token', {
+                const tokenRes = await fetch('/api/token-exchange', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Deriv-App-ID': PKCE_CLIENT_ID,
-                    },
-                    body: new URLSearchParams({
-                        grant_type: 'authorization_code',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
                         code,
                         redirect_uri: PKCE_REDIRECT_URI,
                         client_id: PKCE_CLIENT_ID,
                         code_verifier: verifier,
-                    }).toString(),
+                    }),
                 });
 
                 if (!tokenRes.ok) {
-                    const err = await tokenRes.text();
-                    throw new Error(`Token exchange failed: ${err}`);
+                    let errBody = '';
+                    try { errBody = await tokenRes.text(); } catch (_) {}
+                    throw new Error(`Token exchange failed (HTTP ${tokenRes.status}): ${errBody}`);
                 }
 
                 const tokenData = await tokenRes.json();
@@ -71,14 +68,15 @@ const PkceCallbackHandler = () => {
 
                 localStorage.removeItem(PKCE_LOCAL_STORAGE_KEY);
 
-                const legacyRes = await fetch('https://auth.deriv.com/oauth2/legacy/tokens', {
+                const legacyRes = await fetch('/api/legacy-tokens', {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${access_token}` },
                 });
 
                 if (!legacyRes.ok) {
-                    const err = await legacyRes.text();
-                    throw new Error(`Legacy token fetch failed: ${err}`);
+                    let errBody = '';
+                    try { errBody = await legacyRes.text(); } catch (_) {}
+                    throw new Error(`Legacy token fetch failed (HTTP ${legacyRes.status}): ${errBody}`);
                 }
 
                 const legacyData = await legacyRes.json();
@@ -119,7 +117,8 @@ const PkceCallbackHandler = () => {
                 window.location.replace(`${window.location.origin}/?account=${selected_currency}`);
             } catch (e: any) {
                 console.error('[PKCE Callback]', e);
-                setErrorMsg(e?.message ?? 'An unexpected error occurred.');
+                const msg = e?.message ?? 'An unexpected error occurred.';
+                setErrorMsg(msg + (e?.stack ? `\n\n${e.stack}` : ''));
                 setStatus('error');
             }
         };
