@@ -2,7 +2,7 @@
  * New OTP-based Deriv WebSocket manager.
  *
  * Replaces the old pattern of:
- *   new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=101585")
+ *   new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=337")
  *   + { authorize: token } message
  *
  * New pattern:

@@ -1,5 +1,6 @@
 import Cookies from 'js-cookie';
 import { action, makeObservable, reaction, when } from 'mobx';
+import { isLoggedIn as isPkceLoggedIn } from '@/utils/auth';
 import { BOT_RESTRICTED_COUNTRIES_LIST } from '@/components/layout/header/utils';
 import {
     ContentFlag,
@@ -91,7 +92,7 @@ export default class AppStore {
         const is_tmb_enabled = window.is_tmb_enabled === true;
         const isSingleLoggingIn =
             window.location.pathname === '/callback' ||
-            (Cookies.get('logged_state') === 'true' &&
+            ((Cookies.get('logged_state') === 'true' || isPkceLoggedIn()) &&
                 !is_tmb_enabled &&
                 Object.keys(JSON.parse(localStorage.getItem('accountsList') || '{}')).length === 0);
 

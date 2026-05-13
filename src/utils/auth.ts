@@ -1,8 +1,8 @@
 /*
  * New Deriv OAuth2 PKCE auth module.
  *
- * All tokens live exclusively in sessionStorage — never cookies, never localStorage.
- * SessionStorage is tab-scoped, which keeps login state off disk and isolated per tab.
+ * Access token lives in sessionStorage (tab-scoped).
+ * logged_state cookie is kept in sync so legacy layout/store code can read it.
  *
  * Exports:
  *   startLogin()       — generate PKCE codes → redirect to auth.deriv.com (SAME TAB)
@@ -12,6 +12,7 @@
  *   logout()           — clear all auth state → redirect to /
  *   getAuthHeaders()   — {Authorization, Deriv-App-ID, Content-Type} for API calls
  */
+import Cookies from 'js-cookie';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const CLIENT_ID   = '337DJLKi2OJ4VsyFSLIt9';
@@ -198,6 +199,9 @@ export async function handleCallback(): Promise<string> {
     sessionStorage.setItem(K_TOKEN_EXPIRY, String(Date.now() + expiresIn * 1000));
     sessionStorage.removeItem(K_CODE_VERIFIER); // consumed
 
+    // ── Sync logged_state cookie (legacy layout/store code checks this) ───────
+    Cookies.set('logged_state', 'true', { path: '/', expires: 1 });
+
     // ── Fetch legacy account tokens (best-effort) ───────────────────────────
     // The legacy tokens (acct1/token1/cur1) are Deriv account tokens that the
     // trading bot WebSocket layer still needs for authentication.
@@ -272,6 +276,9 @@ export function logout(): void {
     sessionStorage.removeItem(K_TOKEN_EXPIRY);
     sessionStorage.removeItem(K_CODE_VERIFIER);
     sessionStorage.removeItem(K_OAUTH_STATE);
+
+    // Sync logged_state cookie so legacy layout/store code sees the logout
+    Cookies.set('logged_state', 'false', { path: '/' });
 
     // Legacy system — clear so the app shows the logged-out state
     const legacyKeys = [

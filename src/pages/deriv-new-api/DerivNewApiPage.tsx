@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { logout } from '@/utils/auth';
 import {
     connectPublicWebSocket,
     connectTradingWebSocket,
     fetchDerivAccounts,
     getAccountOtp,
     isAuthenticated,
-    logout,
 } from '@/utils/deriv-rest-client';
 import { startLogin, startSignup } from '@/utils/pkce';
 import './DerivNewApiPage.scss';
@@ -35,7 +35,7 @@ const DerivNewApiPage: React.FC = () => {
     const closePubWsRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
-        isAuthenticated().then(setAuthed);
+        setAuthed(isAuthenticated());
     }, []);
 
     const handleFetchAccounts = useCallback(async () => {
