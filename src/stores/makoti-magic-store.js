@@ -126,8 +126,8 @@ class MakotiMagicStore {
             this.ws.close();
         }
 
-        const server_url = localStorage.getItem('config.server_url') || 'ws.binaryws.com';
-        const app_id = 101585;
+        const server_url = localStorage.getItem('config.server_url') || 'ws.derivws.com';
+        const app_id = localStorage.getItem('config.app_id') || '337';
 
         runInAction(() => {
             this.connection_status = 'Connecting...';

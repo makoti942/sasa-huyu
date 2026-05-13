@@ -1,44 +1,27 @@
 /**
- * Utility functions for authentication-related operations
+ * Auth utility helpers.
+ * Clears all token state from both the new sessionStorage system
+ * and the legacy localStorage system, then reloads.
  */
-import Cookies from 'js-cookie';
 
-/**
- * Clears authentication data from local storage and reloads the page
- */
 export const clearAuthData = (): void => {
-    localStorage.removeItem('accountsList');
-    localStorage.removeItem('clientAccounts');
-    localStorage.removeItem('callback_token');
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('active_loginid');
-    localStorage.removeItem('client.accounts');
-    localStorage.removeItem('client.country');
+    // New system (sessionStorage)
+    sessionStorage.removeItem('deriv_access_token');
+    sessionStorage.removeItem('deriv_token_expiry');
+    sessionStorage.removeItem('deriv_code_verifier');
+    sessionStorage.removeItem('deriv_oauth_state');
+
+    // Legacy system (localStorage)
+    const legacyKeys = [
+        'accountsList', 'clientAccounts', 'callback_token',
+        'authToken', 'active_loginid', 'client.accounts', 'client.country',
+    ];
+    legacyKeys.forEach(k => { try { localStorage.removeItem(k); } catch { /**/ } });
+
     location.reload();
 };
 
-/**
- * Handles OIDC authentication failure by clearing auth data and showing logged out view
- * @param error - The error that occurred during OIDC authentication
- */
-export const handleOidcAuthFailure = (error: any): void => {
-    // Log the error
-    console.error('OIDC authentication failed:', error);
-
-    // Clear auth data
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('active_loginid');
-    localStorage.removeItem('clientAccounts');
-    localStorage.removeItem('accountsList');
-
-    // Set logged_state cookie to false
-    Cookies.set('logged_state', 'false', {
-        domain: window.location.hostname.split('.').slice(-2).join('.'),
-        expires: 30,
-        path: '/',
-        secure: true,
-    });
-
-    // Reload the page to show the logged out view
-    window.location.reload();
+export const handleOidcAuthFailure = (error: unknown): void => {
+    console.error('Auth failure:', error);
+    clearAuthData();
 };

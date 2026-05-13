@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { observer } from 'mobx-react-lite';
-import { generateOAuthURL, standalone_routes } from '@/components/shared';
+import { standalone_routes } from '@/components/shared';
 import Button from '@/components/shared_ui/button';
 import useActiveAccount from '@/hooks/api/account/useActiveAccount';
 import { useOauth2 } from '@/hooks/auth/useOauth2';
@@ -11,7 +11,7 @@ import { useStore } from '@/hooks/useStore';
 import useTMB from '@/hooks/useTMB';
 import { handleOidcAuthFailure } from '@/utils/auth-utils';
 import { getBalanceSwapState } from '@/utils/balance-swap-utils';
-import { redirectToNewAccountsLogin } from '@/utils/pkce';
+import { startLogin } from '@/utils/auth';
 import { StandaloneCircleUserRegularIcon } from '@deriv/quill-icons/Standalone';
 
 
@@ -272,24 +272,6 @@ const AppHeader = observer(({ isAuthenticating }: TAppHeaderProps) => {
                     <Button
                         tertiary
                         className='auth-login-button'
-                        onClick={async () => {
-                            try {
-                                const tmbEnabled = await isTmbEnabled();
-                                if (tmbEnabled) {
-                                    await onRenderTMBCheck(true, undefined, false);
-                                } else {
-                                    window.location.href = generateOAuthURL(false, 'home');
-                                }
-                            } catch (error) {
-                                console.error(error);
-                            }
-                        }}
-                    >
-                        <Localize i18n_default_text='Log in' />
-                    </Button>
-                    <Button
-                        tertiary
-                        className='auth-new-accounts-button'
                         is_disabled={isNewLoginLoading}
                         onClick={async (e: React.MouseEvent) => {
                             e.preventDefault();
@@ -297,17 +279,23 @@ const AppHeader = observer(({ isAuthenticating }: TAppHeaderProps) => {
                             setIsNewLoginLoading(true);
                             setNewLoginError('');
                             try {
-                                await redirectToNewAccountsLogin();
-                                // If we reach here the redirect didn't fire — re-enable
-                                setIsNewLoginLoading(false);
+                                const tmbEnabled = await isTmbEnabled().catch(() => false);
+                                if (tmbEnabled) {
+                                    await onRenderTMBCheck(true, undefined, false);
+                                    setIsNewLoginLoading(false);
+                                } else {
+                                    await startLogin();
+                                    // redirect fires inside startLogin — if we reach here, re-enable
+                                    setIsNewLoginLoading(false);
+                                }
                             } catch (error) {
-                                console.error('[New Accounts Login]', error);
+                                console.error('[Login]', error);
                                 setIsNewLoginLoading(false);
-                                setNewLoginError('Login failed to start. Please try again or use a different browser.');
+                                setNewLoginError('Login failed to start. Please try again.');
                             }
                         }}
                     >
-                        <Localize i18n_default_text={isNewLoginLoading ? 'Preparing login…' : 'Login (new accounts)'} />
+                        <Localize i18n_default_text={isNewLoginLoading ? 'Preparing login…' : 'Log in'} />
                     </Button>
                     {newLoginError && (
                         <span style={{ color: '#e74c3c', fontSize: '12px', display: 'block', marginTop: '4px' }}>

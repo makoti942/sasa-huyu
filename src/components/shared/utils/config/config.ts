@@ -2,16 +2,17 @@
 import { LocalStorageConstants, LocalStorageUtils, URLUtils } from '@deriv-com/utils';
 import { isStaging } from '../url/helpers';
 
-// This is the single, correct App ID for this application.
-const APP_ID = 101585;
+// OAuth2 client_id for the new PKCE auth system
+export const DERIV_CLIENT_ID = '337DJLKi2OJ4VsyFSLIt9';
+
+// WebSocket app_id — used only for the legacy binary WebSocket API (ws.derivws.com).
+// This is a numeric ID separate from the OAuth client_id.
+const WS_APP_ID = 337;
 
 export const livechat_license_id = 12049137;
-export const livechat_client_id = '66aa088aad5a414484c1fd1fa8a5ace7';
-
-// All other App ID and domain-switching logic has been removed to ensure consistency.
+export const livechat_client_id  = '66aa088aad5a414484c1fd1fa8a5ace7';
 
 export const isProduction = () => {
-    // This can be simplified as we no longer rely on domain for App ID.
     return !/localhost|binary\.sx|pages\.dev/i.test(window.location.hostname);
 };
 
@@ -26,43 +27,26 @@ export const isTestLink = () => {
 export const isLocal = () => /localhost(:\d+)?$/i.test(window.location.hostname);
 
 const getDefaultServerURL = () => {
-    const server = 'ws';
-    const server_url = `${server}.derivws.com`;
-    return server_url;
+    return 'ws.derivws.com';
 };
 
 /**
- * Returns the App ID for the application.
- * This function is now simplified to always return the single, correct App ID.
+ * Returns the numeric WebSocket app_id.
+ * Used only for the legacy binary WebSocket connection (not for OAuth/REST).
  */
 export const getAppId = () => {
-    // Set the app_id in localStorage for other parts of the app that might read it.
-    window.localStorage.setItem('config.app_id', String(APP_ID));
-    return APP_ID;
+    window.localStorage.setItem('config.app_id', String(WS_APP_ID));
+    return WS_APP_ID;
 };
 
-/**
- * All App ID switching logic has been disabled and removed.
- * This function is now a no-op for backward compatibility.
- */
-export const switchAppIdAfterTrade = () => {
-    // No-op. The App ID is now constant.
-    return null;
-};
+export const switchAppIdAfterTrade = () => null;
 
-/**
- * This function is a no-op as the App ID is now constant.
- */
-export const forceUpdateAppId = () => {
-    return getAppId();
-};
+export const forceUpdateAppId = () => getAppId();
 
 export const getSocketURL = () => {
     const local_storage_server_url = window.localStorage.getItem('config.server_url');
     if (local_storage_server_url) return local_storage_server_url;
-
-    const server_url = getDefaultServerURL();
-    return server_url;
+    return getDefaultServerURL();
 };
 
 export const checkAndSetEndpointFromUrl = () => {
@@ -71,51 +55,43 @@ export const checkAndSetEndpointFromUrl = () => {
 
         if (url_params.has('qa_server') && url_params.has('app_id')) {
             const qa_server = url_params.get('qa_server') || '';
-            const app_id = url_params.get('app_id') || '';
+            const app_id    = url_params.get('app_id')    || '';
 
             url_params.delete('qa_server');
             url_params.delete('app_id');
 
-            if (/^(^(www\.)?qa[0-9]{1,4}\.deriv.dev|(.*)\.derivws\.com)$/.test(qa_server) && /^[0-9]+$/.test(app_id)) {
-                localStorage.setItem('config.app_id', app_id);
+            if (
+                /^(^(www\.)?qa[0-9]{1,4}\.deriv.dev|(.*)\.derivws\.com)$/.test(qa_server) &&
+                /^[0-9]+$/.test(app_id)
+            ) {
+                localStorage.setItem('config.app_id',    app_id);
                 localStorage.setItem('config.server_url', qa_server.replace(/"/g, ''));
             }
 
             const params = url_params.toString();
-            const hash = location.hash;
-
+            const hash   = location.hash;
             location.href = `${location.protocol}//${location.hostname}${location.pathname}${
                 params ? `?${params}` : ''
             }${hash || ''}`;
-
             return true;
         }
     }
-
     return false;
 };
 
 export const getDebugServiceWorker = () => {
-    const debug_service_worker_flag = window.localStorage.getItem('debug_service_worker');
-    if (debug_service_worker_flag) return !!parseInt(debug_service_worker_flag);
-
+    const flag = window.localStorage.getItem('debug_service_worker');
+    if (flag) return !!parseInt(flag);
     return false;
 };
 
-export const generateOAuthURL = (is_new_account = false, state = '') => {
-    const language = 'EN';
-    const server_url = localStorage.getItem('config.server_url');
-    const redirect_uri = `${window.location.origin}/callback`;
-    const app_id = getAppId();
-    const state_param = state ? `&state=${state}` : '';
-
-    if (server_url && /qa/.test(server_url)) {
-        return `https://${server_url}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
-    }
-
-    // Note: App ID 101585 is currently only registered on the old API (oauth.deriv.com).
-    // The new endpoint (auth.deriv.com) will return 'invalid_client' until the App ID is registered there.
-    const endpoint = is_new_account ? 'auth.deriv.com' : 'oauth.deriv.com';
-
-    return `https://${endpoint}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
+/**
+ * generateOAuthURL — shim kept for call-sites not yet migrated to startLogin().
+ * Triggers PKCE login to auth.deriv.com and returns ''.
+ * @deprecated Use startLogin() from @/utils/auth directly.
+ */
+export const generateOAuthURL = (_is_new_account = false, _state = '') => {
+    // Trigger PKCE login asynchronously — caller must not rely on the return value.
+    import('@/utils/auth').then(({ startLogin }) => startLogin()).catch(console.error);
+    return '';
 };

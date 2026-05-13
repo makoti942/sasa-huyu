@@ -1,4 +1,4 @@
-import Cookies from 'js-cookie';
+import { isLoggedIn } from '@/utils/auth';
 import CommonStore from '@/stores/common-store';
 import { TAuthData } from '@/types/api-types';
 import { clearAuthData } from '@/utils/auth-utils';
@@ -324,7 +324,7 @@ class APIBase {
             if (error) {
                 if (error.code === 'InvalidToken') {
                     const is_tmb_enabled = window.is_tmb_enabled === true;
-                    if (Cookies.get('logged_state') === 'true' && !is_tmb_enabled) {
+                    if (isLoggedIn() && !is_tmb_enabled) {
                         globalObserver.emit('InvalidToken', { error });
                     } else {
                         clearAuthData();

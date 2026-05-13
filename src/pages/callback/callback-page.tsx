@@ -1,282 +1,116 @@
 import React, { useEffect, useState } from 'react';
-import Cookies from 'js-cookie';
-import { crypto_currencies_display_order, fiat_currencies_display_order } from '@/components/shared';
-import { generateDerivApiInstance } from '@/external/bot-skeleton/services/api/appId';
-import { observer as globalObserver } from '@/external/bot-skeleton/utils/observer';
-import { clearAuthData } from '@/utils/auth-utils';
-import { Callback } from '@deriv-com/auth-client';
+import { handleCallback, startLogin } from '@/utils/auth';
 import { Button } from '@deriv-com/ui';
-import { PKCE_VERIFIER_KEY, PKCE_STATE_KEY, PKCE_CLIENT_ID } from '@/utils/pkce';
 
-const getSelectedCurrency = (
-    tokens: Record<string, string>,
-    clientAccounts: Record<string, any>,
-    state: any
-): string => {
-    const getQueryParams = new URLSearchParams(window.location.search);
-    const currency =
-        (state && state?.account) ||
-        getQueryParams.get('account') ||
-        sessionStorage.getItem('query_param_currency') ||
-        '';
-    const firstAccountKey = tokens.acct1;
-    const firstAccountCurrency = clientAccounts[firstAccountKey]?.currency;
+/*
+ * CallbackPage — handles /callback after Deriv PKCE login redirect.
+ *
+ * 1. Detects ?code= in URL → runs handleCallback() from auth.ts
+ * 2. On success: stores access_token in sessionStorage + legacy tokens in localStorage,
+ *    then redirects to /.
+ * 3. On error: shows a clear message + retry button.
+ */
 
-    const validCurrencies = [...fiat_currencies_display_order, ...crypto_currencies_display_order];
-    if (tokens.acct1?.startsWith('VR') || currency === 'demo') return 'demo';
-    if (currency && validCurrencies.includes(currency.toUpperCase())) return currency;
-    return firstAccountCurrency || 'USD';
-};
+type Phase = 'processing' | 'success' | 'error';
 
-/* ─────────────────────────────────────────────────────────
-   PKCE callback — handles ?code=... redirects from Deriv.
-   Exchanges code + verifier directly with auth.deriv.com
-   (frontend PKCE — no backend needed), saves access_token
-   to sessionStorage, then redirects home.
-───────────────────────────────────────────────────────── */
-const PkceCallbackHandler = () => {
-    const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
+const CallbackPage = () => {
+    const [phase,    setPhase]    = useState<Phase>('processing');
     const [errorMsg, setErrorMsg] = useState('');
 
     useEffect(() => {
-        // Guard flag — prevents double-execution on StrictMode re-renders
-        let tokenExchangeStarted = false;
+        const params = new URLSearchParams(window.location.search);
 
-        const run = async () => {
-            if (tokenExchangeStarted) return;
-            tokenExchangeStarted = true;
+        // If there is no ?code= or ?error= this is not a PKCE callback —
+        // just redirect home so the user doesn't see a blank page.
+        if (!params.has('code') && !params.has('error')) {
+            window.location.replace('/');
+            return;
+        }
 
-            // Surface any error Deriv sent back in the redirect
-            const params = new URLSearchParams(window.location.search);
-            const derivError = params.get('error');
-            if (derivError) {
-                const desc = params.get('error_description') ?? derivError;
-                setErrorMsg(`Deriv error: ${desc}. Please go back and try again.`);
-                setStatus('error');
-                return;
-            }
+        handleCallback()
+            .then(() => {
+                setPhase('success');
+                setTimeout(() => {
+                    window.location.replace('/');
+                }, 1200);
+            })
+            .catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                setErrorMsg(msg);
+                setPhase('error');
 
-            // Step 3 — parse code + state
-            const code          = params.get('code');
-            const returnedState = params.get('state');
-            if (!code || !returnedState) {
-                setErrorMsg('Login failed: Deriv did not return a valid response. Please go back and try again.');
-                setStatus('error');
-                return;
-            }
-
-            // Step 4 — CSRF / state check (sessionStorage is tab-specific)
-            const savedState = sessionStorage.getItem(PKCE_STATE_KEY);
-            if (!savedState) {
-                setErrorMsg(
-                    'Your session expired or the page was refreshed during login. ' +
-                    'Please go back and try again.'
-                );
-                setStatus('error');
-                return;
-            }
-            if (savedState !== returnedState) {
-                setErrorMsg('Security check failed. Please go back and try again.');
-                setStatus('error');
-                return;
-            }
-            sessionStorage.removeItem(PKCE_STATE_KEY);
-
-            // Step 5 — retrieve code_verifier
-            const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
-            if (!codeVerifier) {
-                setErrorMsg(
-                    'Login session data is missing. This happens if you opened the login in a new ' +
-                    'tab, or if your browser blocks sessionStorage. Please go back and try again in the same tab.'
-                );
-                setStatus('error');
-                return;
-            }
-
-            // Step 6 — exchange code for access_token directly with Deriv (PKCE public client)
-            const redirectUri = `${window.location.origin}/callback`;
-            let response: Response;
-            try {
-                response = await fetch('https://auth.deriv.com/oauth2/token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        grant_type:    'authorization_code',
-                        code,
-                        redirect_uri:  redirectUri,
-                        client_id:     PKCE_CLIENT_ID,
-                        code_verifier: codeVerifier,
-                    }).toString(),
-                });
-            } catch (netErr: any) {
-                setErrorMsg('Network error during login. Please check your connection and try again.');
-                setStatus('error');
-                return;
-            }
-
-            // Step 7 — handle token response
-            if (!response.ok) {
-                let errData: any = {};
-                try { errData = await response.json(); } catch {}
-                const desc = errData.error_description || errData.error || `HTTP ${response.status}`;
-                setErrorMsg(`Login failed: ${desc}`);
-                setStatus('error');
-                return;
-            }
-
-            const data = await response.json() as { access_token: string; expires_in: number };
-
-            // Save access_token + expiry (tab-scoped; each tab manages its own session)
-            sessionStorage.setItem('deriv_access_token', data.access_token);
-            sessionStorage.setItem('deriv_token_expiry', String(Date.now() + data.expires_in * 1000));
-            sessionStorage.removeItem(PKCE_VERIFIER_KEY);
-
-            Cookies.set('logged_state', 'true', {
-                domain:  window.location.hostname,
-                expires: 30,
-                path:    '/',
-                secure:  window.location.protocol === 'https:',
+                // Expired/already-used codes: auto-redirect after a short delay
+                if (msg.includes('expired or already used') || msg.includes('single-use')) {
+                    setTimeout(() => { window.location.href = '/'; }, 3500);
+                }
             });
-
-            setStatus('success');
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            window.location.href = '/';
-        };
-
-        run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    if (status === 'error') {
+    if (phase === 'processing') {
         return (
-            <div style={{ padding: '40px', textAlign: 'center', maxWidth: '520px', margin: '0 auto' }}>
-                <h2 style={{ color: '#e74c3c', marginBottom: '16px' }}>Login failed</h2>
-                <p style={{
-                    color: '#ccc', margin: '16px 0', whiteSpace: 'pre-wrap',
-                    textAlign: 'left', background: '#1a1a1a', padding: '12px',
-                    borderRadius: '8px', fontSize: '13px',
-                }}>
-                    {errorMsg}
-                </p>
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
-                    <Button onClick={() => { window.location.reload(); }}>Retry</Button>
-                    <Button onClick={() => { window.location.href = '/'; }}>Return to App</Button>
-                </div>
+            <div style={styles.container}>
+                <p style={styles.muted}>Completing login, please wait…</p>
             </div>
         );
     }
 
-    if (status === 'success') {
+    if (phase === 'success') {
         return (
-            <div style={{ padding: '40px', textAlign: 'center' }}>
-                <p style={{ color: '#10b981' }}>Login successful! Redirecting…</p>
+            <div style={styles.container}>
+                <p style={{ color: '#4caf50', fontSize: '16px' }}>
+                    Login successful! Redirecting…
+                </p>
             </div>
         );
     }
 
     return (
-        <div style={{ padding: '40px', textAlign: 'center' }}>
-            <p>Completing login, please wait…</p>
+        <div style={styles.container}>
+            <h2 style={{ color: '#e74c3c', marginBottom: '16px' }}>Login failed</h2>
+            <pre style={styles.pre}>{errorMsg}</pre>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '20px' }}>
+                <Button
+                    onClick={() => startLogin().catch(console.error)}
+                    primary
+                >
+                    Try Again
+                </Button>
+                <Button
+                    onClick={() => { window.location.href = '/'; }}
+                    tertiary
+                >
+                    Return to App
+                </Button>
+            </div>
         </div>
     );
 };
 
-/* ─────────────────────────────────────────────────────────
-   Legacy callback — handles existing Deriv OAuth redirects.
-───────────────────────────────────────────────────────── */
-const CallbackPage = () => {
-    const isPkceFlow = new URLSearchParams(window.location.search).has('code') ||
-                       new URLSearchParams(window.location.search).has('error');
-
-    if (isPkceFlow) {
-        return <PkceCallbackHandler />;
-    }
-
-    return (
-        <Callback
-            onSignInSuccess={async (tokens: Record<string, string>, rawState: unknown) => {
-                const state = rawState as { account?: string } | null;
-                const accountsList: Record<string, string> = {};
-                const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
-
-                for (const [key, value] of Object.entries(tokens)) {
-                    if (key.startsWith('acct')) {
-                        const tokenKey = key.replace('acct', 'token');
-                        if (tokens[tokenKey]) {
-                            accountsList[value] = tokens[tokenKey];
-                            clientAccounts[value] = {
-                                loginid: value,
-                                token: tokens[tokenKey],
-                                currency: '',
-                            };
-                        }
-                    } else if (key.startsWith('cur')) {
-                        const accKey = key.replace('cur', 'acct');
-                        if (tokens[accKey]) {
-                            clientAccounts[tokens[accKey]].currency = value;
-                        }
-                    }
-                }
-
-                localStorage.setItem('accountsList', JSON.stringify(accountsList));
-                localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
-
-                let is_token_set = false;
-                const api = await generateDerivApiInstance();
-                if (api) {
-                    const { authorize, error } = await api.authorize(tokens.token1);
-                    api.disconnect();
-                    if (error) {
-                        if (error.code === 'InvalidToken') {
-                            is_token_set = true;
-                            const is_tmb_enabled = window.is_tmb_enabled === true;
-                            if (Cookies.get('logged_state') === 'true' && !is_tmb_enabled) {
-                                globalObserver.emit('InvalidToken', { error });
-                            }
-                            if (Cookies.get('logged_state') === 'false') {
-                                clearAuthData();
-                            }
-                        }
-                    } else {
-                        localStorage.setItem('callback_token', authorize.toString());
-                        const clientAccountsArray = Object.values(clientAccounts);
-                        const firstId = authorize?.account_list[0]?.loginid;
-                        const filteredTokens = clientAccountsArray.filter(account => account.loginid === firstId);
-                        if (filteredTokens.length) {
-                            localStorage.setItem('authToken', filteredTokens[0].token);
-                            localStorage.setItem('active_loginid', filteredTokens[0].loginid);
-                            is_token_set = true;
-                        }
-                    }
-                }
-                if (!is_token_set) {
-                    localStorage.setItem('authToken', tokens.token1);
-                    localStorage.setItem('active_loginid', tokens.acct1);
-                }
-
-                Cookies.set('logged_state', 'true', {
-                    domain: window.location.hostname,
-                    expires: 30,
-                    path: '/',
-                    secure: window.location.protocol === 'https:',
-                });
-
-                const selected_currency = getSelectedCurrency(tokens, clientAccounts, state);
-                await new Promise(resolve => setTimeout(resolve, 100));
-                window.location.replace(window.location.origin + `/?account=${selected_currency}`);
-            }}
-            renderReturnButton={() => {
-                return (
-                    <Button
-                        className='callback-return-button'
-                        onClick={() => { window.location.href = '/'; }}
-                    >
-                        {'Return to Bot'}
-                    </Button>
-                );
-            }}
-        />
-    );
+const styles: Record<string, React.CSSProperties> = {
+    container: {
+        padding:    '40px 24px',
+        textAlign:  'center',
+        maxWidth:   '520px',
+        margin:     '60px auto',
+        color:      '#fff',
+    },
+    muted: {
+        color:      '#aaa',
+        fontSize:   '15px',
+    },
+    pre: {
+        color:           '#ccc',
+        background:      '#1a1a1a',
+        padding:         '12px 16px',
+        borderRadius:    '8px',
+        fontSize:        '13px',
+        fontFamily:      'monospace',
+        textAlign:       'left',
+        whiteSpace:      'pre-wrap',
+        overflowWrap:    'break-word',
+        margin:          '0 auto',
+        maxWidth:        '480px',
+    },
 };
 
 export default CallbackPage;

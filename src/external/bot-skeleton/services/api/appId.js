@@ -1,4 +1,4 @@
-import { getAppId, getSocketURL } from '@/components/shared';
+import { getAppId, getSocketURL, DERIV_CLIENT_ID } from '@/components/shared';
 import { website_name } from '@/utils/site-config';
 import DerivAPIBasic from '@deriv/deriv-api/dist/DerivAPIBasic';
 import { getInitialLanguage } from '@deriv-com/translations';
