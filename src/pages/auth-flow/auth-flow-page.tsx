@@ -1,6 +1,6 @@
 import React from 'react'
 import { isLoggedIn } from '@/auth/DerivAuth'
-import { isAuthFlowComplete, getAuthState } from '@/utils/auth-state'
+import { getAuthState } from '@/utils/auth-state'
 import { LoginPage } from '@/pages/login'
 import { AccountCreationPage } from '@/pages/account'
 import './auth-flow-page.scss'
