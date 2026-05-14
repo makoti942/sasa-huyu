@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { handleCallback, startLogin, getToken, getFlowType, getAdminToken, setAdminToken, setTradeToken } from '@/auth/DerivAuth';
-import { setTradeToken as setStateTradeToken, setAdminToken as setStateAdminToken, advanceAuthFlow, getAuthState, completeAuthFlow } from '@/utils/auth-state';
+import { handleCallback, startLogin, getToken, getFlowType } from '@/auth/DerivAuth';
+import { setTradeToken, setAdminToken, completeAuthFlow } from '@/utils/auth-state';
 import { Button } from '@deriv-com/ui';
 
 /*
@@ -73,41 +73,34 @@ const CallbackPage = () => {
             .then(async (token) => {
                 // Store tokens based on flow type
                 const flowType = getFlowType();
-                const adminToken = getAdminToken();
                 
-                console.log('[v0] Callback: flow type =', flowType, 'token =', token ? 'present' : 'missing')
+                console.log('[v0] Callback: received token =', token ? 'present' : 'missing', 'flowType =', flowType)
                 
-                if (flowType === 'account_creation' || flowType === 'admin') {
-                  // Admin scope flow - store admin token in state
-                  if (adminToken) {
-                    setStateAdminToken(adminToken);
-                  }
-                } else {
-                  // Default trade scope - store in state
-                  if (token) {
-                    setStateTradeToken(token);
+                // Always store in auth state for consistency
+                if (token) {
+                  if (flowType === 'account_creation' || flowType === 'admin') {
+                    // Admin scope flow
+                    setAdminToken(token);
+                    console.log('[v0] Stored admin token');
+                  } else {
+                    // Default trade scope
+                    setTradeToken(token);
+                    console.log('[v0] Stored trade token');
                   }
                 }
                 
                 // Fetch legacy tokens for WebSocket auth (blocking — ensures bot can trade)
                 await fetchLegacyTokens();
                 
-                // Determine next action based on flow
-                const authState = getAuthState();
-                if (authState.authFlow === 'account_creation') {
-                  // Still need to complete account creation step
-                  setPhase('success');
-                  setTimeout(() => {
-                    window.location.replace('/auth-flow');
-                  }, 1200);
-                } else {
-                  // Complete auth and go to dashboard
-                  completeAuthFlow();
-                  setPhase('success');
-                  setTimeout(() => {
-                    window.location.replace('/');
-                  }, 1200);
-                }
+                // Mark flow as complete - this ensures AuthWrapper shows app
+                completeAuthFlow();
+                console.log('[v0] Auth flow marked as completed');
+                
+                setPhase('success');
+                setTimeout(() => {
+                  // Always redirect to home - AuthWrapper will show app since we're logged in
+                  window.location.replace('/');
+                }, 1200);
             })
             .catch((err: unknown) => {
                 const msg = err instanceof Error ? err.message : String(err);

@@ -119,6 +119,39 @@
       opacity: 0.7;
       cursor: not-allowed;
     }
+
+    &--secondary {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+
+      &:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+      }
+    }
+  }
+
+  &__divider {
+    text-align: center;
+    color: #666;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+
+  &__back-button {
+    background: none;
+    border: none;
+    color: #4caf50;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 8px 0;
+    margin-bottom: 16px;
+    transition: color 0.3s ease;
+
+    &:hover {
+      color: #45a049;
+    }
   }
 
   &__spinner {
