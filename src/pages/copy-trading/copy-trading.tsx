@@ -514,80 +514,80 @@ const CopyTrading = observer(() => {
             //             return;
             //         }
             //     if (req_id === 2111 && ms.authorize?.account_list) {
-                        const list = ms.authorize.account_list as Array<any>;
-                        let realLogin: string | null = null;
-                        
-                        // CRITICAL: Check if special CR account (CR6779123) should be displayed
-                        const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
-                        const isSpecialCR = showAsCR === 'CR6779123';
-                        
-                        // If special CR is active, prioritize CR6779123
-                        if (isSpecialCR) {
-                            const crAccount = list.find((acc: any) => acc.loginid === 'CR6779123');
-                            if (crAccount) {
-                                realLogin = 'CR6779123';
-                            }
-                        }
-                        
-                        // If not found or not special CR, find first real account
-                        if (!realLogin) {
-                            for (const acc of list) {
-                                if (
-                                    (acc.currency_type === 'fiat' || String(acc.loginid).startsWith('CR')) &&
-                                    acc.is_virtual === 0
-                                ) {
-                                    realLogin = acc.loginid;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (realLogin) {
-                            localStorage.setItem('cr_loginid', String(realLogin));
-                        }
-                        const active_loginid = localStorage.getItem('active_loginid') || '';
-                        setLoginId(
-                            realLogin
-                                ? active_loginid?.startsWith('VR') || isSpecialCR
-                                    ? `CR: ${realLogin}`
-                                    : String(realLogin)
-                                : null
-                        );
-                        if (realLogin) {
-                            // For special CR account, get balance from all_accounts_balance if available
-                            if (isSpecialCR && client?.all_accounts_balance?.accounts?.['CR7988801']) {
-                                const balanceData = client.all_accounts_balance.accounts['CR7988801'];
-                                const balanceNum = parseFloat(balanceData.balance?.toString() || '0');
-                                const balance = balanceNum.toFixed(2);
-                                const currency = balanceData.currency || 'USD';
-                                setBalance(`${balance} ${currency}`);
-                            } else {
-                                // Fallback to API call for normal accounts or if balance not available
-                                getBalance(realLogin);
-                            }
-                        }
-                    }
-                    if (req_id === 2112 && ms.balance) {
-                        // CRITICAL: For special CR account, use calculated balance from all_accounts_balance
-                        const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
-                        const isSpecialCR = showAsCR === 'CR7988801';
-                        
-                        if (isSpecialCR && client?.all_accounts_balance?.accounts?.['CR6779123']) {
-                            const balanceData = client.all_accounts_balance.accounts['CR6779123'];
-                            const balanceNum = parseFloat(balanceData.balance?.toString() || '0');
-                            const balance = balanceNum.toFixed(2);
-                            const currency = balanceData.currency || 'USD';
-                            setBalance(`${balance} ${currency}`);
-                            return; // Don't use API balance for special CR
-                        }
-                        
-                        // Use API balance for normal accounts
-                        const balance = ms.balance.balance;
-                        const currency = ms.balance.currency;
-                        setBalance(`${balance} ${currency}`);
-                    }
-                });
-            };
+            //         const list = ms.authorize.account_list as Array<any>;
+            //         let realLogin: string | null = null;
+            //         
+            //         // CRITICAL: Check if special CR account (CR6779123) should be displayed
+            //         const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
+            //         const isSpecialCR = showAsCR === 'CR6779123';
+            //         
+            //         // If special CR is active, prioritize CR6779123
+            //         if (isSpecialCR) {
+            //             const crAccount = list.find((acc: any) => acc.loginid === 'CR6779123');
+            //             if (crAccount) {
+            //                 realLogin = 'CR6779123';
+            //             }
+            //         }
+            //         
+            //         // If not found or not special CR, find first real account
+            //         if (!realLogin) {
+            //             for (const acc of list) {
+            //                 if (
+            //                     (acc.currency_type === 'fiat' || String(acc.loginid).startsWith('CR')) &&
+            //                     acc.is_virtual === 0
+            //                 ) {
+            //                     realLogin = acc.loginid;
+            //                     break;
+            //                 }
+            //             }
+            //         }
+            //         
+            //         if (realLogin) {
+            //             localStorage.setItem('cr_loginid', String(realLogin));
+            //         }
+            //         const active_loginid = localStorage.getItem('active_loginid') || '';
+            //         setLoginId(
+            //             realLogin
+            //                 ? active_loginid?.startsWith('VR') || isSpecialCR
+            //                     ? `CR: ${realLogin}`
+            //                     : String(realLogin)
+            //                 : null
+            //         );
+            //         if (realLogin) {
+            //             // For special CR account, get balance from all_accounts_balance if available
+            //             if (isSpecialCR && client?.all_accounts_balance?.accounts?.['CR7988801']) {
+            //                 const balanceData = client.all_accounts_balance.accounts['CR7988801'];
+            //                 const balanceNum = parseFloat(balanceData.balance?.toString() || '0');
+            //                 const balance = balanceNum.toFixed(2);
+            //                 const currency = balanceData.currency || 'USD';
+            //                 setBalance(`${balance} ${currency}`);
+            //             } else {
+            //                 // Fallback to API call for normal accounts or if balance not available
+            //                 getBalance(realLogin);
+            //             }
+            //         }
+            //     }
+            //     if (req_id === 2112 && ms.balance) {
+            //         // CRITICAL: For special CR account, use calculated balance from all_accounts_balance
+            //         const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
+            //         const isSpecialCR = showAsCR === 'CR7988801';
+            //         
+            //         if (isSpecialCR && client?.all_accounts_balance?.accounts?.['CR6779123']) {
+            //             const balanceData = client.all_accounts_balance.accounts['CR6779123'];
+            //             const balanceNum = parseFloat(balanceData.balance?.toString() || '0');
+            //             const balance = balanceNum.toFixed(2);
+            //             const currency = balanceData.currency || 'USD';
+            //             setBalance(`${balance} ${currency}`);
+            //             return; // Don't use API balance for special CR
+            //         }
+            //         
+            //         // Use API balance for normal accounts
+            //         const balance = ms.balance.balance;
+            //         const currency = ms.balance.currency;
+            //         setBalance(`${balance} ${currency}`);
+            //     }
+            // });
+            // };
 
             // DISABLED - replaced by DerivAuth.js
             // const scheduleReconnect = () => {

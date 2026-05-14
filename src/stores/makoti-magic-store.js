@@ -199,16 +199,16 @@ class MakotiMagicStore {
     //             this.connection_status = STATUS_OFFLINE;
     //             this.is_initialized = false;
     //         });
-            setTimeout(() => this.connectWebSocket(), 5000);
-        };
+    //         setTimeout(() => this.connectWebSocket(), 5000);
+    //     };
 
-        this.ws.onerror = (e) => {
-            console.error('WebSocket error:', e);
-            runInAction(() => {
-                this.connection_status = 'Error';
-            });
-        };
-    }
+    //     this.ws.onerror = (e) => {
+    //         console.error('WebSocket error:', e);
+    //         runInAction(() => {
+    //             this.connection_status = 'Error';
+    //         });
+    //     };
+    // }
 
     runScan = () => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {

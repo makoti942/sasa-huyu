@@ -441,11 +441,11 @@ export default Engine =>
                 //         throw authError;
                 //     }
                 // } else if (isOnDemoAccount) {
-                    console.log('✅ [PURCHASE] API already on demo account:', api_base.account_info?.loginid);
-                    if (api_base.account_info && !this.accountInfo) {
-                        this.accountInfo = { ...api_base.account_info, loginid: api_base.account_info.loginid };
-                    }
-                }
+                //     console.log('✅ [PURCHASE] API already on demo account:', api_base.account_info?.loginid);
+                //     if (api_base.account_info && !this.accountInfo) {
+                //         this.accountInfo = { ...api_base.account_info, loginid: api_base.account_info.loginid };
+                //     }
+                // }
             }
 
             const onSuccess = response => {

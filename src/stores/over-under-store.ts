@@ -745,302 +745,46 @@ export default class OverUnderStore {
     //                 }
     //             }
     //         };
-            this.ws.onmessage = async (msg) => {
-                try {
-                    const data = JSON.parse(msg.data);
-                    if (data.subscription?.id) this.active_subscription_id = data.subscription.id;
-                    if (data.error) {
-                        this.addLog(`Error: ${data.error.message}`);
-                        if (data.msg_type === 'buy') {
-                             const symbol = data.echo_req.symbol;
-                             if(symbol) this.symbol_locks[symbol] = false;
-                             this.is_purchasing = false;
-                        }
-                    }
-                    switch (data.msg_type) {
-                        case 'history':
-                            if (this.is_all_vol_mode) {
-                                const symbol = data.echo_req.ticks_history;
-                                if (!this.symbol_data[symbol]) {
-                                    this.symbol_data[symbol] = { tick_history: [], last_digit: null, last_last_digit: null, _tick_prices: [] };
-                                }
-                                const pip_size = pip_sizes[symbol] || 2;
-                                const prices = data.history.prices;
-                                const digits = prices.map((p: string | number) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
-                                this.symbol_data[symbol].tick_history = digits;
-                                this.symbol_data[symbol]._tick_prices = prices.map((p: string | number) => Number(p));
-                                if (digits.length > 0) this.symbol_data[symbol].last_digit = digits[digits.length - 1];
-                                this.addLog(`Loaded ${digits.length} historical ticks for ${symbol}.`);
-                            } else if (data.echo_req.subscribe === 1) {
-                                const pip_size = pip_sizes[this.selected_symbol] || 2;
-                                const prices = data.history.prices;
-                                const digits = prices.map((p: string | number) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
-                                this.tick_history = digits;
-                                this._tick_prices = prices.map((p: string | number) => Number(p));
-                                if (digits.length > 0) this.last_digit = digits[digits.length - 1];
-                                this.addLog(`Loaded ${digits.length} historical ticks.`);
-                            } else if (this.is_analyzing_volatility) {
-                                const sym_for_analysis: string = data.echo_req.ticks_history;
-                                if (!this.analysis_pending.has(sym_for_analysis)) break;
-                                const pip_size = pip_sizes[sym_for_analysis] || 2;
-                                const rawPrices = data.history.prices.map((p: string | number) => Number(p));
-                                const digits = rawPrices.map((p: number) => Number(p.toFixed(pip_size).slice(-1)));
-                                const strategy = this.analysis_strategy ?? (
-                                    this.is_differs_mode ? 'differs'
-                                    : this.is_differs_v2_mode ? 'differs_v2'
-                                    : this.is_rise_fall_v2_mode ? 'rise_fall_v2'
-                                    : this.is_rise_fall_mode ? 'rise_fall'
-                                    : this.is_manual_mode ? 'manual'
-                                    : 'over_under'
-                                );
-                                this.volatilityAnalyzer?.postMessage({
-                                    ticks: digits,
-                                    prices: rawPrices,
-                                    contract_type: this.is_recovery_active ? this.recovery_contract_type : (this.is_manual_mode ? this.manual_contract_type : (this.is_differs_mode || this.is_differs_v2_mode ? 'DIGITDIFF' : 'DIGITOVER')),
-                                    barrier: this.is_recovery_active ? this.recovery_barrier : (this.is_manual_mode ? this.manual_barrier : '5'),
-                                    strategy,
-                                    symbol: sym_for_analysis,
-                                });
-                            }
-                            break;
-                        case 'authorize':
-                            this.is_authorizing = false;
-                            if (data.error) {
-                                this.addLog(`Authorization Failed: ${data.error.message}.`);
-                                this.is_authorized = false;
-                            } else {
-                                this.addLog(`Authorization Successful for ${data.authorize.loginid}!`);
-                                this.is_authorized = true;
-                                this.connection_status = STATUS_AUTHORIZED;
-                                this.ws?.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-                            }
-                            this.subscribeToTicks(this.selected_symbol);
-                            break;
-                        case 'buy':
-                            this.is_purchasing = false;
-                            const symbol = data.echo_req.parameters.symbol;
-                            if (data.error) {
-                                if (symbol) this.symbol_locks[symbol] = false;
-                            } else {
-                                const contract_id = data.buy.contract_id;
-                                this.addLog(`Purchase Sent: ${contract_id} on ${symbol}`);
-                                this.active_contracts.add(String(contract_id));
-                            }
-                            break;
-                        case 'proposal_open_contract':
-                            const contract = data.proposal_open_contract;
-                            const formattedContract = {
-                                ...contract,
-                                date_start: contract.date_start || Math.floor(Date.now() / 1000),
-                                transaction_ids: contract.transaction_ids || { buy: contract.contract_id },
-                                accountID: contract.accountID || this.root_store.client.loginid
-                            };
-                            if (this.root_store.summary_card) this.root_store.summary_card.onBotContractEvent(formattedContract);
-                            if (this.root_store.transactions) this.root_store.transactions.onBotContractEvent(formattedContract);
-                            if (contract.is_sold) {
-                                const contract_id = String(contract.contract_id);
-                                const symbol = contract.underlying;
-                                if (symbol) this.symbol_locks[symbol] = false;
-
-                                // Manual + Recovery fast path: arm recovery the
-                                // instant the contract result lands (bypassing
-                                // the round-results aggregator) so the very
-                                // next tick on this symbol fires recovery.
-                                if (
-                                    symbol &&
-                                    this.is_manual_mode &&
-                                    this.is_recovery_enabled &&
-                                    this.active_contracts.has(contract_id)
-                                ) {
-                                    const profit = contract.profit;
-                                    const is_loss = profit < 0;
-                                    this.addLog(`Manual result on ${symbol}: ${is_loss ? 'LOST' : 'WON'} ($${profit})`);
-                                    if (is_loss) {
-                                        this.is_recovery_active = true;
-                                        this.recovery_symbol = symbol;
-                                        if (this.is_2term_mode) {
-                                            const nextStake = Number((this.stake + profit).toFixed(2));
-                                            this.stake = nextStake > 0 ? nextStake : this.initial_stake;
-                                            this.addLog(`2term on loss: stake → ${this.stake}. Recovery armed on ${symbol} — fires next tick.`);
-                                        } else {
-                                            this.stake = Number((this.stake * this.martingale).toFixed(2));
-                                            this.addLog(`Martingale on loss: stake → ${this.stake}. Recovery armed on ${symbol} — fires next tick.`);
-                                        }
-                                    } else {
-                                        if (this.is_recovery_active) {
-                                            this.is_recovery_active = false;
-                                            this.recovery_symbol = null;
-                                            this.addLog(`Win — recovery deactivated.`);
-                                        }
-                                        if (this.is_2term_mode) {
-                                            this.stake = Number((this.stake + profit).toFixed(2));
-                                        } else {
-                                            this.stake = this.initial_stake;
-                                        }
-                                    }
-                                    this.active_contracts.delete(contract_id);
-                                    if (!this.is_turbo) {
-                                        this.setIsAutoRunning(false);
-                                        this.addLog('Turbo Mode is off. Stopping auto-run.');
-                                    }
-                                    break;
-                                }
-
-                                if (this.active_contracts.has(contract_id)) {
-                                    const profit = contract.profit;
-                                    this.contract_results.set(contract_id, { profit, symbol });
-                                    this.addLog(`Trade Result [${contract_id}] on ${symbol}: ${profit >= 0 ? 'WON' : 'LOST'} ($${profit})`);
-                                    this.active_contracts.delete(contract_id);
-                                    if (this.active_contracts.size === 0 && !this.is_processing_round) {
-                                        this.processRoundResults();
-                                    }
-                                }
-                            }
-                            break;
-                        case 'tick':
-                            const tick = data.tick;
-                            const tick_symbol = tick.symbol;
-                            const pip_size = tick.pip_size || pip_sizes[tick_symbol] || 2;
-                            const quote_str = tick.quote.toFixed(pip_size);
-                            const digit = parseInt(quote_str.slice(-1), 10);
-
-                            if (this.is_all_vol_mode) {
-                                if (!this.symbol_data[tick_symbol]) {
-                                    this.symbol_data[tick_symbol] = { tick_history: [], last_digit: null, last_last_digit: null, _tick_prices: [] };
-                                    this.addLog(`Received tick for unsubscribed symbol ${tick_symbol} in All Vol mode. Initializing...`);
-                                }
-                                const current_symbol_data = this.symbol_data[tick_symbol];
-                                current_symbol_data.last_last_digit = current_symbol_data.last_digit;
-                                current_symbol_data.last_digit = digit;
-                                current_symbol_data.tick_history = [...current_symbol_data.tick_history.slice(-MAX_TICKS + 1), digit];
-                                current_symbol_data._tick_prices = [...current_symbol_data._tick_prices.slice(-MAX_TICKS + 1), Number(tick.quote)];
-                            } else {
-                                this.last_last_digit = this.last_digit;
-                                this.last_digit = digit;
-                                this.tick_history = [...this.tick_history.slice(-MAX_TICKS + 1), digit];
-                                this._tick_prices = [...this._tick_prices.slice(-MAX_TICKS + 1), Number(tick.quote)];
-                            }
-                            
-                            const pending_check = this.pending_instant_result_check[tick_symbol];
-                            if (pending_check) {
-                                const last_digit_for_check = this.is_all_vol_mode ? this.symbol_data[tick_symbol].last_digit : this.last_digit;
-                                const barrier = pending_check.barrier;
-                            
-                                let is_loss = false;
-                                if (String(last_digit_for_check) === barrier) {
-                                    is_loss = true;
-                                }
-                            
-                                if (is_loss) {
-                                    this.addLog(`⚡ Instant Result on ${tick_symbol}: LOST (Digit: ${last_digit_for_check}, Barrier: ${barrier})`);
-                                    const next_stake = Number((pending_check.stake * this.martingale).toFixed(2));
-                                    this.addLog(`⚡ Fast Recovery on ${tick_symbol}: Martingale triggered. New stake: ${next_stake}`);
-                            
-                                    this.pending_instant_result_check[tick_symbol] = { ...pending_check, stake: next_stake, ticks_to_check: 2 };
-                                    this.executeTrade(pending_check.contract_type, barrier, tick_symbol, next_stake, true);
-                                } else {
-                                    pending_check.ticks_to_check--;
-                                    if (pending_check.ticks_to_check <= 0) {
-                                        this.addLog(`⚡ Instant Result on ${tick_symbol}: WON (Digit: ${last_digit_for_check}, Barrier: ${barrier})`);
-                                         if (!this.is_2term_mode) {
-                                            this.stake = this.initial_stake;
-                                            this.addLog(`⚡ Stake reset to initial: ${this.initial_stake}`)
-                                        }
-                                        delete this.pending_instant_result_check[tick_symbol];
-                                    } else {
-                                        this.addLog(`⚡ Instant Result on ${tick_symbol}: Tick ${last_digit_for_check} is not a loss. Waiting for ${pending_check.ticks_to_check} more ticks.`);
-                                    }
-                                }
-                                return;
-                            }
-                            
-                            // ── MANUAL + RECOVERY: fire IMMEDIATELY on the next tick of the
-                            // volatility the loss occurred on, ignoring trigger digits and
-                            // even when All Vol mode is on. Highest priority — runs even
-                            // if other busy flags are set, since the prior contract is
-                            // already settled (recovery was armed in proposal_open_contract).
-                            if (
-                                this.is_auto_running &&
-                                this.is_manual_mode &&
-                                this.is_recovery_active &&
-                                this.recovery_symbol &&
-                                tick_symbol === this.recovery_symbol &&
-                                !this.symbol_locks[tick_symbol] &&
-                                !this.is_purchasing
-                            ) {
-                                this.addLog(`Recovery: Immediate trade on ${tick_symbol} (${this.recovery_contract_type} ${this.recovery_barrier}) — bypassing trigger.`);
-                                this.executeTrade(
-                                    this.recovery_contract_type,
-                                    this.recovery_barrier,
-                                    tick_symbol,
-                                    undefined,
-                                    false,
-                                    this.manual_duration,
-                                );
-                                return;
-                            }
-
-                            const is_general_busy = this.is_analyzing_volatility || this.is_processing_round || this.active_contracts.size > 0 || this.is_purchasing;
-
-                            // Rise/Fall V2: bypass the generic busy guard so the 4th consecutive
-                            // histogram bar fires a trade on the EXACT same tick it is detected —
-                            // no delay, no waiting for volatility analysis or other flags.
-                            // The only hard gate is the symbol lock (already checked inside
-                            // analyzeAndExecuteRiseFallV2) and active_contracts (we must not
-                            // stack trades while one is still open).
-                            if (this.is_auto_running && this.is_rise_fall_v2_mode) {
-                                const active_symbol = this.is_all_vol_mode ? tick_symbol : this.selected_symbol;
-                                if (!this.symbol_locks[active_symbol] && this.active_contracts.size === 0 && !this.is_purchasing) {
-                                    this.analyzeAndExecuteRiseFallV2(this.is_all_vol_mode ? active_symbol : undefined);
-                                }
-                            } else if (this.is_auto_running && !is_general_busy) {
-
-                                if (this.is_all_vol_mode) {
-                                    const active_symbol = tick_symbol;
-                                    if (this.symbol_locks[active_symbol]) return;
-
-                                    const symbol_data = this.symbol_data[active_symbol];
-                                    if (!symbol_data) return;
-
-                                    if (this.is_differs_mode) {
-                                        this.analyzeAndExecuteDiffers(active_symbol);
-                                    } else if (this.is_differs_v2_mode) {
-                                        this.analyzeAndExecuteDiffersV2(active_symbol);
-                                    } else if (this.is_manual_mode) {
-                                        this.handleOverUnderLogic(symbol_data);
-                                    } else if (!this.is_rise_fall_mode) {
-                                        this.handleOverUnderLogic(symbol_data);
-                                    }
-                                } else {
-                                    if (this.symbol_locks[this.selected_symbol]) return;
-
-                    if (this.is_rise_fall_v2_mode) {
-                        this.analyzeAndExecuteRiseFallV2();
-                    } else if (this.is_rise_fall_mode) {
-                        this.analyzeAndExecuteRiseFall();
-                    } else if (this.is_differs_mode) {
-                                        this.analyzeAndExecuteDiffers();
-                                    } else if (this.is_differs_v2_mode) {
-                                        this.analyzeAndExecuteDiffersV2();
-                                    } else {
-                                        this.handleOverUnderLogic();
-                                    }
-                                }
-                            }
-                            break;
-                    }
-                } catch (error) { this.addLog(`Message parse error: ${error.message}`); }
-            };
-            this.ws.onclose = () => {
-                this.addLog(`Connection closed. Reconnecting...`);
-                this.connection_status = STATUS_OFFLINE;
-                this.is_authorizing = false;
-                this.is_authorized = false;
-                this.reconnectTimeout = setTimeout(() => this.connectWebSocket(), 5000);
-            };
-            this.ws.onerror = (e) => this.addLog(`Connection Error: ${e.type}`);
-        } catch (e) { this.addLog(`Connection failed to initialize: ${e.message}`); this.is_authorizing = false; }
-    }
+            // DISABLED - replaced by DerivAuth.js
+            // this.ws.onmessage = async (msg) => {
+            //     try {
+            //         const data = JSON.parse(msg.data);
+            //         if (data.subscription?.id) this.active_subscription_id = data.subscription.id;
+            //         if (data.error) {
+            //             this.addLog(`Error: ${data.error.message}`);
+            //             if (data.msg_type === 'buy') {
+            //                  const symbol = data.echo_req.symbol;
+            //                  if(symbol) this.symbol_locks[symbol] = false;
+            //                  this.is_purchasing = false;
+            //             }
+            //         }
+            //         switch (data.msg_type) {
+            //     case 'history':
+            //         if (this.is_all_vol_mode) {
+            //             const symbol = data.echo_req.ticks_history;
+            //             if (!this.symbol_data[symbol]) {
+            //                 this.symbol_data[symbol] = { tick_history: [], last_digit: null, last_last_digit: null, _tick_prices: [] };
+            //             }
+            //             ... (onmessage, onclose, onerror handlers) ...
+            //         }
+            //         break;
+            //     case 'authorize':
+            //     case 'buy':
+            //     case 'proposal_open_contract':
+            //     case 'tick':
+            // }
+            // } catch (error) { this.addLog(`Message parse error: ${error.message}`); }
+            // };
+            // this.ws.onclose = () => {
+            //     this.addLog(`Connection closed. Reconnecting...`);
+            //     this.connection_status = STATUS_OFFLINE;
+            //     this.is_authorizing = false;
+            //     this.is_authorized = false;
+            //     this.reconnectTimeout = setTimeout(() => this.connectWebSocket(), 5000);
+            // };
+            // this.ws.onerror = (e) => this.addLog(`Connection Error: ${e.type}`);
+        // } catch (e) { this.addLog(`Connection failed to initialize: ${e.message}`); this.is_authorizing = false; }
+    // }
 
     handleOverUnderLogic(symbol_data?: any) {
         const data = symbol_data || this;
