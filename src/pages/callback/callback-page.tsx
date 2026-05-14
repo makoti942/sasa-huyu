@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { handleCallback, startLogin, getToken } from '@/utils/auth';
+import { handleCallback, startLogin, getToken, getFlowType, getAdminToken, setAdminToken, setTradeToken } from '@/auth/DerivAuth';
+import { setTradeToken as setStateTradeToken, setAdminToken as setStateAdminToken, advanceAuthFlow, getAuthState, completeAuthFlow } from '@/utils/auth-state';
 import { Button } from '@deriv-com/ui';
 
 /*
@@ -69,13 +70,44 @@ const CallbackPage = () => {
         }
 
         handleCallback()
-            .then(async () => {
+            .then(async (token) => {
+                // Store tokens based on flow type
+                const flowType = getFlowType();
+                const adminToken = getAdminToken();
+                
+                console.log('[v0] Callback: flow type =', flowType, 'token =', token ? 'present' : 'missing')
+                
+                if (flowType === 'account_creation' || flowType === 'admin') {
+                  // Admin scope flow - store admin token in state
+                  if (adminToken) {
+                    setStateAdminToken(adminToken);
+                  }
+                } else {
+                  // Default trade scope - store in state
+                  if (token) {
+                    setStateTradeToken(token);
+                  }
+                }
+                
                 // Fetch legacy tokens for WebSocket auth (blocking — ensures bot can trade)
                 await fetchLegacyTokens();
-                setPhase('success');
-                setTimeout(() => {
+                
+                // Determine next action based on flow
+                const authState = getAuthState();
+                if (authState.authFlow === 'account_creation') {
+                  // Still need to complete account creation step
+                  setPhase('success');
+                  setTimeout(() => {
+                    window.location.replace('/auth-flow');
+                  }, 1200);
+                } else {
+                  // Complete auth and go to dashboard
+                  completeAuthFlow();
+                  setPhase('success');
+                  setTimeout(() => {
                     window.location.replace('/');
-                }, 1200);
+                  }, 1200);
+                }
             })
             .catch((err: unknown) => {
                 const msg = err instanceof Error ? err.message : String(err);

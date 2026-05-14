@@ -12,6 +12,7 @@ import { forceUpdateAppId } from '@/components/shared/utils/config/config';
 import { observer as globalObserver } from '@/external/bot-skeleton/utils/observer';
 import { StoreProvider } from '@/hooks/useStore';
 import CallbackPage from '@/pages/callback';
+import { AuthFlowPage } from '@/pages/auth-flow';
 import Endpoint from '@/pages/endpoint';
 import { TAuthData } from '@/types/api-types';
 import { initializeI18n, localize, TranslationProvider } from '@deriv-com/translations';
@@ -59,6 +60,7 @@ const router = createBrowserRouter(
             <Route index element={<AppRoot />} />
             <Route path='endpoint' element={<Endpoint />} />
             <Route path='callback' element={<CallbackPage />} />
+            <Route path='auth-flow' element={<AuthFlowPage />} />
             {/* Catch-all route - redirect to home for any invalid routes */}
             <Route path='*' element={<Navigate to='/' replace />} />
         </Route>

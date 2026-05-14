@@ -22,14 +22,23 @@ const DERIV_CONFIG = {
   authUrl: getEnv('VITE_DERIV_AUTH_URL', "https://auth.deriv.com/oauth2/auth"),
   tokenUrl: getEnv('VITE_DERIV_TOKEN_URL', "https://auth.deriv.com/oauth2/token"),
   restBase: getEnv('VITE_DERIV_REST_BASE', "https://api.derivws.com/trading/v1"),
-  scope: "trade"
+  scopes: {
+    trade: "trade",
+    admin: "admin",
+    payments: "payments",
+    trading_information: "trading_information"
+  }
 }
 
 const STORAGE_KEYS = {
   accessToken: "deriv_access_token",
   tokenExpiry: "deriv_token_expiry",
   codeVerifier: "deriv_code_verifier",
-  oauthState: "deriv_oauth_state"
+  oauthState: "deriv_oauth_state",
+  flowType: "deriv_flow_type", // 'login' | 'account_creation' | 'admin'
+  adminToken: "deriv_admin_token",
+  adminTokenExpiry: "deriv_admin_token_expiry",
+  currentScope: "deriv_current_scope"
 }
 
 // ─── PKCE HELPERS ───────────────────────────────────────────
@@ -54,9 +63,9 @@ async function generateCodeChallenge(verifier) {
     .replace(/=+$/, '')
 }
 
-// ─── LOGIN ───────────────────────────────────────────────────
+// ─── MULTI-SCOPE LOGIN ──────────────────────────────────────
 
-export async function startLogin() {
+async function initiateOAuthFlow(scope, flowType) {
   // Clear any leftover PKCE data from previous attempts
   Object.values(STORAGE_KEYS).forEach(k => sessionStorage.removeItem(k))
 
@@ -66,12 +75,14 @@ export async function startLogin() {
 
   sessionStorage.setItem(STORAGE_KEYS.codeVerifier, codeVerifier)
   sessionStorage.setItem(STORAGE_KEYS.oauthState, state)
+  sessionStorage.setItem(STORAGE_KEYS.flowType, flowType)
+  sessionStorage.setItem(STORAGE_KEYS.currentScope, scope)
 
   const params = new URLSearchParams({
     response_type: "code",
     client_id: DERIV_CONFIG.clientId,
     redirect_uri: DERIV_CONFIG.redirectUri,
-    scope: DERIV_CONFIG.scope,
+    scope: scope,
     state: state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
@@ -79,11 +90,26 @@ export async function startLogin() {
     app_id: DERIV_CONFIG.legacyAppId
   })
 
-  console.log("[v0] Login URL:", DERIV_CONFIG.authUrl + "?" + params.toString())
+  console.log("[v0] OAuth Flow:", flowType, "Scope:", scope)
   
   // MUST be same tab. Never window.open() or new tab.
   // sessionStorage is tab-specific — new tab = lost code_verifier
   window.location.href = DERIV_CONFIG.authUrl + "?" + params.toString()
+}
+
+// Trade scope login - first step in multi-step flow
+export async function startLoginFlow() {
+  await initiateOAuthFlow(DERIV_CONFIG.scopes.trade, 'login')
+}
+
+// Admin scope for account creation and management
+export async function startAccountCreationFlow() {
+  await initiateOAuthFlow(DERIV_CONFIG.scopes.admin, 'account_creation')
+}
+
+// Legacy function - maintained for backward compatibility
+export async function startLogin() {
+  await startLoginFlow()
 }
 
 // ─── CALLBACK ────────────────────────────────────────────────
@@ -167,12 +193,28 @@ export async function handleCallback() {
     )
   }
 
-  // Save token BEFORE any redirect
-  sessionStorage.setItem(STORAGE_KEYS.accessToken, data.access_token)
-  sessionStorage.setItem(
-    STORAGE_KEYS.tokenExpiry,
-    String(Date.now() + data.expires_in * 1000)
-  )
+  // Determine which token storage based on scope
+  const flowType = sessionStorage.getItem(STORAGE_KEYS.flowType)
+  const currentScope = sessionStorage.getItem(STORAGE_KEYS.currentScope)
+  
+  console.log("[v0] Token received for flow:", flowType, "scope:", currentScope)
+
+  if (currentScope === DERIV_CONFIG.scopes.admin || currentScope === DERIV_CONFIG.scopes.payments) {
+    // Admin/payments scope - store as admin token
+    sessionStorage.setItem(STORAGE_KEYS.adminToken, data.access_token)
+    sessionStorage.setItem(
+      STORAGE_KEYS.adminTokenExpiry,
+      String(Date.now() + data.expires_in * 1000)
+    )
+  } else {
+    // Default trade scope - store as access token
+    sessionStorage.setItem(STORAGE_KEYS.accessToken, data.access_token)
+    sessionStorage.setItem(
+      STORAGE_KEYS.tokenExpiry,
+      String(Date.now() + data.expires_in * 1000)
+    )
+  }
+  
   sessionStorage.removeItem(STORAGE_KEYS.codeVerifier)
 
   return data.access_token
@@ -185,6 +227,21 @@ export function getToken() {
   const expiry = sessionStorage.getItem(STORAGE_KEYS.tokenExpiry)
   if (token && expiry && Date.now() < Number(expiry)) return token
   return null
+}
+
+export function getAdminToken() {
+  const token = sessionStorage.getItem(STORAGE_KEYS.adminToken)
+  const expiry = sessionStorage.getItem(STORAGE_KEYS.adminTokenExpiry)
+  if (token && expiry && Date.now() < Number(expiry)) return token
+  return null
+}
+
+export function getFlowType() {
+  return sessionStorage.getItem(STORAGE_KEYS.flowType) || null
+}
+
+export function getCurrentScope() {
+  return sessionStorage.getItem(STORAGE_KEYS.currentScope) || null
 }
 
 export function isLoggedIn() {
