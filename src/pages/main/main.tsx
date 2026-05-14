@@ -31,6 +31,7 @@ import OverUnder from '../OverUnder';
 import MakotiMagic from '../MakotiMagic';
 import MakotiMagicStore from '@/stores/makoti-magic-store';
 import './main.scss';
+import { isLoggedIn, createDerivWebSocket } from '@/auth/DerivAuth';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
 const TradingView = lazy(() => import('../tradingview'));
@@ -79,8 +80,13 @@ const AppWrapper = observer(() => {
     const navigate = useNavigate();
 
     useEffect(() => {
+        if (isLoggedIn()) {
+            createDerivWebSocket();
+        }
+    }, []);
+
+    useEffect(() => {
         MakotiMagicStore.setBotLoadCallback((xmlContent: string) => {
-            // Just load the bot without navigating
             setPendingFreeBot({ name: 'Makoti Magic Bot', xml: xmlContent });
         });
     }, [setPendingFreeBot]);

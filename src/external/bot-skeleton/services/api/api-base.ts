@@ -22,6 +22,7 @@ import {
 } from './appId';
 import { getAppId } from '@/components/shared';
 import chart_api from './chart-api';
+import { createDerivWebSocket } from '@/auth/DerivAuth';
 
 type CurrentSubscription = {
     id: string;
@@ -104,9 +105,12 @@ class APIBase {
                 this.api.connection.removeEventListener('open', this.onsocketopen.bind(this));
                 this.api.connection.removeEventListener('close', this.onsocketclose.bind(this));
             }
-            this.api = generateDerivApiInstance();
-            this.api?.connection.addEventListener('open', this.onsocketopen.bind(this));
-            this.api?.connection.addEventListener('close', this.onsocketclose.bind(this));
+            const ws = await createDerivWebSocket();
+            if (ws) {
+                this.api = generateDerivApiInstance(ws);
+                this.api?.connection.addEventListener('open', this.onsocketopen.bind(this));
+                this.api?.connection.addEventListener('close', this.onsocketclose.bind(this));
+            }
         }
 
         if (!this.has_active_symbols && !V2GetActiveToken()) {
@@ -134,24 +138,17 @@ class APIBase {
         return 'Socket not initialized';
     }
 
-    /**
-     * Ensure the WebSocket connection is using the current app_id from localStorage
-     * If app_id has changed, reconnect safely (only when no active trades)
-     */
     async ensureCurrentAppId() {
-        // Only check if we have an active connection
         if (!this.api || this.api?.connection.readyState !== 1) {
             return;
         }
 
-        // Check if app_id has changed
         if (hasAppIdChanged()) {
             const oldAppId = getCurrentConnectionAppId();
             const newAppId = getAppId();
 
             console.log(`🔌 [APP ID] App ID changed: ${oldAppId} → ${newAppId}`);
 
-            // Check if we're currently running trades - if so, don't reconnect (causes logout)
             if (this.is_running) {
                 console.log(
                     `⚠️ [APP ID] Bot is running, cannot reconnect. New app_id ${newAppId} will be used on next connection.`
@@ -159,7 +156,6 @@ class APIBase {
                 return;
             }
 
-            // Safe to reconnect - no active trades
             console.log(`🔄 [APP ID] Reconnecting with new app_id ${newAppId} (safe - no active trades)...`);
             const token = V2GetActiveToken();
             const savedAccountId = this.account_id;
@@ -170,13 +166,9 @@ class APIBase {
             }
 
             try {
-                // Save token before reconnecting
                 this.token = token;
-
-                // Reconnect
                 await this.init(true);
 
-                // Wait for connection to be ready
                 if (this.api && this.api.connection) {
                     await new Promise<void>(resolve => {
                         if (this.api?.connection.readyState === 1) {
@@ -187,12 +179,11 @@ class APIBase {
                                 resolve();
                             };
                             this.api?.connection?.addEventListener('open', onOpen);
-                            setTimeout(() => resolve(), 5000); // Timeout after 5 seconds
+                            setTimeout(() => resolve(), 5000); 
                         }
                     });
                 }
 
-                // Re-authorize with saved token
                 if (this.api && this.api.connection.readyState === 1) {
                     const { authorize, error } = await this.api.authorize(token);
                     if (error) {
@@ -210,21 +201,13 @@ class APIBase {
                 }
             } catch (err) {
                 console.error('❌ [APP ID] Reconnection error:', err);
-                // If reconnection fails, the old connection should still work
             }
         }
     }
 
-    /**
-     * Reconnect WebSocket with new app_id after trade completion
-     * This is safe because:
-     * - Trade is already complete
-     * - We're between trades (no active trade to interrupt)
-     * - We preserve the token and re-authorize automatically
-     */
     async reconnectWithNewAppId() {
         if (!hasAppIdChanged()) {
-            return; // No change needed
+            return; 
         }
 
         const oldAppId = getCurrentConnectionAppId();
@@ -238,14 +221,11 @@ class APIBase {
 
         console.log(`🔄 [WEBSOCKET] Reconnecting: ${oldAppId} → ${newAppId} (after trade completion)`);
 
-        // Save token before reconnecting
         const savedToken = token;
         const savedAccountId = this.account_id;
 
-        // Reconnect with new app_id
         await this.init(true);
 
-        // Wait for connection to be ready
         if (this.api?.connection) {
             await new Promise<void>(resolve => {
                 if (this.api?.connection.readyState === 1) {
@@ -256,12 +236,11 @@ class APIBase {
                         resolve();
                     };
                     this.api?.connection?.addEventListener('open', onOpen);
-                    setTimeout(() => resolve(), 5000); // Timeout after 5 seconds
+                    setTimeout(() => resolve(), 5000); 
                 }
             });
         }
 
-        // Re-authorize with saved token (init() should do this, but ensure it happens)
         if (savedToken && this.api && this.api.connection.readyState === 1) {
             try {
                 const { authorize, error } = await this.api.authorize(savedToken);
@@ -270,7 +249,6 @@ class APIBase {
                 } else {
                     console.log(`✅ [WEBSOCKET] Reconnected and re-authorized with App ID ${newAppId}`);
                     this.account_id = savedAccountId;
-                    // Restore account info
                     this.account_info = authorize;
                     setAccountList(authorize?.account_list || []);
                     setAuthData(authorize);
@@ -284,7 +262,6 @@ class APIBase {
     }
 
     terminate() {
-        // eslint-disable-next-line no-console
         if (this.api) this.api.disconnect();
     }
 
@@ -302,10 +279,8 @@ class APIBase {
     }
 
     reconnectIfNotConnected = () => {
-        // eslint-disable-next-line no-console
         console.log('connection state: ', this.api?.connection?.readyState);
         if (this.api?.connection?.readyState && this.api?.connection?.readyState > 1) {
-            // eslint-disable-next-line no-console
             console.log('Info: Connection to the server was closed, trying to reconnect.');
             this.init(true);
         }
@@ -364,7 +339,6 @@ class APIBase {
     async getSelfExclusion() {
         if (!this.api || !this.is_authorized) return;
         await this.api.getSelfExclusion();
-        // TODO: fix self exclusion
     }
 
     async subscribe() {
@@ -425,7 +399,6 @@ class APIBase {
         this.subscriptions.forEach(s => s.unsubscribe());
         this.subscriptions = [];
 
-        // Resetting timeout resolvers
         const global_timeouts = globalObserver.getState('global_timeouts') ?? [];
 
         global_timeouts.forEach((_: unknown, i: number) => {

@@ -4,12 +4,12 @@
 
 const DERIV_CONFIG = {
   clientId: "337DJLKi2OJ4VsyFSLIt9",
+  legacyAppId: "101585",
   redirectUri: "https://makotitraderss.vercel.app/callback",
   authUrl: "https://auth.deriv.com/oauth2/auth",
   tokenUrl: "https://auth.deriv.com/oauth2/token",
-  apiBase: "https://api.derivws.com",
-  scope: "trade",
-  appId: "337DJLKi2OJ4VsyFSLIt9"
+  restBase: "https://api.derivws.com/trading/v1",
+  scope: "trade"
 }
 
 const STORAGE_KEYS = {
@@ -56,13 +56,14 @@ export async function startLogin() {
 
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: DERIV_CONFIG.clientId,
-    redirect_uri: DERIV_CONFIG.redirectUri,
-    scope: DERIV_CONFIG.scope,
+    client_id: "337DJLKi2OJ4VsyFSLIt9",
+    redirect_uri: "https://makotitraderss.vercel.app/callback",
+    scope: "trade",
     state: state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
-    prompt: "login consent"
+    prompt: "login consent",
+    app_id: "101585"
   })
 
   // MUST be same tab. Never window.open() or new tab.
@@ -166,9 +167,18 @@ export function isLoggedIn() {
 }
 
 export function getAuthHeaders() {
+  const token = getToken()
+  if (!token) {
+    // Handle case where user is not logged in - maybe return empty headers
+    // or headers for public endpoints. For now, returning without auth.
+    return {
+      "Deriv-App-ID": DERIV_CONFIG.clientId,
+      "Content-Type": "application/json"
+    }
+  }
   return {
-    "Authorization": "Bearer " + getToken(),
-    "Deriv-App-ID": DERIV_CONFIG.appId,
+    "Authorization": "Bearer " + token,
+    "Deriv-App-ID": DERIV_CONFIG.clientId,
     "Content-Type": "application/json"
   }
 }
@@ -185,36 +195,89 @@ export function logout() {
 
 // ─── WEBSOCKET ────────────────────────────────────────────────
 
-export async function getAccounts() {
-  const response = await fetch(
-    DERIV_CONFIG.apiBase + "/trading/v1/options/accounts",
-    { headers: getAuthHeaders() }
-  )
-  if (!response.ok) throw new Error("Failed to get accounts")
-  return response.json()
-}
+// This function will now be responsible for the entire new connection flow.
+// It will be called from our application logic after login.
+export async function createDerivWebSocket() {
+  const token = sessionStorage.getItem("deriv_access_token")
+  if (!token) {
+    console.log("No token - cannot create WebSocket")
+    return null
+  }
 
-export async function getAuthenticatedWSUrl(accountId) {
-  const response = await fetch(
-    DERIV_CONFIG.apiBase + "/trading/v1/options/accounts/" + accountId + "/otp",
-    { method: "POST", headers: getAuthHeaders() }
-  )
-  if (!response.ok) throw new Error("Failed to get WebSocket URL")
-  const data = await response.json()
-  return data.websocket_url
-}
+  try {
+    // Step 1: Get accounts list
+    const accountsRes = await fetch(
+      "https://api.derivws.com/trading/v1/options/accounts",
+      {
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+          "Content-Type": "application/json"
+        }
+      }
+    )
 
-export async function createAuthenticatedWebSocket(accountId) {
-  const wsUrl = await getAuthenticatedWSUrl(accountId)
-  return new WebSocket(wsUrl)
-}
+    if (!accountsRes.ok) {
+      console.error("Failed to get accounts:", await accountsRes.text())
+      return null
+    }
 
-// ─── EXPORTS SUMMARY ─────────────────────────────────────────
-// startLogin()              → call when login button clicked
-// handleCallback()          → call on /callback page load
-// getToken()                → get current Bearer token
-// isLoggedIn()              → check if user is logged in
-// getAuthHeaders()          → get headers for all API calls
-// logout()                  → log user out completely
-// getAccounts()             → get user's Deriv accounts
-// createAuthenticatedWebSocket(accountId) → get WS connection
+    const accountsData = await accountsRes.json()
+    const accounts = accountsData.data || accountsData
+    const firstAccount = Array.isArray(accounts) ? accounts[0] : accounts
+
+    if (!firstAccount || !firstAccount.id) {
+      console.error("No account found in response:", accountsData)
+      return null
+    }
+
+    // Step 2: Get OTP authenticated WebSocket URL
+    const otpRes = await fetch(
+      "https://api.derivws.com/trading/v1/options/accounts/" + 
+      firstAccount.id + "/otp",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+          "Content-Type": "application/json"
+        }
+      }
+    )
+
+    if (!otpRes.ok) {
+      console.error("Failed to get OTP:", await otpRes.text())
+      return null
+    }
+
+    const otpData = await otpRes.json()
+    const wsUrl = otpData.data?.url || otpData.url || otpData.websocket_url
+
+    if (!wsUrl) {
+      console.error("No WebSocket URL in OTP response:", otpData)
+      return null
+    }
+
+    // Step 3: Connect to authenticated WebSocket
+    console.log("Attempting to connect to WebSocket at:", wsUrl)
+    const ws = new WebSocket(wsUrl)
+    
+    ws.onopen = () => {
+      console.log("Deriv WebSocket connected successfully")
+    }
+    
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err)
+    }
+    
+    ws.onclose = (event) => {
+      console.log("WebSocket closed. Code:", event.code, "Reason:", event.reason)
+      // Optional: implement a reconnect strategy here if needed
+    }
+
+    return ws
+  } catch (error) {
+    console.error("Error creating Deriv WebSocket connection:", error)
+    return null
+  }
+}
