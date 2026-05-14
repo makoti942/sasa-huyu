@@ -2,13 +2,26 @@
 // Single source of truth for all Deriv authentication
 // Every component in the app imports auth functions from here only
 
+// Support both env vars and defaults
+const getEnv = (key, fallback) => {
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    return import.meta.env[key] || fallback
+  }
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[key] || fallback
+  }
+  return fallback
+}
+
 const DERIV_CONFIG = {
-  clientId: "337DJLKi2OJ4VsyFSLIt9",
-  legacyAppId: "101585",
-  redirectUri: "https://makotitraderss.vercel.app/callback",
-  authUrl: "https://auth.deriv.com/oauth2/auth",
-  tokenUrl: "https://auth.deriv.com/oauth2/token",
-  restBase: "https://api.derivws.com/trading/v1",
+  clientId: getEnv('VITE_DERIV_CLIENT_ID', "337DJLKi2OJ4VsyFSLIt9"),
+  legacyAppId: getEnv('VITE_DERIV_LEGACY_APP_ID', "101585"),
+  redirectUri: getEnv('VITE_DERIV_REDIRECT_URI', 
+    typeof window !== 'undefined' ? window.location.origin + "/callback" : "https://makotitraderss.vercel.app/callback"
+  ),
+  authUrl: getEnv('VITE_DERIV_AUTH_URL', "https://auth.deriv.com/oauth2/auth"),
+  tokenUrl: getEnv('VITE_DERIV_TOKEN_URL', "https://auth.deriv.com/oauth2/token"),
+  restBase: getEnv('VITE_DERIV_REST_BASE', "https://api.derivws.com/trading/v1"),
   scope: "trade"
 }
 
@@ -56,16 +69,18 @@ export async function startLogin() {
 
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: "337DJLKi2OJ4VsyFSLIt9",
-    redirect_uri: "https://makotitraderss.vercel.app/callback",
-    scope: "trade",
+    client_id: DERIV_CONFIG.clientId,
+    redirect_uri: DERIV_CONFIG.redirectUri,
+    scope: DERIV_CONFIG.scope,
     state: state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     prompt: "login consent",
-    app_id: "101585"
+    app_id: DERIV_CONFIG.legacyAppId
   })
 
+  console.log("[v0] Login URL:", DERIV_CONFIG.authUrl + "?" + params.toString())
+  
   // MUST be same tab. Never window.open() or new tab.
   // sessionStorage is tab-specific — new tab = lost code_verifier
   window.location.href = DERIV_CONFIG.authUrl + "?" + params.toString()
@@ -116,29 +131,39 @@ export async function handleCallback() {
 
   let response
   try {
+    const tokenParams = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: code,
+      redirect_uri: DERIV_CONFIG.redirectUri,
+      client_id: DERIV_CONFIG.clientId,
+      code_verifier: codeVerifier
+    })
+    console.log("[v0] Token exchange params:", {
+      grant_type: "authorization_code",
+      code: "***",
+      redirect_uri: DERIV_CONFIG.redirectUri,
+      client_id: DERIV_CONFIG.clientId,
+      code_verifier: "***"
+    })
     response = await fetch(DERIV_CONFIG.tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code: code,
-        redirect_uri: DERIV_CONFIG.redirectUri,
-        client_id: DERIV_CONFIG.clientId,
-        code_verifier: codeVerifier
-      }).toString()
+      body: tokenParams.toString()
     })
   } catch (networkError) {
     throw new Error(
-      "Network error during login. Please check your connection."
+      "Network error during login. Please check your connection: " + 
+      (networkError instanceof Error ? networkError.message : String(networkError))
     )
   }
 
   const data = await response.json()
+  console.log("[v0] Token response status:", response.status, "data keys:", Object.keys(data))
 
   if (!response.ok) {
     throw new Error(
-      "Deriv login failed: " + 
-      (data.error_description || data.error || "Unknown error")
+      "Deriv login failed (HTTP " + response.status + "): " + 
+      (data.error_description || data.error || JSON.stringify(data))
     )
   }
 
@@ -207,11 +232,11 @@ export async function createDerivWebSocket() {
   try {
     // Step 1: Get accounts list
     const accountsRes = await fetch(
-      "https://api.derivws.com/trading/v1/options/accounts",
+      DERIV_CONFIG.restBase + "/options/accounts",
       {
         headers: {
           "Authorization": "Bearer " + token,
-          "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+          "Deriv-App-ID": DERIV_CONFIG.clientId,
           "Content-Type": "application/json"
         }
       }
@@ -233,13 +258,13 @@ export async function createDerivWebSocket() {
 
     // Step 2: Get OTP authenticated WebSocket URL
     const otpRes = await fetch(
-      "https://api.derivws.com/trading/v1/options/accounts/" + 
+      DERIV_CONFIG.restBase + "/options/accounts/" + 
       firstAccount.id + "/otp",
       {
         method: "POST",
         headers: {
           "Authorization": "Bearer " + token,
-          "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+          "Deriv-App-ID": DERIV_CONFIG.clientId,
           "Content-Type": "application/json"
         }
       }
