@@ -279,15 +279,9 @@ const AppHeader = observer(({ isAuthenticating }: TAppHeaderProps) => {
                             setIsNewLoginLoading(true);
                             setNewLoginError('');
                             try {
-                                const tmbEnabled = await isTmbEnabled().catch(() => false);
-                                if (tmbEnabled) {
-                                    await onRenderTMBCheck(true, undefined, false);
-                                    setIsNewLoginLoading(false);
-                                } else {
                                     await startLogin();
                                     // redirect fires inside startLogin — if we reach here, re-enable
                                     setIsNewLoginLoading(false);
-                                }
                             } catch (error) {
                                 console.error('[Login]', error);
                                 setIsNewLoginLoading(false);
