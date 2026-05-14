@@ -376,6 +376,8 @@ const useTMB = (): UseTMBReturn => {
     //     [isCallbackPage, getActiveSessions, handleLogout, processTokens, domains, currentDomain]
     // );
 
+    const onRenderTMBCheck = useCallback(async () => { /* placeholder */ }, []);
+
     const handleLogout = useCallback(() => { logout(); }, []);
 
     return useMemo(
