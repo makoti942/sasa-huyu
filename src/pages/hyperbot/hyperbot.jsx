@@ -448,24 +448,25 @@ const Hyperbot = observer(() => {
     };
 
     // Authorize if needed
-    const authorizeIfNeeded = async () => {
-        if (is_authorized || !apiRef.current) return;
-        const token = V2GetActiveToken();
-        if (!token) {
-            alert('Please log in to place trades');
-            throw new Error('No token');
-        }
-        try {
-            const { authorize, error } = await apiRef.current.authorize(token);
-            if (error) throw error;
-            setIsAuthorized(true);
-            const loginid = authorize?.loginid || V2GetActiveClientId();
-            setAccountCurrency(authorize?.currency || currency);
-        } catch (e) {
-            console.error('Authorization error:', e);
-            throw e;
-        }
-    };
+    // DISABLED - replaced by DerivAuth.js
+    // const authorizeIfNeeded = async () => {
+    //     if (is_authorized || !apiRef.current) return;
+    //     const token = V2GetActiveToken();
+    //     if (!token) {
+    //         alert('Please log in to place trades');
+    //         throw new Error('No token');
+    //     }
+    //     try {
+    //         const { authorize, error } = await apiRef.current.authorize(token);
+    //         if (error) throw error;
+    //         setIsAuthorized(true);
+    //         const loginid = authorize?.loginid || V2GetActiveClientId();
+    //         setAccountCurrency(authorize?.currency || currency);
+    //     } catch (e) {
+    //         console.error('Authorization error:', e);
+    //         throw e;
+    //     }
+    // };
 
     // Place trades once
     const placeTradesOnce = async () => {

@@ -53,8 +53,9 @@ const TickAnalyser: React.FC = () => {
     ];
 
     useEffect(() => {
-        const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=337');
-        wsRef.current = ws;
+        // DISABLED - replaced by DerivAuth.js
+        // const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=337');
+        // wsRef.current = ws;
 
         ws.onopen = () => {
             setIsLoading(false);

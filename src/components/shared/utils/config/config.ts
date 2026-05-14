@@ -90,8 +90,9 @@ export const getDebugServiceWorker = () => {
  * Triggers PKCE login to auth.deriv.com and returns ''.
  * @deprecated Use startLogin() from @/utils/auth directly.
  */
-export const generateOAuthURL = (_is_new_account = false, _state = '') => {
-    // Trigger PKCE login asynchronously — caller must not rely on the return value.
-    import('@/utils/auth').then(({ startLogin }) => startLogin()).catch(console.error);
-    return '';
-};
+// DISABLED - replaced by DerivAuth.js
+// export const generateOAuthURL = (_is_new_account = false, _state = '') => {
+//     // Trigger PKCE login asynchronously — caller must not rely on the return value.
+//     import('@/utils/auth').then(({ startLogin }) => startLogin()).catch(console.error);
+//     return '';
+// };

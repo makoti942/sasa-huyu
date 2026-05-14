@@ -448,8 +448,9 @@ const CopyTrading = observer(() => {
 
             // Deriv config-aware endpoint
             const APP_ID = String(getAppId?.() ?? localStorage.getItem('config.app_id') ?? '337');
-            const server = getSocketURL?.() || 'ws.derivws.com';
-            const ws_url = `wss://${server}/websockets/v3?app_id=${APP_ID}`;
+            // DISABLED - replaced by DerivAuth.js
+            // const server = getSocketURL?.() || 'ws.derivws.com';
+            // const ws_url = `wss://${server}/websockets/v3?app_id=${APP_ID}`;
 
             let ws: WebSocket | null = null;
             let reconnectAttempts = 0;
@@ -481,37 +482,38 @@ const CopyTrading = observer(() => {
                 }
             };
 
-            const connect = () => {
-                ws = new WebSocket(ws_url);
+            // DISABLED - replaced by DerivAuth.js
+            // const connect = () => {
+            //     ws = new WebSocket(ws_url);
 
-                ws.addEventListener('open', () => {
-                    reconnectAttempts = 0;
-                    startPing();
-                    authorize();
-                });
+            //     ws.addEventListener('open', () => {
+            //         reconnectAttempts = 0;
+            //         startPing();
+            //         authorize();
+            //     });
 
-                ws.addEventListener('close', () => {
-                    stopPing();
-                    scheduleReconnect();
-                });
+            //     ws.addEventListener('close', () => {
+            //         stopPing();
+            //         scheduleReconnect();
+            //     });
 
-                ws.addEventListener('error', () => {
-                    stopPing();
-                    scheduleReconnect();
-                });
+            //     ws.addEventListener('error', () => {
+            //         stopPing();
+            //         scheduleReconnect();
+            //     });
 
-                ws.addEventListener('message', evt => {
-                    const ms = JSON.parse(evt.data);
-                    const req_id = ms?.echo_req?.req_id;
-                    const error = ms?.error;
+            //     ws.addEventListener('message', evt => {
+            //         const ms = JSON.parse(evt.data);
+            //         const req_id = ms?.echo_req?.req_id;
+            //         const error = ms?.error;
 
-                    if (error) {
-                        const errorMsg = `Error: ${error.message || 'Unknown error'}${error.code ? ` (${error.code})` : ''}`;
-                        setLoginId('API Error');
-                        setBalance(errorMsg);
-                        return;
-                    }
-                    if (req_id === 2111 && ms.authorize?.account_list) {
+            //         if (error) {
+            //             const errorMsg = `Error: ${error.message || 'Unknown error'}${error.code ? ` (${error.code})` : ''}`;
+            //             setLoginId('API Error');
+            //             setBalance(errorMsg);
+            //             return;
+            //         }
+            //     if (req_id === 2111 && ms.authorize?.account_list) {
                         const list = ms.authorize.account_list as Array<any>;
                         let realLogin: string | null = null;
                         
@@ -587,32 +589,19 @@ const CopyTrading = observer(() => {
                 });
             };
 
-            const scheduleReconnect = () => {
-                const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts++));
-                setTimeout(() => connect(), delay);
-            };
+            // DISABLED - replaced by DerivAuth.js
+            // const scheduleReconnect = () => {
+            //     const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts++));
+            //     setTimeout(() => connect(), delay);
+            // };
 
-            const authorize = () => {
-                if (!ws || ws.readyState === WebSocket.CLOSED) return;
+            // const getBalance = (loginid: string) => {
+            //     if (!ws || ws.readyState === WebSocket.CLOSED) return;
+            //     const msg = JSON.stringify({ balance: 1, loginid, req_id: 2112 });
+            //     ws.send(msg);
+            // };
 
-                // Check if we have any tokens
-                if (!tokens || tokens.length === 0) {
-                    setLoginId('No tokens');
-                    setBalance('******');
-                    return;
-                }
-
-                const msg = JSON.stringify({ authorize: 'MULTI', tokens, req_id: 2111 });
-                ws.send(msg);
-            };
-
-            const getBalance = (loginid: string) => {
-                if (!ws || ws.readyState === WebSocket.CLOSED) return;
-                const msg = JSON.stringify({ balance: 1, loginid, req_id: 2112 });
-                ws.send(msg);
-            };
-
-            connect();
+            // connect();
         };
 
         // Update counts periodically

@@ -685,65 +685,66 @@ export default class OverUnderStore {
         }
     }
 
-    connectWebSocket() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_authorized) {
-            this.addLog('Already connected and authorized.');
-            return;
-        }
-        if (this.ws) { this.ws.onclose = null; this.ws.close(); }
-        if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
-        this.addLog('Connecting...');
-        this.connection_status = STATUS_CONNECTING;
-        this.is_authorized = false;
-        this.is_authorizing = true;
-        const app_id = getAppId();
-        const server_url = getSocketURL();
-        try {
-            this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
-            this.ws.onopen = () => {
-                runInAction(() => { this.connection_status = STATUS_LIVE; });
-                this.addLog(`Connection opened (App ID: ${app_id}). Requesting authorization...`);
-                if (window.self !== window.top) {
-                    window.parent.postMessage({ name: 'request_auth_token' }, '*');
-                } else {
-                    try {
-                        const active_loginid = localStorage.getItem('active_loginid');
-                        const client_accounts_str = localStorage.getItem('client.accounts');
-                        if (client_accounts_str && active_loginid) {
-                            const client_accounts = JSON.parse(client_accounts_str);
-                            const token = client_accounts[active_loginid]?.token;
-                            if (token) {
-                                this.addLog(`Authorizing with token for ${active_loginid}...`);
-                                this.ws?.send(JSON.stringify({ authorize: token }));
-                                return;
-                            }
-                        }
-                        const accountsListStr = localStorage.getItem('accountsList');
-                        if (accountsListStr && active_loginid) {
-                            const accountsList = JSON.parse(accountsListStr);
-                            const token = accountsList[active_loginid];
-                            if (token) {
-                                this.addLog(`Authorizing with fallback token for ${active_loginid}...`);
-                                this.ws?.send(JSON.stringify({ authorize: token }));
-                                return;
-                            }
-                        }
-                        const storeToken = this.root_store.client.getToken?.();
-                        if (storeToken) {
-                            this.addLog('Authorizing with store token...');
-                            this.ws?.send(JSON.stringify({ authorize: storeToken }));
-                            return;
-                        }
-                        this.addLog('No token found in storage. Proceeding with public ticks.');
-                        runInAction(() => { this.is_authorizing = false; });
-                        this.subscribeToTicks(this.selected_symbol);
-                    } catch (e) {
-                        this.addLog(`Token retrieval error: ${e.message}. Proceeding with public ticks.`);
-                        runInAction(() => { this.is_authorizing = false; });
-                        this.subscribeToTicks(this.selected_symbol);
-                    }
-                }
-            };
+    // DISABLED - replaced by DerivAuth.js
+    // connectWebSocket() {
+    //     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_authorized) {
+    //         this.addLog('Already connected and authorized.');
+    //         return;
+    //     }
+    //     if (this.ws) { this.ws.onclose = null; this.ws.close(); }
+    //     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    //     this.addLog('Connecting...');
+    //     this.connection_status = STATUS_CONNECTING;
+    //     this.is_authorized = false;
+    //     this.is_authorizing = true;
+    //     const app_id = getAppId();
+    //     const server_url = getSocketURL();
+    //     try {
+    //         this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
+    //         this.ws.onopen = () => {
+    //             runInAction(() => { this.connection_status = STATUS_LIVE; });
+    //             this.addLog(`Connection opened (App ID: ${app_id}). Requesting authorization...`);
+    //             if (window.self !== window.top) {
+    //                 window.parent.postMessage({ name: 'request_auth_token' }, '*');
+    //             } else {
+    //                 try {
+    //                     const active_loginid = localStorage.getItem('active_loginid');
+    //                     const client_accounts_str = localStorage.getItem('client.accounts');
+    //                     if (client_accounts_str && active_loginid) {
+    //                         const client_accounts = JSON.parse(client_accounts_str);
+    //                         const token = client_accounts[active_loginid]?.token;
+    //                         if (token) {
+    //                             this.addLog(`Authorizing with token for ${active_loginid}...`);
+    //                             this.ws?.send(JSON.stringify({ authorize: token }));
+    //                             return;
+    //                         }
+    //                     }
+    //                     const accountsListStr = localStorage.getItem('accountsList');
+    //                     if (accountsListStr && active_loginid) {
+    //                         const accountsList = JSON.parse(accountsListStr);
+    //                         const token = accountsList[active_loginid];
+    //                         if (token) {
+    //                             this.addLog(`Authorizing with fallback token for ${active_loginid}...`);
+    //                             this.ws?.send(JSON.stringify({ authorize: token }));
+    //                             return;
+    //                         }
+    //                     }
+    //                     const storeToken = this.root_store.client.getToken?.();
+    //                     if (storeToken) {
+    //                         this.addLog('Authorizing with store token...');
+    //                         this.ws?.send(JSON.stringify({ authorize: storeToken }));
+    //                         return;
+    //                     }
+    //                     this.addLog('No token found in storage. Proceeding with public ticks.');
+    //                     runInAction(() => { this.is_authorizing = false; });
+    //                     this.subscribeToTicks(this.selected_symbol);
+    //                 } catch (e) {
+    //                     this.addLog(`Token retrieval error: ${e.message}. Proceeding with public ticks.`);
+    //                     runInAction(() => { this.is_authorizing = false; });
+    //                     this.subscribeToTicks(this.selected_symbol);
+    //                 }
+    //             }
+    //         };
             this.ws.onmessage = async (msg) => {
                 try {
                     const data = JSON.parse(msg.data);

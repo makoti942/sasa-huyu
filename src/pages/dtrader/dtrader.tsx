@@ -41,25 +41,26 @@ const Dtrader = observer(() => {
         }
 
         const appId = getAppId() || 337;
-        const params = new URLSearchParams({
-            acct1: loginId,
-            token1: token,
-            cur1: currency,
-            lang: 'EN',
-            app_id: appId.toString(),
-            chart_type: 'area',
-            interval: '1t',
-            symbol: '1HZ100V',
-            trade_type: 'over_under',
-            hide_bot: '1',
-            bot_disabled: 'true',
-            disable_bot: '1',
-            no_bot: '1',
-            manual_only: '1',
-            hide_bot_controls: 'true',
-            hide_account_switcher: 'true',
-            hide_trade_panel: 'true',
-        });
+        // DISABLED - replaced by DerivAuth.js
+        // const params = new URLSearchParams({
+        //     acct1: loginId,
+        //     token1: token,
+        //     cur1: currency,
+        //     lang: 'EN',
+        //     app_id: appId.toString(),
+        //     chart_type: 'area',
+        //     interval: '1t',
+        //     symbol: '1HZ100V',
+        //     trade_type: 'over_under',
+        //     hide_bot: '1',
+        //     bot_disabled: 'true',
+        //     disable_bot: '1',
+        //     no_bot: '1',
+        //     manual_only: '1',
+        //     hide_bot_controls: 'true',
+        //     hide_account_switcher: 'true',
+        //     hide_trade_panel: 'true',
+        // });
 
         const url = `https://deriv-dtrader.vercel.app/dtrader?${params.toString()}`;
         setIframeSrc(url);

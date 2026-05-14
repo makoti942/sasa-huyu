@@ -150,28 +150,29 @@ const SpeedBot = observer(() => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const authorizeIfNeeded = async () => {
-        if (is_authorized) return;
-        const token = V2GetActiveToken();
-        if (!token) {
-            setStatus('No token found. Please log in and select an account.');
-            throw new Error('No token');
-        }
-        const { authorize, error } = await apiRef.current.authorize(token);
-        if (error) {
-            setStatus(`Authorization error: ${error.message || error.code}`);
-            throw error;
-        }
-        setIsAuthorized(true);
-        const loginid = authorize?.loginid || V2GetActiveClientId();
-        setAccountCurrency(authorize?.currency || 'USD');
-        try {
-            // Sync SpeedBot auth state into shared ClientStore so Transactions store keys correctly by account
-            store?.client?.setLoginId?.(loginid || '');
-            store?.client?.setCurrency?.(authorize?.currency || 'USD');
-            store?.client?.setIsLoggedIn?.(true);
-        } catch {}
-    };
+    // DISABLED - replaced by DerivAuth.js
+    // const authorizeIfNeeded = async () => {
+    //     if (is_authorized) return;
+    //     const token = V2GetActiveToken();
+    //     if (!token) {
+    //         setStatus('No token found. Please log in and select an account.');
+    //         throw new Error('No token');
+    //     }
+    //     const { authorize, error } = await apiRef.current.authorize(token);
+    //     if (error) {
+    //         setStatus(`Authorization error: ${error.message || error.code}`);
+    //         throw error;
+    //     }
+    //     setIsAuthorized(true);
+    //     const loginid = authorize?.loginid || V2GetActiveClientId();
+    //     setAccountCurrency(authorize?.currency || 'USD');
+    //     try {
+    //         // Sync SpeedBot auth state into shared ClientStore so Transactions store keys correctly by account
+    //         store?.client?.setLoginId?.(loginid || '');
+    //         store?.client?.setCurrency?.(authorize?.currency || 'USD');
+    //         store?.client?.setIsLoggedIn?.(true);
+    //     } catch {}
+    // };
 
     const stopTicks = () => {
         try {

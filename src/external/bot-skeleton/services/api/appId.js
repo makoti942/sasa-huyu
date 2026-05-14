@@ -65,54 +65,9 @@ export const shouldRecreateApiInstance = storedAppId => {
     return storedAppId !== currentAppId;
 };
 
-export const getLoginId = () => {
-    const login_id = localStorage.getItem('active_loginid');
-    if (login_id && login_id !== 'null') return login_id;
-    return null;
-};
-
-export const V2GetActiveToken = () => {
-    // CRITICAL: If show_as_cr flag is set, always use demo account token
-    // This ensures all trades are executed on demo account, even when CR account is displayed
-    const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
-    if (showAsCR) {
-        const accountsList = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('accountsList') || '{}') : {};
-        const demoToken = accountsList['VRTC10109979'];
-        if (demoToken) {
-            console.log('[V2GetActiveToken] 🎯 Using demo token (show_as_cr:', showAsCR, ')');
-            return demoToken;
-        }
-    }
-    const token = localStorage.getItem('authToken');
-    if (token && token !== 'null') return token;
-    return null;
-};
-
-export const V2GetActiveClientId = () => {
-    // CRITICAL: If show_as_cr flag is set, always return demo account ID
-    // This ensures API always uses demo account for trading
-    const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
-    if (showAsCR) {
-        console.log('[V2GetActiveClientId] 🎯 Using demo account ID (show_as_cr:', showAsCR, ')');
-        return 'VRTC10109979';
-    }
-    const token = V2GetActiveToken();
-
-    if (!token) return null;
-    const account_list = JSON.parse(localStorage.getItem('accountsList') || '{}');
-    if (account_list && account_list !== 'null') {
-        const active_clientId = Object.keys(account_list).find(key => account_list[key] === token);
-        return active_clientId;
-    }
-    return null;
-};
-
-export const getToken = () => {
-    const active_loginid = getLoginId();
-    const client_accounts = JSON.parse(localStorage.getItem('accountsList')) ?? undefined;
-    const active_account = (client_accounts && client_accounts[active_loginid]) || {};
-    return {
-        token: active_account ?? undefined,
-        account_id: active_loginid ?? undefined,
-    };
-};
+// DISABLED - replaced by DerivAuth.js
+// Stub exports to prevent import crashes — always return null/empty
+export const getLoginId = () => null;
+export const V2GetActiveToken = () => null;
+export const V2GetActiveClientId = () => null;
+export const getToken = () => ({ token: undefined, account_id: undefined });

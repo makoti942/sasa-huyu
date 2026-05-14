@@ -8,43 +8,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { code, redirect_uri, client_id, code_verifier } = req.body as Record<string, string>;
-    if (!code || !redirect_uri || !client_id || !code_verifier) {
-        return res.status(400).json({ error: 'Missing required parameters' });
-    }
+    const { code, redirect_uri, client_id, code_verifier, access_token } = req.body as Record<string, string>;
 
     try {
-        // Step 1: Exchange authorization code for access token
-        const tokenRes = await fetch('https://auth.deriv.com/oauth2/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'authorization_code',
-                code,
-                redirect_uri,
-                client_id,
-                code_verifier,
-            }).toString(),
-        });
+        let token = access_token;
 
-        if (!tokenRes.ok) {
-            const body = await tokenRes.text().catch(() => '');
-            return res.status(tokenRes.status).json({
-                error: `Token exchange failed (HTTP ${tokenRes.status})`,
-                detail: body,
+        // If no direct access_token, exchange auth code for one
+        if (!token) {
+            if (!code || !redirect_uri || !client_id || !code_verifier) {
+                return res.status(400).json({ error: 'Missing required parameters: provide access_token, or (code + redirect_uri + client_id + code_verifier)' });
+            }
+
+            const tokenRes = await fetch('https://auth.deriv.com/oauth2/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri,
+                    client_id,
+                    code_verifier,
+                }).toString(),
             });
+
+            if (!tokenRes.ok) {
+                const body = await tokenRes.text().catch(() => '');
+                return res.status(tokenRes.status).json({
+                    error: `Token exchange failed (HTTP ${tokenRes.status})`,
+                    detail: body,
+                });
+            }
+
+            const tokenData = await tokenRes.json() as Record<string, string>;
+            token = tokenData.access_token;
+            if (!token) {
+                return res.status(502).json({ error: 'No access_token in token response', detail: JSON.stringify(tokenData) });
+            }
         }
 
-        const tokenData = await tokenRes.json() as Record<string, string>;
-        const access_token = tokenData.access_token;
-        if (!access_token) {
-            return res.status(502).json({ error: 'No access_token in token response', detail: JSON.stringify(tokenData) });
-        }
-
-        // Step 2: Exchange access token for legacy Deriv account tokens
+        // Exchange access token for legacy Deriv account tokens
         const legacyRes = await fetch('https://auth.deriv.com/oauth2/legacy/tokens', {
             method: 'POST',
-            headers: { Authorization: `Bearer ${access_token}` },
+            headers: { Authorization: `Bearer ${token}` },
         });
 
         if (!legacyRes.ok) {

@@ -1,4 +1,5 @@
-const ENDPOINT = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
+// DISABLED - replaced by DerivAuth.js
+// const ENDPOINT = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
 let ws = null;
 let currentSymbol = null;
 const symbolMeta = new Map();

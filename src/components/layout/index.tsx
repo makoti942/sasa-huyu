@@ -159,9 +159,8 @@ const Layout = () => {
                         sessionStorage.setItem('query_param_currency', query_param_currency);
                     }
                     try {
-                        const { generateOAuthURL } = await import('@/components/shared');
-                        // For auto-auth, default to old account endpoint as it is the most common fallback
-                        window.location.replace(generateOAuthURL(false));
+                        const { startLogin } = await import('@/utils/auth');
+                        await startLogin();
                     } catch (err) {
                         setIsAuthenticating(false);
                         handleOidcAuthFailure(err);

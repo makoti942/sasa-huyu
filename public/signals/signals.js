@@ -1,7 +1,8 @@
 // Store ticks per subscribed symbol (filled dynamically)
 const ticksStorage = {};
 
-const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=80058');
+// DISABLED - replaced by DerivAuth.js
+// const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=80058');
 
 const subscribeTicks = symbol => {
     ws.send(

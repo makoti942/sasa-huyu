@@ -23,7 +23,8 @@ const SmartTrader = observer(() => {
                 // Store ticks per subscribed symbol (filled dynamically)
                 const ticksStorage: { [key: string]: number[] } = {};
 
-                const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=337');
+                // DISABLED - replaced by DerivAuth.js
+                // const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=337');
 
                 const subscribeTicks = (symbol: string) => {
                     ws.send(

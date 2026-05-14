@@ -1,10 +1,11 @@
 import { ComponentProps, ReactNode, useMemo } from 'react';
 import Livechat from '@/components/chat/Livechat';
 import useIsLiveChatWidgetAvailable from '@/components/chat/useIsLiveChatWidgetAvailable';
-import { generateOAuthURL, standalone_routes } from '@/components/shared';
+import { standalone_routes } from '@/components/shared';
 import { useOauth2 } from '@/hooks/auth/useOauth2';
 import { useFirebaseCountriesConfig } from '@/hooks/firebase/useFirebaseCountriesConfig';
 import useRemoteConfig from '@/hooks/growthbook/useRemoteConfig';
+import { startLogin } from '@/utils/auth';
 import { useIsIntercomAvailable } from '@/hooks/useIntercom';
 import useThemeSwitcher from '@/hooks/useThemeSwitcher';
 import useTMB from '@/hooks/useTMB';
@@ -114,7 +115,7 @@ const useMobileMenuConfig = (client?: RootStore['client']) => {
                         if (tmbEnabled) {
                             await onRenderTMBCheck(true, undefined, false);
                         } else {
-                            window.location.href = generateOAuthURL(false, 'home');
+                            await startLogin();
                         }
                     },
                 },

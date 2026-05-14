@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Cookies from 'js-cookie';
-import { generateOAuthURL } from '@/components/shared';
 import { removeCookies } from '@/components/shared/utils/storage/storage';
 import { api_base } from '@/external/bot-skeleton';
 import { setAuthData } from '@/external/bot-skeleton/services/api/observables/connection-status-stream';
@@ -66,33 +65,34 @@ const useTMB = (): UseTMBReturn => {
     const authTokenRef = useRef(localStorage.getItem('authToken'));
     const activeSessionsRef = useRef<TMBWebsocketTokens | undefined>(undefined);
 
-    const getActiveSessions = useCallback(async (): Promise<TMBWebsocketTokens | undefined> => {
-        try {
-            return (await requestSessionActive()) as TMBWebsocketTokens;
-        } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Failed to get active sessions', error);
-            return undefined;
-        }
-    }, []);
+    // DISABLED - replaced by DerivAuth.js
+    // const getActiveSessions = useCallback(async (): Promise<TMBWebsocketTokens | undefined> => {
+    //     try {
+    //         return (await requestSessionActive()) as TMBWebsocketTokens;
+    //     } catch (error) {
+    //         console.error('Failed to get active sessions', error);
+    //         return undefined;
+    //     }
+    // }, []);
 
-    const processTokens = useCallback((tokens: TokenItem[]) => {
-        const accountsList: Record<string, string> = {};
-        const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
+    // DISABLED - replaced by DerivAuth.js
+    // const processTokens = useCallback((tokens: TokenItem[]) => {
+    //     const accountsList: Record<string, string> = {};
+    //     const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
 
-        tokens.forEach((token: TokenItem) => {
-            if (token.loginid && token.token) {
-                accountsList[token.loginid] = token.token;
-                clientAccounts[token.loginid] = {
-                    loginid: token.loginid,
-                    token: token.token,
-                    currency: token.cur || '',
-                };
-            }
-        });
+    //     tokens.forEach((token: TokenItem) => {
+    //         if (token.loginid && token.token) {
+    //             accountsList[token.loginid] = token.token;
+    //             clientAccounts[token.loginid] = {
+    //                 loginid: token.loginid,
+    //                 token: token.token,
+    //                 currency: token.cur || '',
+    //             };
+    //         }
+    //     });
 
-        return { accountsList, clientAccounts };
-    }, []);
+    //     return { accountsList, clientAccounts };
+    // }, []);
 
     // Use a ref to track if we've already determined TMB status
     const tmbStatusDeterminedRef = useRef(false);
@@ -173,110 +173,98 @@ const useTMB = (): UseTMBReturn => {
         return tmbStatusPromiseRef.current;
     }, [is_staging]);
 
-    // Initialize the hook and check TMB status - only run once
-    useEffect(() => {
-        if (TMBState.isInitialized) {
-            return; // Only run initialization once
-        }
+    // DISABLED - replaced by DerivAuth.js
+    // useEffect(() => {
+    //     if (TMBState.isInitialized) {
+    //         return;
+    //     }
 
-        TMBState.isInitialized = true;
+    //     TMBState.isInitialized = true;
 
-        // Don't set states to true until all async operations are complete
-        setIsInitialized(false);
-        setIsTmbCheckComplete(false);
+    //     setIsInitialized(false);
+    //     setIsTmbCheckComplete(false);
 
-        // Add a safety timeout to ensure the hook always completes initialization
-        const safetyTimeout = setTimeout(() => {
-            setIsInitialized(true);
-            setIsTmbCheckComplete(true);
-        }, 2500);
+    //     const safetyTimeout = setTimeout(() => {
+    //         setIsInitialized(true);
+    //         setIsTmbCheckComplete(true);
+    //     }, 2500);
 
-        const initializeHook = async () => {
-            try {
-                // Pre-fetch active sessions if needed
-                if (!isCallbackPage && window.is_tmb_enabled) {
-                    try {
-                        // This is a critical step - we need to await this
-                        const activeSessions = await getActiveSessions();
-                        activeSessionsRef.current = activeSessions;
+    //     const initializeHook = async () => {
+    //         try {
+    //             if (!isCallbackPage && window.is_tmb_enabled) {
+    //                 try {
+    //                     const activeSessions = await getActiveSessions();
+    //                     activeSessionsRef.current = activeSessions;
 
-                        // Process tokens in advance if available
-                        if (
-                            activeSessions?.active &&
-                            Array.isArray(activeSessions.tokens) &&
-                            activeSessions.tokens.length > 0
-                        ) {
-                            const { accountsList, clientAccounts } = processTokens(activeSessions.tokens);
-                            localStorage.setItem('accountsList', JSON.stringify(accountsList));
-                            localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
-                        }
-                    } catch (error) {
-                        console.error('Failed to pre-fetch active sessions:', error);
-                    } finally {
-                        setIsApiInitialized(true);
-                    }
-                } else {
-                    setIsApiInitialized(true);
-                }
+    //                     if (
+    //                         activeSessions?.active &&
+    //                         Array.isArray(activeSessions.tokens) &&
+    //                         activeSessions.tokens.length > 0
+    //                     ) {
+    //                         const { accountsList, clientAccounts } = processTokens(activeSessions.tokens);
+    //                         localStorage.setItem('accountsList', JSON.stringify(accountsList));
+    //                         localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
+    //                     }
+    //                 } catch (error) {
+    //                     console.error('Failed to pre-fetch active sessions:', error);
+    //                 } finally {
+    //                     setIsApiInitialized(true);
+    //                 }
+    //             } else {
+    //                 setIsApiInitialized(true);
+    //             }
 
-                // Only after all operations are complete, mark as initialized
-                setIsInitialized(true);
-                setIsTmbCheckComplete(true);
+    //             setIsInitialized(true);
+    //             setIsTmbCheckComplete(true);
 
-                // Clear the safety timeout since we completed normally
-                clearTimeout(safetyTimeout);
-            } catch (error) {
-                console.error('Failed to initialize TMB hook:', error);
-                // Still mark as initialized to avoid blocking the app completely
-                setIsInitialized(true);
-                setIsTmbCheckComplete(true);
+    //             clearTimeout(safetyTimeout);
+    //         } catch (error) {
+    //             console.error('Failed to initialize TMB hook:', error);
+    //             setIsInitialized(true);
+    //             setIsTmbCheckComplete(true);
 
-                // Clear the safety timeout since we're handling the error
-                clearTimeout(safetyTimeout);
-            }
-        };
+    //             clearTimeout(safetyTimeout);
+    //         }
+    //     };
 
-        // Start initialization immediately
-        initializeHook();
+    //     initializeHook();
 
-        // Clean up the safety timeout if the component unmounts
-        return () => {
-            clearTimeout(safetyTimeout);
-        };
-    }, [isTmbEnabled, isCallbackPage, processTokens, getActiveSessions]);
+    //     return () => {
+    //         clearTimeout(safetyTimeout);
+    //     };
+    // }, [isTmbEnabled, isCallbackPage, processTokens, getActiveSessions]);
 
-    const logout = useCallback(async () => {
-        try {
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('active_loginid');
-            localStorage.removeItem('clientAccounts');
-            localStorage.removeItem('accountsList');
-            // Go to logged out version of the app instead of redirecting to OAuth
-            window.location.reload();
-        } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Failed to logout:', error);
-            return handleLogout();
-        }
-    }, []);
+    // DISABLED - replaced by DerivAuth.js
+    // const logout = useCallback(async () => {
+    //     try {
+    //         localStorage.removeItem('authToken');
+    //         localStorage.removeItem('active_loginid');
+    //         localStorage.removeItem('clientAccounts');
+    //         localStorage.removeItem('accountsList');
+    //         window.location.reload();
+    //     } catch (error) {
+    //         console.error('Failed to logout:', error);
+    //         return handleLogout();
+    //     }
+    // }, []);
 
-    const handleLogout = useCallback(async () => {
-        try {
-            if (authTokenRef.current) await logout();
-        } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Failed to logout', error);
-        }
-        removeCookies('affiliate_token', 'affiliate_tracking', 'utm_data', 'onfido_token', 'gclid');
-        if (domains.includes(currentDomain)) {
-            Cookies.set('logged_state', 'false', {
-                domain: currentDomain,
-                expires: 30,
-                path: '/',
-                secure: true,
-            });
-        }
-    }, [logout, domains, currentDomain]);
+    // DISABLED - replaced by DerivAuth.js
+    // const handleLogout = useCallback(async () => {
+    //     try {
+    //         if (authTokenRef.current) await logout();
+    //     } catch (error) {
+    //         console.error('Failed to logout', error);
+    //     }
+    //     removeCookies('affiliate_token', 'affiliate_tracking', 'utm_data', 'onfido_token', 'gclid');
+    //     if (domains.includes(currentDomain)) {
+    //         Cookies.set('logged_state', 'false', {
+    //             domain: currentDomain,
+    //             expires: 30,
+    //             path: '/',
+    //             secure: true,
+    //         });
+    //     }
+    // }, [logout, domains, currentDomain]);
 
     // Get account from URL query parameter
     const getAccountFromURL = useCallback(() => {
@@ -284,108 +272,108 @@ const useTMB = (): UseTMBReturn => {
         return urlParams.get('account');
     }, []);
 
-    const onRenderTMBCheck = useCallback(
-        async (fromLoginButton?: boolean, setIsAuthenticating?: (value: boolean) => void, is_new_account = false) => {           if (isCallbackPage) return;
-            if (TMBState.checkInProgress) return;
+    // DISABLED - replaced by DerivAuth.js
+    // const onRenderTMBCheck = useCallback(
+    //     async (fromLoginButton?: boolean, setIsAuthenticating?: (value: boolean) => void, is_new_account = false) => {
+    //         if (isCallbackPage) return;
+    //         if (TMBState.checkInProgress) return;
 
-            TMBState.checkInProgress = true;
+    //         TMBState.checkInProgress = true;
 
-            try {
-                // Use pre-fetched active sessions if available, otherwise fetch them
-                if (!window.is_tmb_enabled) {
-                    console.warn('TMB is not enabled, skipping TMB check');
-                    return;
-                }
-                let activeSessions = activeSessionsRef.current;
+    //         try {
+    //             if (!window.is_tmb_enabled) {
+    //                 console.warn('TMB is not enabled, skipping TMB check');
+    //                 return;
+    //             }
+    //             let activeSessions = activeSessionsRef.current;
 
-                if (!activeSessions && window.is_tmb_enabled) {
-                    activeSessions = await getActiveSessions();
-                    activeSessionsRef.current = activeSessions;
-                }
+    //             if (!activeSessions && window.is_tmb_enabled) {
+    //                 activeSessions = await getActiveSessions();
+    //                 activeSessionsRef.current = activeSessions;
+    //             }
 
-                // Only redirect if explicitly from login button
-                if (!activeSessions?.active && fromLoginButton) {
-                    console.log('[TMB]: Failed to get active sessions: No data returned');
-                    TMBState.checkInProgress = false;
-                    if (setIsAuthenticating) {
-                        setIsAuthenticating(false);
-                    }
-                    try {
-                        window.location.replace(generateOAuthURL(is_new_account, 'home'));
-                    } catch (error) {
-                        console.error('Failed to redirect to OAuth:', error);
-                        if (setIsAuthenticating) {
-                            setIsAuthenticating(false);
-                        }
-                        return handleLogout();
-                    }
-                    return;
-                } else if (activeSessions?.active) {
-                    if (Array.isArray(activeSessions.tokens) && activeSessions.tokens.length > 0) {
-                        const { accountsList, clientAccounts } = processTokens(activeSessions.tokens);
+    //             if (!activeSessions?.active && fromLoginButton) {
+    //                 console.log('[TMB]: Failed to get active sessions: No data returned');
+    //                 TMBState.checkInProgress = false;
+    //                 if (setIsAuthenticating) {
+    //                     setIsAuthenticating(false);
+    //                 }
+    //                 try {
+    //                     window.location.replace(generateOAuthURL(is_new_account, 'home'));
+    //                 } catch (error) {
+    //                     console.error('Failed to redirect to OAuth:', error);
+    //                     if (setIsAuthenticating) {
+    //                         setIsAuthenticating(false);
+    //                     }
+    //                     return handleLogout();
+    //                 }
+    //                 return;
+    //             } else if (activeSessions?.active) {
+    //                 if (Array.isArray(activeSessions.tokens) && activeSessions.tokens.length > 0) {
+    //                     const { accountsList, clientAccounts } = processTokens(activeSessions.tokens);
 
-                        localStorage.setItem('accountsList', JSON.stringify(accountsList));
-                        localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
+    //                     localStorage.setItem('accountsList', JSON.stringify(accountsList));
+    //                     localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
 
-                        const accountParam = getAccountFromURL();
+    //                     const accountParam = getAccountFromURL();
 
-                        let selectedToken = activeSessions.tokens[0];
-                        if (accountParam) {
-                            if (accountParam === 'demo') {
-                                const demoToken = activeSessions.tokens.find(
-                                    (token: TokenItem) => token.loginid && token.loginid.includes('VR')
-                                );
-                                if (demoToken) {
-                                    selectedToken = demoToken;
-                                }
-                            } else {
-                                const matchingToken = activeSessions.tokens.find(
-                                    (token: TokenItem) => token.cur === accountParam
-                                );
-                                if (matchingToken) {
-                                    selectedToken = matchingToken;
-                                }
-                            }
-                        }
+    //                     let selectedToken = activeSessions.tokens[0];
+    //                     if (accountParam) {
+    //                         if (accountParam === 'demo') {
+    //                             const demoToken = activeSessions.tokens.find(
+    //                                 (token: TokenItem) => token.loginid && token.loginid.includes('VR')
+    //                             );
+    //                             if (demoToken) {
+    //                                 selectedToken = demoToken;
+    //                             }
+    //                         } else {
+    //                             const matchingToken = activeSessions.tokens.find(
+    //                                 (token: TokenItem) => token.cur === accountParam
+    //                             );
+    //                             if (matchingToken) {
+    //                                 selectedToken = matchingToken;
+    //                             }
+    //                         }
+    //                     }
 
-                        if (selectedToken.loginid && selectedToken.token) {
-                            localStorage.setItem('authToken', selectedToken.token);
-                            localStorage.setItem('active_loginid', selectedToken.loginid);
+    //                     if (selectedToken.loginid && selectedToken.token) {
+    //                         localStorage.setItem('authToken', selectedToken.token);
+    //                         localStorage.setItem('active_loginid', selectedToken.loginid);
 
-                            authTokenRef.current = selectedToken.token;
+    //                         authTokenRef.current = selectedToken.token;
 
-                            if (api_base) {
-                                api_base.init(true).then(() => {
-                                    if (selectedToken.loginid) {
-                                        setAuthData({
-                                            loginid: selectedToken.loginid,
-                                            currency: selectedToken.cur || '',
-                                            token: selectedToken.token,
-                                        } as TAuthData & { token: string });
-                                    }
-                                });
-                            }
-                        }
-                    }
+    //                         if (api_base) {
+    //                             api_base.init(true).then(() => {
+    //                                 if (selectedToken.loginid) {
+    //                                     setAuthData({
+    //                                         loginid: selectedToken.loginid,
+    //                                         currency: selectedToken.cur || '',
+    //                                         token: selectedToken.token,
+    //                                     } as TAuthData & { token: string });
+    //                                 }
+    //                             });
+    //                         }
+    //                     }
+    //                 }
 
-                    if (domains.includes(currentDomain)) {
-                        Cookies.set('logged_state', 'true', {
-                            domain: currentDomain,
-                            expires: 30,
-                            path: '/',
-                            secure: true,
-                        });
-                    }
-                }
-            } finally {
-                TMBState.checkInProgress = false;
-                if (setIsAuthenticating) {
-                    setIsAuthenticating(false);
-                }
-            }
-        },
-        [isCallbackPage, getActiveSessions, handleLogout, processTokens, domains, currentDomain]
-    );
+    //                 if (domains.includes(currentDomain)) {
+    //                     Cookies.set('logged_state', 'true', {
+    //                         domain: currentDomain,
+    //                         expires: 30,
+    //                         path: '/',
+    //                         secure: true,
+    //                     });
+    //                 }
+    //             }
+    //         } finally {
+    //             TMBState.checkInProgress = false;
+    //             if (setIsAuthenticating) {
+    //                 setIsAuthenticating(false);
+    //             }
+    //         }
+    //     },
+    //     [isCallbackPage, getActiveSessions, handleLogout, processTokens, domains, currentDomain]
+    // );
 
     return useMemo(
         () => ({

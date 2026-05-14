@@ -54,13 +54,8 @@ class DerivClient {
             setTimeout(() => resolve(), 1000);
         });
 
-        const { authorize, error } = await this.api.authorize(token);
-        if (error) {
-            this.status = 'error';
-            throw error;
-        }
+        // DISABLED - replaced by DerivAuth.js
         this.status = 'connected';
-        this.loginId = authorize?.loginid;
 
         // Try to subscribe to balance (optional - don't fail connection if this fails)
         try {
@@ -82,7 +77,7 @@ class DerivClient {
             // Connection is still successful even if balance fails
         }
 
-        return authorize;
+        return { loginid: this.loginId };
     }
 
     disconnect() {

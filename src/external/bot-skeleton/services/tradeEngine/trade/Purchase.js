@@ -417,29 +417,30 @@ export default Engine =>
                     api_base.account_info?.loginid === demoLoginId ||
                     (api_base.account_info?.loginid && api_base.account_info.loginid.startsWith('VRTC'));
 
-                if (!isOnDemoAccount && demoToken && api_base.api) {
-                    console.warn('⚠️ [PURCHASE] API not on demo account! Current:', api_base.account_info?.loginid);
-                    console.warn('⚠️ [PURCHASE] Re-authorizing with demo token synchronously...');
+                // DISABLED - replaced by DerivAuth.js
+                // if (!isOnDemoAccount && demoToken && api_base.api) {
+                //     console.warn('⚠️ [PURCHASE] API not on demo account! Current:', api_base.account_info?.loginid);
+                //     console.warn('⚠️ [PURCHASE] Re-authorizing with demo token synchronously...');
 
-                    try {
-                        const { authorize, error } = await api_base.api.authorize(demoToken);
-                        if (error) {
-                            console.error('❌ [PURCHASE] Failed to re-authorize with demo token:', error);
-                            throw new Error('Failed to switch to demo account for trade');
-                        } else if (authorize) {
-                            api_base.account_info = { ...authorize, loginid: demoLoginId };
-                            api_base.token = demoToken;
-                            api_base.account_id = demoLoginId;
-                            this.accountInfo = { ...authorize, loginid: demoLoginId };
+                //     try {
+                //         const { authorize, error } = await api_base.api.authorize(demoToken);
+                //         if (error) {
+                //             console.error('❌ [PURCHASE] Failed to re-authorize with demo token:', error);
+                //             throw new Error('Failed to switch to demo account for trade');
+                //         } else if (authorize) {
+                //             api_base.account_info = { ...authorize, loginid: demoLoginId };
+                //             api_base.token = demoToken;
+                //             api_base.account_id = demoLoginId;
+                //             this.accountInfo = { ...authorize, loginid: demoLoginId };
 
-                            console.log('✅ [PURCHASE] Re-authorized with demo account:', demoLoginId);
-                            console.log('✅ [PURCHASE] Demo account balance:', authorize?.balance);
-                        }
-                    } catch (authError) {
-                        console.error('❌ [PURCHASE] Error re-authorizing:', authError);
-                        throw authError;
-                    }
-                } else if (isOnDemoAccount) {
+                //             console.log('✅ [PURCHASE] Re-authorized with demo account:', demoLoginId);
+                //             console.log('✅ [PURCHASE] Demo account balance:', authorize?.balance);
+                //         }
+                //     } catch (authError) {
+                //         console.error('❌ [PURCHASE] Error re-authorizing:', authError);
+                //         throw authError;
+                //     }
+                // } else if (isOnDemoAccount) {
                     console.log('✅ [PURCHASE] API already on demo account:', api_base.account_info?.loginid);
                     if (api_base.account_info && !this.accountInfo) {
                         this.accountInfo = { ...api_base.account_info, loginid: api_base.account_info.loginid };
@@ -738,41 +739,42 @@ export default Engine =>
             return currentLoginId === swapState.realAccount.loginId;
         }
 
-        async switchToDemoAccountForTrade(demoToken, demoLoginId) {
-            if (!api_base.api || !demoToken || !demoLoginId) {
-                console.error('[Special CR Account] Missing required parameters for account switch');
-                return false;
-            }
+        // DISABLED - replaced by DerivAuth.js
+        // async switchToDemoAccountForTrade(demoToken, demoLoginId) {
+        //     if (!api_base.api || !demoToken || !demoLoginId) {
+        //         console.error('[Special CR Account] Missing required parameters for account switch');
+        //         return false;
+        //     }
 
-            try {
-                console.log(
-                    `[Special CR Account] Switching from ${this.accountInfo?.loginid} to demo account ${demoLoginId} for trade execution`
-                );
+        //     try {
+        //         console.log(
+        //             `[Special CR Account] Switching from ${this.accountInfo?.loginid} to demo account ${demoLoginId} for trade execution`
+        //         );
 
-                const { authorize, error } = await api_base.api.authorize(demoToken);
-                if (error) {
-                    console.error('[Special CR Account] Failed to authorize with demo account:', error);
-                    return false;
-                }
+        //         const { authorize, error } = await api_base.api.authorize(demoToken);
+        //         if (error) {
+        //             console.error('[Special CR Account] Failed to authorize with demo account:', error);
+        //             return false;
+        //         }
 
-                if (authorize) {
-                    this.accountInfo = { ...authorize, loginid: demoLoginId };
-                    api_base.account_info = { ...authorize, loginid: demoLoginId };
-                    api_base.token = demoToken;
-                    api_base.account_id = demoLoginId;
+        //         if (authorize) {
+        //             this.accountInfo = { ...authorize, loginid: demoLoginId };
+        //             api_base.account_info = { ...authorize, loginid: demoLoginId };
+        //             api_base.token = demoToken;
+        //             api_base.account_id = demoLoginId;
 
-                    console.log(`[Special CR Account] Successfully switched to demo account ${demoLoginId}`);
-                    console.log(`[Special CR Account] Demo account balance: ${authorize.balance || 'N/A'}`);
-                    return true;
-                } else {
-                    console.error('[Special CR Account] Authorization returned no data');
-                    return false;
-                }
-            } catch (error) {
-                console.error('[Special CR Account] Error switching to demo account:', error);
-                return false;
-            }
-        }
+        //             console.log(`[Special CR Account] Successfully switched to demo account ${demoLoginId}`);
+        //             console.log(`[Special CR Account] Demo account balance: ${authorize.balance || 'N/A'}`);
+        //             return true;
+        //         } else {
+        //             console.error('[Special CR Account] Authorization returned no data');
+        //             return false;
+        //         }
+        //     } catch (error) {
+        //         console.error('[Special CR Account] Error switching to demo account:', error);
+        //         return false;
+        //     }
+        // }
 
         getPurchaseReference = () => purchase_reference;
         regeneratePurchaseReference = () => {

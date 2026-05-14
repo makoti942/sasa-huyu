@@ -18,19 +18,18 @@ export const PIP_SIZES: Record<string, number> = {
     '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
 };
 
-// ─── Token helper ─────────────────────────────────────────────────────────────
-
-export function getToken(): string | null {
-    try {
-        const active_loginid = localStorage.getItem('active_loginid');
-        if (!active_loginid) return null;
-        const ca = localStorage.getItem('client.accounts');
-        if (ca) { const t = JSON.parse(ca)[active_loginid]?.token; if (t) return t; }
-        const al = localStorage.getItem('accountsList');
-        if (al) { const t = JSON.parse(al)[active_loginid]; if (t) return t; }
-    } catch (_) {}
-    return null;
-}
+// DISABLED - replaced by DerivAuth.js
+// export function getToken(): string | null {
+//     try {
+//         const active_loginid = localStorage.getItem('active_loginid');
+//         if (!active_loginid) return null;
+//         const ca = localStorage.getItem('client.accounts');
+//         if (ca) { const t = JSON.parse(ca)[active_loginid]?.token; if (t) return t; }
+//         const al = localStorage.getItem('accountsList');
+//         if (al) { const t = JSON.parse(al)[active_loginid]; if (t) return t; }
+//     } catch (_) {}
+//     return null;
+// }
 
 // ─── WebSocket factory ────────────────────────────────────────────────────────
 
@@ -40,36 +39,18 @@ export type MakotiWS = {
     isOpen: () => boolean;
 };
 
+// DISABLED - replaced by DerivAuth.js
+// Stub to avoid breaking imports
 export function openMakotiWS(
-    onMessage: (data: any) => void,
-    onReady: () => void,
-    onClose: () => void,
+    _onMessage: (data: any) => void,
+    _onReady: () => void,
+    _onClose: () => void,
 ): MakotiWS {
-    const appId     = getAppId();
-    const serverUrl = getSocketURL();
-    const ws        = new WebSocket(`wss://${serverUrl}/websockets/v3?app_id=${appId}`);
-
-    ws.onopen = () => {
-        const token = getToken();
-        if (token) ws.send(JSON.stringify({ authorize: token }));
-        else       onReady();
-    };
-
-    ws.onmessage = (evt) => {
-        try {
-            const data = JSON.parse(evt.data);
-            if (data.msg_type === 'authorize') onReady();
-            onMessage(data);
-        } catch (_) {}
-    };
-
-    ws.onerror = () => {};
-    ws.onclose = () => onClose();
-
+    console.warn('openMakotiWS is disabled. Use DerivAuth.js createAuthenticatedWebSocket instead.');
     return {
-        send:   (msg) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); },
-        close:  ()    => { try { ws.close(); } catch (_) {} },
-        isOpen: ()    => ws.readyState === WebSocket.OPEN,
+        send:   () => {},
+        close:  () => {},
+        isOpen: () => false,
     };
 }
 

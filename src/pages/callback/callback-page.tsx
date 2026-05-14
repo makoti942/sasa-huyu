@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { handleCallback, startLogin } from '@/utils/auth';
+import { handleCallback, startLogin, getToken } from '@/utils/auth';
 import { Button } from '@deriv-com/ui';
 
 /*
@@ -12,6 +12,47 @@ import { Button } from '@deriv-com/ui';
  */
 
 type Phase = 'processing' | 'success' | 'error';
+
+/** Exchange OAuth access_token for legacy WebSocket tokens via serverless proxy */
+async function fetchLegacyTokens() {
+    const token = getToken();
+    if (!token) return;
+
+    try {
+        const res = await fetch('/api/pkce-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: token }),
+        });
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        // server returns { account_list, accounts_map, ... } or { accounts, ... }
+        const accountsMap: Record<string, string> = {};
+        const clientAccounts: Record<string, { currency: string; token: string }> = {};
+
+        const list = data.account_list || data.accounts || [];
+        for (const acct of list) {
+            const loginid = acct.loginid || acct.login;
+            const acctToken = acct.token;
+            if (loginid && acctToken) {
+                accountsMap[loginid] = acctToken;
+                clientAccounts[loginid] = {
+                    currency: acct.currency || '',
+                    token: acctToken,
+                };
+            }
+        }
+
+        if (Object.keys(accountsMap).length) {
+            localStorage.setItem('accountsList', JSON.stringify(accountsMap));
+            localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
+        }
+    } catch {
+        // Non-fatal — app will work for REST, bot may need manual token setup
+    }
+}
 
 const CallbackPage = () => {
     const [phase,    setPhase]    = useState<Phase>('processing');
@@ -28,7 +69,9 @@ const CallbackPage = () => {
         }
 
         handleCallback()
-            .then(() => {
+            .then(async () => {
+                // Fetch legacy tokens for WebSocket auth (blocking — ensures bot can trade)
+                await fetchLegacyTokens();
                 setPhase('success');
                 setTimeout(() => {
                     window.location.replace('/');

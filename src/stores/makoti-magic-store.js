@@ -116,88 +116,89 @@ class MakotiMagicStore {
         return { continueScanning: true, confidence, digit: topDigit?.digit };
     }
 
-    connectWebSocket = () => {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_initialized) {
-            return;
-        }
+    // DISABLED - replaced by DerivAuth.js
+    // connectWebSocket = () => {
+    //     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_initialized) {
+    //         return;
+    //     }
 
-        if (this.ws) {
-            this.ws.onclose = null;
-            this.ws.close();
-        }
+    //     if (this.ws) {
+    //         this.ws.onclose = null;
+    //         this.ws.close();
+    //     }
 
-        const server_url = localStorage.getItem('config.server_url') || 'ws.derivws.com';
-        const app_id = localStorage.getItem('config.app_id') || '337';
+    //     const server_url = localStorage.getItem('config.server_url') || 'ws.derivws.com';
+    //     const app_id = localStorage.getItem('config.app_id') || '337';
 
-        runInAction(() => {
-            this.connection_status = 'Connecting...';
-        });
+    //     runInAction(() => {
+    //         this.connection_status = 'Connecting...';
+    //     });
 
-        this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
+    //     this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
 
-        this.ws.onopen = () => {
-            runInAction(() => {
-                this.connection_status = STATUS_LIVE;
-                this.is_initialized = true;
-            });
+    //     this.ws.onopen = () => {
+    //         runInAction(() => {
+    //             this.connection_status = STATUS_LIVE;
+    //             this.is_initialized = true;
+    //         });
 
-            const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-            if (token) {
-                this.ws.send(JSON.stringify({ authorize: token }));
-            }
-            this.subscribeToTicks(this.selected_symbol);
-        };
+    //         const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+    //         if (token) {
+    //             this.ws.send(JSON.stringify({ authorize: token }));
+    //         }
+    //         this.subscribeToTicks(this.selected_symbol);
+    //     };
 
-        this.ws.onmessage = (msg) => {
-            try {
-                const data = JSON.parse(msg.data);
-                if (data.error) {
-                    console.error(data.error.message);
-                    return;
-                }
+    //     this.ws.onmessage = (msg) => {
+    //         try {
+    //             const data = JSON.parse(msg.data);
+    //             if (data.error) {
+    //                 console.error(data.error.message);
+    //                 return;
+    //             }
 
-                if (data.subscription?.id) {
-                    this.active_subscription_id = data.subscription.id;
-                }
+    //             if (data.subscription?.id) {
+    //                 this.active_subscription_id = data.subscription.id;
+    //             }
 
-                if (data.msg_type === 'history') {
-                    const pip_sizes = {
-                        'R_100': 2, 'R_75': 4, 'R_50': 4, 'R_25': 3, 'R_10': 3,
-                        '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
-                    };
-                    const pip_size = pip_sizes[this.selected_symbol] || 2;
-                    const prices = data.history.prices;
-                    const digits = prices.map((p) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
+    //             if (data.msg_type === 'history') {
+    //                 const pip_sizes = {
+    //                     'R_100': 2, 'R_75': 4, 'R_50': 4, 'R_25': 3, 'R_10': 3,
+    //                     '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
+    //                 };
+    //                 const pip_size = pip_sizes[this.selected_symbol] || 2;
+    //                 const prices = data.history.prices;
+    //                 const digits = prices.map((p) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
 
-                    runInAction(() => {
-                        this.tick_history = digits;
-                        this.tick_prices = prices.map((p) => Number(p));
-                        if (digits.length > 0) {
-                            this.last_digit = digits[digits.length - 1];
-                        }
-                    });
-                }
+    //                 runInAction(() => {
+    //                     this.tick_history = digits;
+    //                     this.tick_prices = prices.map((p) => Number(p));
+    //                     if (digits.length > 0) {
+    //                         this.last_digit = digits[digits.length - 1];
+    //                     }
+    //                 });
+    //             }
 
-                if (data.msg_type === 'tick') {
-                    this.handleTick(data);
-                }
+    //             if (data.msg_type === 'tick') {
+    //                 this.handleTick(data);
+    //             }
 
-                if (data.msg_type === 'authorize' && !data.error) {
-                    runInAction(() => {
-                        this.connection_status = 'Connected';
-                    });
-                    this.subscribeToTicks(this.selected_symbol);
-                }
-            } catch (error) {
-                console.error('Message parse error:', error);
-            }
-        };
+    //             if (data.msg_type === 'authorize' && !data.error) {
+    //                 runInAction(() => {
+    //                     this.connection_status = 'Connected';
+    //                 });
+    //                 this.subscribeToTicks(this.selected_symbol);
+    //             }
+    //         } catch (error) {
+    //             console.error('Message parse error:', error);
+    //         }
+    //     };
 
-        this.ws.onclose = () => {
-            runInAction(() => {
-                this.connection_status = STATUS_OFFLINE;
-                this.is_initialized = false;
-            });
+    //     this.ws.onclose = () => {
+    //         runInAction(() => {
+    //             this.connection_status = STATUS_OFFLINE;
+    //             this.is_initialized = false;
+    //         });
             setTimeout(() => this.connectWebSocket(), 5000);
         };
 

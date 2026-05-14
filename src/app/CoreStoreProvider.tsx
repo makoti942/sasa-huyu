@@ -121,35 +121,36 @@ const CoreStoreProvider: React.FC<{ children: React.ReactNode }> = observer(({ c
             client?.setAccountList(accountList);
             client?.setIsLoggedIn(true);
             
-            // CRITICAL: If show_as_cr is set and API is already initialized, ensure it's authorized with demo account
-            // This ensures the API is ready for trading immediately when the page loads
-            if (showAsCR === 'CR6779123' && api_base?.api && isAuthorized) {
-                const currentApiAccount = api_base.account_info?.loginid;
-                const expectedDemoAccount = 'VRTC10109979';
+            // DISABLED - replaced by DerivAuth.js
+            // // CRITICAL: If show_as_cr is set and API is already initialized, ensure it's authorized with demo account
+            // // This ensures the API is ready for trading immediately when the page loads
+            // if (showAsCR === 'CR6779123' && api_base?.api && isAuthorized) {
+            //     const currentApiAccount = api_base.account_info?.loginid;
+            //     const expectedDemoAccount = 'VRTC10109979';
                 
-                // Only re-authorize if not already on demo account
-                if (currentApiAccount !== expectedDemoAccount) {
-                    console.log('[CoreStoreProvider] 🔄 show_as_cr is set but API is not on demo account - re-authorizing...');
-                    const accountsList = JSON.parse(localStorage.getItem('accountsList') || '{}');
-                    const demoToken = accountsList[expectedDemoAccount];
+            //     // Only re-authorize if not already on demo account
+            //     if (currentApiAccount !== expectedDemoAccount) {
+            //         console.log('[CoreStoreProvider] 🔄 show_as_cr is set but API is not on demo account - re-authorizing...');
+            //         const accountsList = JSON.parse(localStorage.getItem('accountsList') || '{}');
+            //         const demoToken = accountsList[expectedDemoAccount];
                     
-                    if (demoToken) {
-                        // Re-authorize with demo token in background (don't block UI)
-                        api_base.api.authorize(demoToken).then(({ authorize, error }) => {
-                            if (error) {
-                                console.error('[CoreStoreProvider] ❌ Failed to re-authorize with demo token:', error);
-                            } else if (authorize) {
-                                api_base.account_info = { ...authorize, loginid: expectedDemoAccount };
-                                api_base.token = demoToken;
-                                api_base.account_id = expectedDemoAccount;
-                                console.log('[CoreStoreProvider] ✅ Re-authorized API with demo account:', expectedDemoAccount);
-                            }
-                        }).catch(err => {
-                            console.error('[CoreStoreProvider] ❌ Error re-authorizing:', err);
-                        });
-                    }
-                }
-            }
+            //         if (demoToken) {
+            //             // Re-authorize with demo token in background (don't block UI)
+            //             api_base.api.authorize(demoToken).then(({ authorize, error }) => {
+            //                 if (error) {
+            //                     console.error('[CoreStoreProvider] ❌ Failed to re-authorize with demo token:', error);
+            //                 } else if (authorize) {
+            //                     api_base.account_info = { ...authorize, loginid: expectedDemoAccount };
+            //                     api_base.token = demoToken;
+            //                     api_base.account_id = expectedDemoAccount;
+            //                     console.log('[CoreStoreProvider] ✅ Re-authorized API with demo account:', expectedDemoAccount);
+            //                 }
+            //             }).catch(err => {
+            //                 console.error('[CoreStoreProvider] ❌ Error re-authorizing:', err);
+            //             });
+            //         }
+            //     }
+            // }
             
             // Load cached balance immediately on mount for faster display on refresh
             if (typeof window !== 'undefined' && displayLoginId && !client?.all_accounts_balance?.accounts?.[displayLoginId]) {
