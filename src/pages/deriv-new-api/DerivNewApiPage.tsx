@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { logout } from '@/utils/auth';
+import { logout } from '../../auth/DerivAuth.js';
 import {
     connectPublicWebSocket,
     connectTradingWebSocket,
@@ -37,6 +37,8 @@ const DerivNewApiPage: React.FC = () => {
     useEffect(() => {
         setAuthed(isAuthenticated());
     }, []);
+
+    const handleLogout = () => logout()
 
     const handleFetchAccounts = useCallback(async () => {
         setAccountsLoading(true);
@@ -98,13 +100,6 @@ const DerivNewApiPage: React.FC = () => {
             (evt) => setPubWsMessages(prev => [...prev.slice(-49), evt.data]),
             (status) => setPubWsStatus(status as WsStatus)
         );
-    }, []);
-
-    const handleLogout = useCallback(async () => {
-        await logout();
-        setAuthed(false);
-        setAccounts(null);
-        setOtpResult(null);
     }, []);
 
     const statusBadge = (s: WsStatus) => (
