@@ -199,6 +199,7 @@ export async function handleCallback() {
   
   console.log("[v0] Token received for flow:", flowType, "scope:", currentScope)
 
+  // IMPORTANT: Store token in sessionStorage immediately for isLoggedIn() check
   if (currentScope === DERIV_CONFIG.scopes.admin || currentScope === DERIV_CONFIG.scopes.payments) {
     // Admin/payments scope - store as admin token
     sessionStorage.setItem(STORAGE_KEYS.adminToken, data.access_token)
@@ -206,6 +207,7 @@ export async function handleCallback() {
       STORAGE_KEYS.adminTokenExpiry,
       String(Date.now() + data.expires_in * 1000)
     )
+    console.log("[v0] Stored admin token in sessionStorage")
   } else {
     // Default trade scope - store as access token
     sessionStorage.setItem(STORAGE_KEYS.accessToken, data.access_token)
@@ -213,6 +215,28 @@ export async function handleCallback() {
       STORAGE_KEYS.tokenExpiry,
       String(Date.now() + data.expires_in * 1000)
     )
+    console.log("[v0] Stored trade token in sessionStorage")
+  }
+  
+  // Also sync to auth-state for new code path
+  try {
+    const authStateStr = sessionStorage.getItem('deriv_auth_state')
+    let authState = { authFlow: 'login', tradeToken: null, adminToken: null }
+    if (authStateStr) {
+      authState = JSON.parse(authStateStr)
+    }
+    
+    if (currentScope === DERIV_CONFIG.scopes.admin || currentScope === DERIV_CONFIG.scopes.payments) {
+      authState.adminToken = data.access_token
+    } else {
+      authState.tradeToken = data.access_token
+    }
+    
+    authState.authFlow = 'completed'
+    sessionStorage.setItem('deriv_auth_state', JSON.stringify(authState))
+    console.log("[v0] Synced token to auth-state")
+  } catch (e) {
+    console.warn("[v0] Failed to sync to auth-state:", e)
   }
   
   sessionStorage.removeItem(STORAGE_KEYS.codeVerifier)
@@ -245,7 +269,31 @@ export function getCurrentScope() {
 }
 
 export function isLoggedIn() {
-  return getToken() !== null
+  // Check BOTH token storage locations
+  const hasAccessToken = getToken() !== null
+  const hasAdminToken = getAdminToken() !== null
+  
+  // Also check auth-state if available (for synced data)
+  if (typeof window !== 'undefined') {
+    try {
+      const authStateStr = sessionStorage.getItem('deriv_auth_state')
+      if (authStateStr) {
+        const authState = JSON.parse(authStateStr)
+        if (authState.tradeToken || authState.adminToken) {
+          console.log('[v0] Found token in auth-state:', { tradeToken: !!authState.tradeToken, adminToken: !!authState.adminToken })
+          return true
+        }
+      }
+    } catch (e) {
+      // Ignore parsing errors
+    }
+  }
+  
+  const isLogged = hasAccessToken || hasAdminToken
+  if (isLogged) {
+    console.log('[v0] isLoggedIn check: true (hasAccessToken=' + hasAccessToken + ', hasAdminToken=' + hasAdminToken + ')')
+  }
+  return isLogged
 }
 
 export function getAuthHeaders() {

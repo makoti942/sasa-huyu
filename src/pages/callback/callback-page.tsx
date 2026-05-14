@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { handleCallback, startLogin, getToken, getFlowType } from '@/auth/DerivAuth';
-import { setTradeToken, setAdminToken, completeAuthFlow } from '@/utils/auth-state';
+import { handleCallback, startLogin, getToken } from '@/auth/DerivAuth';
 import { Button } from '@deriv-com/ui';
 
 /*
@@ -71,34 +70,21 @@ const CallbackPage = () => {
 
         handleCallback()
             .then(async (token) => {
-                // Store tokens based on flow type
-                const flowType = getFlowType();
+                console.log('[v0] Callback: handleCallback returned, token present:', !!token)
                 
-                console.log('[v0] Callback: received token =', token ? 'present' : 'missing', 'flowType =', flowType)
-                
-                // Always store in auth state for consistency
-                if (token) {
-                  if (flowType === 'account_creation' || flowType === 'admin') {
-                    // Admin scope flow
-                    setAdminToken(token);
-                    console.log('[v0] Stored admin token');
-                  } else {
-                    // Default trade scope
-                    setTradeToken(token);
-                    console.log('[v0] Stored trade token');
-                  }
-                }
+                // handleCallback() already:
+                // 1. Stored token in sessionStorage (deriv_access_token or deriv_admin_token)
+                // 2. Synced to auth-state
+                // 3. Set authFlow to 'completed'
+                // So isLoggedIn() should return true now
                 
                 // Fetch legacy tokens for WebSocket auth (blocking — ensures bot can trade)
                 await fetchLegacyTokens();
                 
-                // Mark flow as complete - this ensures AuthWrapper shows app
-                completeAuthFlow();
-                console.log('[v0] Auth flow marked as completed');
-                
+                console.log('[v0] Callback: all setup complete, redirecting home')
                 setPhase('success');
                 setTimeout(() => {
-                  // Always redirect to home - AuthWrapper will show app since we're logged in
+                  // AuthWrapper will check isLoggedIn() which now returns true
                   window.location.replace('/');
                 }, 1200);
             })
