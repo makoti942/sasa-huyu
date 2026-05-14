@@ -5,6 +5,7 @@ import { api_base } from '@/external/bot-skeleton';
 import { setAuthData } from '@/external/bot-skeleton/services/api/observables/connection-status-stream';
 import { TAuthData } from '@/types/api-types';
 import { requestSessionActive } from '@deriv-com/auth-client';
+import { logout } from '@/auth/DerivAuth';
 
 // Extend Window interface to include is_tmb_enabled property
 declare global {
@@ -374,6 +375,8 @@ const useTMB = (): UseTMBReturn => {
     //     },
     //     [isCallbackPage, getActiveSessions, handleLogout, processTokens, domains, currentDomain]
     // );
+
+    const handleLogout = useCallback(() => { logout(); }, []);
 
     return useMemo(
         () => ({
