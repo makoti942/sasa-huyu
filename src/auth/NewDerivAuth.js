@@ -70,7 +70,7 @@ export async function handleNewCallback() {
     return null
   }
 
-  window.history.replaceState({}, '', '/callback')
+  window.history.replaceState({}, '', '/')
 
   const savedState = sessionStorage.getItem(S.state)
   if (!savedState || savedState !== returnedState) {
