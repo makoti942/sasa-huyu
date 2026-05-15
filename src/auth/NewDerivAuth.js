@@ -167,22 +167,41 @@ export async function createNewWebSocket() {
   }
 
   const accountsData = await accountsRes.json()
-  console.log("[NEW SYSTEM] Accounts response:", accountsData)
+  console.log("[NEW SYSTEM] Accounts response:", JSON.stringify(accountsData, null, 2))
 
   // Extract first account - handle different response formats
   let accountId = null
+  let accountObj = null
+  
   if (Array.isArray(accountsData)) {
-    accountId = accountsData[0]?.id
+    accountObj = accountsData[0]
   } else if (accountsData.data && Array.isArray(accountsData.data)) {
-    accountId = accountsData.data[0]?.id
+    accountObj = accountsData.data[0]
+  }
+
+  if (accountObj) {
+    console.log("[NEW SYSTEM] First account object:", JSON.stringify(accountObj, null, 2))
+    // Try different property names
+    accountId = accountObj.id || 
+                accountObj.account_id ||
+                accountObj.loginid ||
+                accountObj.uuid
+    
+    console.log("[NEW SYSTEM] Available properties:", Object.keys(accountObj))
   } else if (accountsData.id) {
     accountId = accountsData.id
+  } else if (accountsData.account_id) {
+    accountId = accountsData.account_id
   }
 
   if (!accountId) {
-    console.error("[NEW SYSTEM] No account ID found in:", accountsData)
+    console.error("[NEW SYSTEM] No account ID found. Full response:", JSON.stringify(accountsData, null, 2))
+    // Don't fail yet - maybe we don't need WebSocket
+    console.warn("[NEW SYSTEM] Proceeding without WebSocket for now")
     return null
   }
+  
+  console.log("[NEW SYSTEM] Using account ID:", accountId)
 
   // Step 2: Get OTP authenticated WebSocket URL
   let otpRes

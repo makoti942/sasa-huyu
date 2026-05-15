@@ -120,17 +120,24 @@ const PkceCallbackHandler = () => {
                 let errData: any = {};
                 try { errData = await response.json(); } catch {}
                 const desc = errData.error_description || errData.error || `HTTP ${response.status}`;
+                console.error("[PKCE] Token exchange failed:", desc);
                 setErrorMsg(`Login failed: ${desc}`);
                 setStatus('error');
                 return;
             }
 
             const data = await response.json() as { access_token: string; expires_in: number };
+            console.log("[PKCE] Token received, expires in:", data.expires_in);
 
             // Save access_token + expiry (tab-scoped; each tab manages its own session)
             sessionStorage.setItem('deriv_access_token', data.access_token);
             sessionStorage.setItem('deriv_token_expiry', String(Date.now() + data.expires_in * 1000));
+            sessionStorage.setItem('NEW_AUTH_token', data.access_token);
+            sessionStorage.setItem('NEW_AUTH_expiry', String(Date.now() + data.expires_in * 1000));
+            sessionStorage.setItem('NEW_AUTH_active', 'true');
             sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+            console.log("[PKCE] Token saved to sessionStorage");
+            console.log("[PKCE] NEW_AUTH_active set to true");
 
             Cookies.set('logged_state', 'true', {
                 domain:  window.location.hostname,
@@ -196,23 +203,16 @@ const CallbackPage = () => {
       NEW_AUTH_active: sessionStorage.getItem("NEW_AUTH_active")
     });
     
-    const isNewSystemCallback = 
-      urlParams.has("code") && 
-      sessionStorage.getItem("NEW_AUTH_active") === "true";
+    // PKCE flow takes priority - if we have a code, handle it with PkceCallbackHandler
+    const isPkceCallback = urlParams.has("code");
     const isOldSystemCallback = 
       urlParams.has("token1") || urlParams.has("acct1");
   
-    if (isNewSystemCallback) {
-      handleNewCallback()
-        .then(token => {
-          if (token) {
-            createNewWebSocket();
-            setTimeout(() => { window.location.href = "/"; }, 1500);
-          }
-        })
-        .catch(err => setError(err.message));
+    // PKCE flow (new system) takes priority
+    if (isPkceCallback) {
+        return <PkceCallbackHandler />;
     }
-  
+
     if (error) {
         return (
             <div style={{ padding: '40px', textAlign: 'center', maxWidth: '520px', margin: '0 auto' }}>
@@ -232,21 +232,7 @@ const CallbackPage = () => {
         );
     }
 
-    if (isNewSystemCallback) {
-        return (
-            <div style={{ padding: '40px', textAlign: 'center' }}>
-                <p>Completing login, please wait…</p>
-            </div>
-        );
-    }
-
     if (isOldSystemCallback) {
-        const isPkceFlow = new URLSearchParams(window.location.search).has('code') ||
-                           new URLSearchParams(window.location.search).has('error');
-
-        if (isPkceFlow) {
-            return <PkceCallbackHandler />;
-        }
 
         return (
             <Callback
