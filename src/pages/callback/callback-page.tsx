@@ -129,6 +129,36 @@ const PkceCallbackHandler = () => {
             const data = await response.json() as { access_token: string; expires_in: number };
             console.log("[PKCE] Token received, expires in:", data.expires_in);
 
+            // Step 7.5 — Fetch account information with the access token
+            let accountId = null;
+            try {
+                const accountsRes = await fetch(
+                    "https://api.derivws.com/trading/v1/options/accounts",
+                    {
+                        headers: {
+                            "Authorization": "Bearer " + data.access_token,
+                            "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+                            "Content-Type": "application/json"
+                        }
+                    }
+                );
+
+                if (accountsRes.ok) {
+                    const accountsData = await accountsRes.json();
+                    console.log("[PKCE] Accounts response:", accountsData);
+                    
+                    // Extract account ID
+                    if (accountsData.data && Array.isArray(accountsData.data) && accountsData.data[0]) {
+                        accountId = accountsData.data[0].account_id || accountsData.data[0].id || accountsData.data[0].loginid;
+                        console.log("[PKCE] Account ID extracted:", accountId);
+                    }
+                } else {
+                    console.warn("[PKCE] Failed to fetch accounts, status:", accountsRes.status);
+                }
+            } catch (e) {
+                console.warn("[PKCE] Error fetching accounts:", e);
+            }
+
             // Save access_token + expiry (tab-scoped; each tab manages its own session)
             sessionStorage.setItem('deriv_access_token', data.access_token);
             sessionStorage.setItem('deriv_token_expiry', String(Date.now() + data.expires_in * 1000));
@@ -146,8 +176,17 @@ const PkceCallbackHandler = () => {
             localStorage.setItem('NEW_AUTH_token', data.access_token);
             localStorage.setItem('authToken', data.access_token);
             sessionStorage.setItem('NEW_AUTH_token', data.access_token);
+            
+            // Save account in accountsList format so the app recognizes it
+            if (accountId) {
+                const accountsList = JSON.parse(localStorage.getItem('accountsList') || '{}');
+                accountsList[accountId] = data.access_token;
+                localStorage.setItem('accountsList', JSON.stringify(accountsList));
+                console.log("[PKCE] Saved account to accountsList:", accountId);
+            }
+            
             console.log("[PKCE] Cookies set: AuthToken, isLoggedIn, logged_state");
-            console.log("[PKCE] localStorage set: NEW_AUTH_token, authToken");
+            console.log("[PKCE] localStorage set: NEW_AUTH_token, authToken, accountsList");
             console.log("[PKCE] sessionStorage set: NEW_AUTH_token");
             
             setStatus('success');
