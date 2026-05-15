@@ -1,8 +1,8 @@
 const CONFIG = {
   clientId: "337DJLKi2OJ4VsyFSLIt9",
   redirectUri: "https://makotitraderss.vercel.app/callback",
-  authUrl: "https://auth.deriv.com/oauth2/auth",
-  tokenUrl: "https://auth.deriv.com/oauth2/token",
+  authUrl: "https://oauth.deriv.com/oauth2/authorize",
+  tokenUrl: "https://oauth.deriv.com/oauth2/token",
   wsUrl: "wss://ws.derivws.com/websockets/v3?app_id=101585"
 }
 
@@ -48,8 +48,7 @@ export async function startNewLogin() {
     state: state,
     code_challenge: challenge,
     code_challenge_method: "S256",
-    prompt: "login consent",
-    app_id: "101585"
+    prompt: "login consent"
   })
 
   window.location.href = CONFIG.authUrl + "?" + params.toString()
