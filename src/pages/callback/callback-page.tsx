@@ -188,6 +188,14 @@ const PkceCallbackHandler = () => {
 const CallbackPage = () => {
     const [error, setError] = useState(null);
     const urlParams = new URLSearchParams(window.location.search);
+    
+    console.log("[CALLBACK] URL params:", {
+      code: urlParams.has("code"),
+      token1: urlParams.has("token1"),
+      acct1: urlParams.has("acct1"),
+      NEW_AUTH_active: sessionStorage.getItem("NEW_AUTH_active")
+    });
+    
     const isNewSystemCallback = 
       urlParams.has("code") && 
       sessionStorage.getItem("NEW_AUTH_active") === "true";
@@ -311,7 +319,15 @@ const CallbackPage = () => {
 
                     const selected_currency = getSelectedCurrency(tokens, clientAccounts, state);
                     await new Promise(resolve => setTimeout(resolve, 100));
-                    window.location.replace(window.location.origin + `/?account=${selected_currency}`);
+                    
+                    // If new auth was initiated, redirect to home instead of with account param
+                    // to avoid compatibility issues
+                    if (sessionStorage.getItem("NEW_AUTH_active") === "true") {
+                      console.log("[CALLBACK] New auth active, redirecting to home");
+                      window.location.replace(window.location.origin + "/");
+                    } else {
+                      window.location.replace(window.location.origin + `/?account=${selected_currency}`);
+                    }
                 }}
                 renderReturnButton={() => {
                     return (
