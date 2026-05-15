@@ -7,6 +7,7 @@ import { clearAuthData } from '@/utils/auth-utils';
 import { Callback } from '@deriv-com/auth-client';
 import { Button } from '@deriv-com/ui';
 import { PKCE_VERIFIER_KEY, PKCE_STATE_KEY, PKCE_CLIENT_ID } from '@/utils/pkce';
+import { handleNewCallback, createNewWebSocket } from '../../auth/NewDerivAuth.js';
 
 const getSelectedCurrency = (
     tokens: Record<string, string>,
@@ -185,98 +186,147 @@ const PkceCallbackHandler = () => {
    Legacy callback — handles existing Deriv OAuth redirects.
 ───────────────────────────────────────────────────────── */
 const CallbackPage = () => {
-    const isPkceFlow = new URLSearchParams(window.location.search).has('code') ||
-                       new URLSearchParams(window.location.search).has('error');
-
-    if (isPkceFlow) {
-        return <PkceCallbackHandler />;
+    const [error, setError] = useState(null);
+    const urlParams = new URLSearchParams(window.location.search);
+    const isNewSystemCallback = 
+      urlParams.has("code") && 
+      sessionStorage.getItem("NEW_AUTH_active") === "true";
+    const isOldSystemCallback = 
+      urlParams.has("token1") || urlParams.has("acct1");
+  
+    if (isNewSystemCallback) {
+      handleNewCallback()
+        .then(token => {
+          if (token) {
+            createNewWebSocket();
+            setTimeout(() => { window.location.href = "/"; }, 1500);
+          }
+        })
+        .catch(err => setError(err.message));
+    }
+  
+    if (error) {
+        return (
+            <div style={{ padding: '40px', textAlign: 'center', maxWidth: '520px', margin: '0 auto' }}>
+                <h2 style={{ color: '#e74c3c', marginBottom: '16px' }}>Login failed</h2>
+                <p style={{
+                    color: '#ccc', margin: '16px 0', whiteSpace: 'pre-wrap',
+                    textAlign: 'left', background: '#1a1a1a', padding: '12px',
+                    borderRadius: '8px', fontSize: '13px',
+                }}>
+                    {error}
+                </p>
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
+                    <Button onClick={() => { window.location.reload(); }}>Retry</Button>
+                    <Button onClick={() => { window.location.href = '/'; }}>Return to App</Button>
+                </div>
+            </div>
+        );
     }
 
-    return (
-        <Callback
-            onSignInSuccess={async (tokens: Record<string, string>, rawState: unknown) => {
-                const state = rawState as { account?: string } | null;
-                const accountsList: Record<string, string> = {};
-                const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
+    if (isNewSystemCallback) {
+        return (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+                <p>Completing login, please wait…</p>
+            </div>
+        );
+    }
 
-                for (const [key, value] of Object.entries(tokens)) {
-                    if (key.startsWith('acct')) {
-                        const tokenKey = key.replace('acct', 'token');
-                        if (tokens[tokenKey]) {
-                            accountsList[value] = tokens[tokenKey];
-                            clientAccounts[value] = {
-                                loginid: value,
-                                token: tokens[tokenKey],
-                                currency: '',
-                            };
-                        }
-                    } else if (key.startsWith('cur')) {
-                        const accKey = key.replace('cur', 'acct');
-                        if (tokens[accKey]) {
-                            clientAccounts[tokens[accKey]].currency = value;
-                        }
-                    }
-                }
+    if (isOldSystemCallback) {
+        const isPkceFlow = new URLSearchParams(window.location.search).has('code') ||
+                           new URLSearchParams(window.location.search).has('error');
 
-                localStorage.setItem('accountsList', JSON.stringify(accountsList));
-                localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
+        if (isPkceFlow) {
+            return <PkceCallbackHandler />;
+        }
 
-                let is_token_set = false;
-                const api = await generateDerivApiInstance();
-                if (api) {
-                    const { authorize, error } = await api.authorize(tokens.token1);
-                    api.disconnect();
-                    if (error) {
-                        if (error.code === 'InvalidToken') {
-                            is_token_set = true;
-                            const is_tmb_enabled = window.is_tmb_enabled === true;
-                            if (Cookies.get('logged_state') === 'true' && !is_tmb_enabled) {
-                                globalObserver.emit('InvalidToken', { error });
+        return (
+            <Callback
+                onSignInSuccess={async (tokens: Record<string, string>, rawState: unknown) => {
+                    const state = rawState as { account?: string } | null;
+                    const accountsList: Record<string, string> = {};
+                    const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
+
+                    for (const [key, value] of Object.entries(tokens)) {
+                        if (key.startsWith('acct')) {
+                            const tokenKey = key.replace('acct', 'token');
+                            if (tokens[tokenKey]) {
+                                accountsList[value] = tokens[tokenKey];
+                                clientAccounts[value] = {
+                                    loginid: value,
+                                    token: tokens[tokenKey],
+                                    currency: '',
+                                };
                             }
-                            if (Cookies.get('logged_state') === 'false') {
-                                clearAuthData();
+                        } else if (key.startsWith('cur')) {
+                            const accKey = key.replace('cur', 'acct');
+                            if (tokens[accKey]) {
+                                clientAccounts[tokens[accKey]].currency = value;
                             }
                         }
-                    } else {
-                        localStorage.setItem('callback_token', authorize.toString());
-                        const clientAccountsArray = Object.values(clientAccounts);
-                        const firstId = authorize?.account_list[0]?.loginid;
-                        const filteredTokens = clientAccountsArray.filter(account => account.loginid === firstId);
-                        if (filteredTokens.length) {
-                            localStorage.setItem('authToken', filteredTokens[0].token);
-                            localStorage.setItem('active_loginid', filteredTokens[0].loginid);
-                            is_token_set = true;
+                    }
+
+                    localStorage.setItem('accountsList', JSON.stringify(accountsList));
+                    localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
+
+                    let is_token_set = false;
+                    const api = await generateDerivApiInstance();
+                    if (api) {
+                        const { authorize, error } = await api.authorize(tokens.token1);
+                        api.disconnect();
+                        if (error) {
+                            if (error.code === 'InvalidToken') {
+                                is_token_set = true;
+                                const is_tmb_enabled = window.is_tmb_enabled === true;
+                                if (Cookies.get('logged_state') === 'true' && !is_tmb_enabled) {
+                                    globalObserver.emit('InvalidToken', { error });
+                                }
+                                if (Cookies.get('logged_state') === 'false') {
+                                    clearAuthData();
+                                }
+                            }
+                        } else {
+                            localStorage.setItem('callback_token', authorize.toString());
+                            const clientAccountsArray = Object.values(clientAccounts);
+                            const firstId = authorize?.account_list[0]?.loginid;
+                            const filteredTokens = clientAccountsArray.filter(account => account.loginid === firstId);
+                            if (filteredTokens.length) {
+                                localStorage.setItem('authToken', filteredTokens[0].token);
+                                localStorage.setItem('active_loginid', filteredTokens[0].loginid);
+                                is_token_set = true;
+                            }
                         }
                     }
-                }
-                if (!is_token_set) {
-                    localStorage.setItem('authToken', tokens.token1);
-                    localStorage.setItem('active_loginid', tokens.acct1);
-                }
+                    if (!is_token_set) {
+                        localStorage.setItem('authToken', tokens.token1);
+                        localStorage.setItem('active_loginid', tokens.acct1);
+                    }
 
-                Cookies.set('logged_state', 'true', {
-                    domain: window.location.hostname,
-                    expires: 30,
-                    path: '/',
-                    secure: window.location.protocol === 'https:',
-                });
+                    Cookies.set('logged_state', 'true', {
+                        domain: window.location.hostname,
+                        expires: 30,
+                        path: '/',
+                        secure: window.location.protocol === 'https:',
+                    });
 
-                const selected_currency = getSelectedCurrency(tokens, clientAccounts, state);
-                await new Promise(resolve => setTimeout(resolve, 100));
-                window.location.replace(window.location.origin + `/?account=${selected_currency}`);
-            }}
-            renderReturnButton={() => {
-                return (
-                    <Button
-                        className='callback-return-button'
-                        onClick={() => { window.location.href = '/'; }}
-                    >
-                        {'Return to Bot'}
-                    </Button>
-                );
-            }}
-        />
-    );
+                    const selected_currency = getSelectedCurrency(tokens, clientAccounts, state);
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    window.location.replace(window.location.origin + `/?account=${selected_currency}`);
+                }}
+                renderReturnButton={() => {
+                    return (
+                        <Button
+                            className='callback-return-button'
+                            onClick={() => { window.location.href = '/'; }}
+                        >
+                            {'Return to Bot'}
+                        </Button>
+                    );
+                }}
+            />
+        );
+    }
+    return null;
 };
 
 export default CallbackPage;

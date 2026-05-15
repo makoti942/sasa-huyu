@@ -24,6 +24,7 @@ import AccountsInfoLoader from './account-info-loader';
 import AccountSwitcher from './account-switcher';
 import MobileMenu, { MobileMenuRef } from './mobile-menu';
 import AdminPasswordModal from '../footer/AdminPasswordModal';
+import { startNewLogin } from '../../../auth/NewDerivAuth.js';
 import './header.scss';
 
 type TAppHeaderProps = {
@@ -267,6 +268,18 @@ const AppHeader = observer(({ isAuthenticating }: TAppHeaderProps) => {
                 </>
             );
         } else {
+            const handleNewAccountLogin = async (event: React.MouseEvent<HTMLButtonElement>) => {
+                const btn = event.currentTarget;
+                try {
+                  btn.disabled = true;
+                  btn.textContent = "Preparing...";
+                  await startNewLogin();
+                } catch(e) {
+                  btn.disabled = false;
+                  btn.textContent = "Login (New Account)";
+                  alert("Error: " + e.message);
+                }
+              };
             return (
                 <div className='auth-actions'>
                     <Button
@@ -291,21 +304,7 @@ const AppHeader = observer(({ isAuthenticating }: TAppHeaderProps) => {
                         tertiary
                         className='auth-new-accounts-button'
                         is_disabled={isNewLoginLoading}
-                        onClick={async (e: React.MouseEvent) => {
-                            e.preventDefault();
-                            if (isNewLoginLoading) return;
-                            setIsNewLoginLoading(true);
-                            setNewLoginError('');
-                            try {
-                                await redirectToNewAccountsLogin();
-                                // If we reach here the redirect didn't fire — re-enable
-                                setIsNewLoginLoading(false);
-                            } catch (error) {
-                                console.error('[New Accounts Login]', error);
-                                setIsNewLoginLoading(false);
-                                setNewLoginError('Login failed to start. Please try again or use a different browser.');
-                            }
-                        }}
+                        onClick={handleNewAccountLogin}
                     >
                         <Localize i18n_default_text={isNewLoginLoading ? 'Preparing login…' : 'Login (new accounts)'} />
                     </Button>

@@ -19,6 +19,7 @@ import CoreStoreProvider from './CoreStoreProvider';
 import SecurityProtection from '@/components/security/security-protection';
 import CopyTradingManager from '@/pages/copy-trading/copy-trading-manager';
 import { initReplicator } from '@/pages/copy-trading/replicator';
+import { isNewLoggedIn, createNewWebSocket } from '../auth/NewDerivAuth.js';
 import './app-root.scss';
 
 const Layout = lazy(() => import('../components/layout'));
@@ -120,6 +121,10 @@ export const getGlobalCopyTradingManager = () => globalCopyTradingManager;
 
 function App() {
     React.useEffect(() => {
+        if (isNewLoggedIn() && !window._newSystemWSReady) {
+            createNewWebSocket();
+        }
+
         // Force update app ID in localStorage to ensure we use the current config value
         forceUpdateAppId();
 

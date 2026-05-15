@@ -28,8 +28,8 @@ import RiskDisclaimer from '../components/risk-disclaimer';
 import RiskCalculatorButton from '../components/risk-calculator-button/risk-calculator-button';
 import BotBuilder from '../pages/bot-builder';
 import Main from '../pages/main';
-import OverUnder from '../pages/OverUnder';
-import MakotiMagic from '../pages/MakotiMagic'; // <--- LOAD MAKOTI MAGIC
+import LoginScreen from '../pages/auth/LoginScreen'; // Import the new login screen
+import { generateOAuthURL } from '@/components/shared'; // Import the function for the old login
 import './app.scss';
 import 'react-toastify/dist/ReactToastify.css';
 import '../components/bot-notification/bot-notification.scss';
@@ -37,7 +37,6 @@ import '../components/bot-notification/bot-notification.scss';
 const AppContent = observer(() => {
     const [is_api_initialized, setIsApiInitialized] = React.useState(false);
     const [is_loading, setIsLoading] = React.useState(true);
-    const [is_eu_error_loading, setIsEuErrorLoading] = React.useState(true);
     const store = useStore();
     const { app, transactions, common, client } = store;
     const { showDigitalOptionsMaltainvestError } = app;
@@ -51,23 +50,6 @@ const AppContent = observer(() => {
 
     initTrackJS(client.loginid);
 
-    const livechat_client_information = {
-        is_client_store_initialized: client?.is_logged_in ? !!client?.account_settings?.email : !!client,
-        is_logged_in: client?.is_logged_in,
-        loginid: client?.loginid,
-        landing_company_shortcode: client?.landing_company_shortcode,
-        currency: client?.currency,
-        residence: client?.residence,
-        email: client?.account_settings?.email,
-        first_name: client?.account_settings?.first_name,
-        last_name: client?.account_settings?.last_name,
-    };
-
-    useLiveChat(livechat_client_information);
-
-    const token = V2GetActiveToken() ?? null;
-    useIntercom(token);
-
     useEffect(() => {
         if (connectionStatus === CONNECTION_STATUS.OPENED) {
             setIsApiInitialized(true);
@@ -76,34 +58,6 @@ const AppContent = observer(() => {
             common.setSocketOpened(false);
         }
     }, [common, connectionStatus]);
-
-    const { current_language } = common;
-    const html = document.documentElement;
-    React.useEffect(() => {
-        html?.setAttribute('lang', current_language.toLowerCase());
-        html?.setAttribute('dir', current_language.toLowerCase() === 'ar' ? 'rtl' : 'ltr');
-    }, [current_language, html]);
-
-    const is_eu_country = client?.is_eu_country;
-    const clients_logged_out_country_code = client?.clients_country;
-    const clients_logged_in_country_code = client?.account_settings?.country_code;
-    const is_client_logged_in = client?.is_logged_in;
-
-    useEffect(() => {
-        const bot_restricted_countries = BOT_RESTRICTED_COUNTRIES_LIST();
-
-        if (!client.is_logged_in) {
-            if (clients_logged_out_country_code) {
-                const is_restricted = !!bot_restricted_countries[clients_logged_out_country_code];
-                setIsEuErrorLoading(client.is_eu_country && is_restricted);
-            }
-        } else {
-            if (clients_logged_in_country_code) {
-                const is_restricted = !!bot_restricted_countries[clients_logged_in_country_code];
-                setIsEuErrorLoading(is_restricted);
-            }
-        }
-    }, [is_eu_country, clients_logged_out_country_code, clients_logged_in_country_code, is_client_logged_in]);
 
     const handleMessage = React.useCallback(
         ({ data }) => {
@@ -137,78 +91,48 @@ const AppContent = observer(() => {
         };
     }, [is_api_initialized, client.is_logged_in, client.loginid, handleMessage, connectionStatus]);
 
-    React.useEffect(() => {
-        showDigitalOptionsMaltainvestError(client, common);
-    }, [client.is_options_blocked, client.account_settings?.country_code, client.clients_country]);
-
     const init = () => {
         ServerTime.init(common);
         app.setDBotEngineStores();
         ApiHelpers.setInstance(app.api_helpers_store);
-        import('@/utils/gtm').then(({ default: GTM }) => {
-            GTM.init(store);
-        });
-    };
-
-    const changeActiveSymbolLoadingState = () => {
-        init();
-        const retrieveActiveSymbols = () => {
-            const { active_symbols } = ApiHelpers.instance;
-            active_symbols.retrieveActiveSymbols(true).then(() => {
-                setIsLoading(false);
-            });
-        };
-
-        if (ApiHelpers?.instance?.active_symbols) {
-            retrieveActiveSymbols();
-        } else {
-            const intervalId = setInterval(() => {
-                if (ApiHelpers?.instance?.active_symbols) {
-                    clearInterval(intervalId);
-                    retrieveActiveSymbols();
-                }
-            }, 1000);
-        }
     };
 
     React.useEffect(() => {
         if (is_api_initialized) {
             init();
-            setIsLoading(true);
             if (!client.is_logged_in) {
-                changeActiveSymbolLoadingState();
+                setIsLoading(false);
             }
         }
-    }, [is_api_initialized]);
+    }, [is_api_initialized, client.is_logged_in]);
 
     React.useEffect(() => {
         if (client.is_logged_in && client.is_landing_company_loaded && is_api_initialized) {
-            changeActiveSymbolLoadingState();
+            const { active_symbols } = ApiHelpers.instance;
+            active_symbols.retrieveActiveSymbols(true).then(() => {
+                setIsLoading(false);
+            });
         }
     }, [client.is_landing_company_loaded, is_api_initialized, client.loginid]);
 
-    useEffect(() => {
-        initDatadog(true);
-        if (client) {
-            initHotjar(client);
-        }
-    }, []);
-
-    if (common?.error) return null;
+    if (!client.is_logged_in && !is_loading) {
+        const handleOldLogin = () => {
+            // This replicates the logic from the old header button
+            window.location.href = generateOAuthURL(false, 'home');
+        };
+        return <LoginScreen onOldLogin={handleOldLogin} />;
+    }
 
     return is_loading ? (
-        <ChunkLoader message={is_eu_error_loading ? '' : localize('Initializing Deriv Bot account...')} />
+        <ChunkLoader />
     ) : (
         <AuthLoadingWrapper>
             <ThemeProvider theme={is_dark_mode_on ? 'dark' : 'light'}>
                 <BlocklyLoading />
                 <div className='bot-dashboard bot' data-testid='dt_bot_dashboard'>
                     <Audio />
-                    
-                    {/* REMOVED MULTI-TAB SWITCHER */}
                     <Main />
                     <BotBuilder />
-
                     <BotStopped />
                     <TransactionDetailsModal />
                     <ToastContainer limit={3} draggable={false} />
