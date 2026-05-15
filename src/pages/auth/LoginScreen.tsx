@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import './LoginScreen.css';
 import { CreateAccountModal } from './CreateAccountModal';
-import { startNewLogin } from '../../auth/NewDerivAuth.js'; // Assuming the path
+import { startLogin } from '../../utils/pkce';
 
 // A dummy old login handler for illustration. The real one will be passed as a prop.
 const dummyOldLoginHandler = () => {
@@ -36,11 +36,11 @@ const LoginScreen = ({ onOldLogin = dummyOldLoginHandler, onNewLoginSuccess }) =
     onOldLogin().finally(() => setLoading(null));
   };
 
-  const handleNewLoginClick = () => {
+  const handleNewLoginClick = async () => {
       setLoading('new');
-      // startNewLogin will redirect, so no need to stop loading animation unless there's an error
+      // startLogin will redirect, so no need to stop loading animation unless there's an error
       try {
-          startNewLogin();
+          await startLogin();
       } catch (error) {
           console.error("New login failed to start", error);
           setLoading(null);

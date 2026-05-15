@@ -139,15 +139,20 @@ const PkceCallbackHandler = () => {
             console.log("[PKCE] Token saved to sessionStorage");
             console.log("[PKCE] NEW_AUTH_active set to true");
 
-            Cookies.set('logged_state', 'true', {
-                domain:  window.location.hostname,
-                expires: 30,
-                path:    '/',
-                secure:  window.location.protocol === 'https:',
-            });
-
+            // Step 8 — save to cookie and local storage
+            Cookies.set('AuthToken', data.access_token, { expires: 7 });
+            Cookies.set('isLoggedIn', 'true', { expires: 7 });
+            Cookies.set('logged_state', 'true', { expires: 7 });
+            localStorage.setItem('NEW_AUTH_token', data.access_token);
+            localStorage.setItem('authToken', data.access_token);
+            sessionStorage.setItem('NEW_AUTH_token', data.access_token);
+            console.log("[PKCE] Cookies set: AuthToken, isLoggedIn, logged_state");
+            console.log("[PKCE] localStorage set: NEW_AUTH_token, authToken");
+            console.log("[PKCE] sessionStorage set: NEW_AUTH_token");
+            
             setStatus('success');
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // Reload the page to allow the app to reinitialize with the new token
             window.location.href = '/';
         };
 
