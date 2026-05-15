@@ -1,8 +1,9 @@
 const CONFIG = {
   clientId: "337DJLKi2OJ4VsyFSLIt9",
   redirectUri: "https://makotitraderss.vercel.app/callback",
-  authUrl: "https://auth.deriv.com/oauth2/authorize",
+  authUrl: "https://auth.deriv.com/oauth2/auth",
   tokenUrl: "https://auth.deriv.com/oauth2/token",
+  apiBaseUrl: "https://api.derivws.com",
   wsUrl: "wss://ws.derivws.com/websockets/v3?app_id=101585"
 }
 
