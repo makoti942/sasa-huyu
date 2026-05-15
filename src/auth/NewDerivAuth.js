@@ -61,6 +61,13 @@ export async function handleNewCallback() {
   if (handled) return null
   handled = true
 
+  console.log("[NEW AUTH] Callback started")
+  console.log("[NEW AUTH] URL params:", window.location.search)
+  console.log("[NEW AUTH] NEW_AUTH_active:", 
+    sessionStorage.getItem("NEW_AUTH_active"))
+  console.log("[NEW AUTH] NEW_AUTH_verifier exists:", 
+    !!sessionStorage.getItem("NEW_AUTH_verifier"))
+
   const p = new URLSearchParams(window.location.search)
   const code = p.get("code")
   const returnedState = p.get("state")
@@ -131,34 +138,114 @@ export function logoutNew() {
     encodeURIComponent("https://makotitraderss.vercel.app")
 }
 
-export function createNewWebSocket() {
+export async function createNewWebSocket() {
   const token = getNewToken()
   if (!token) return null
 
-  const ws = new WebSocket(CONFIG.wsUrl)
+  // Step 1: Get accounts using Bearer token via REST
+  let accountsRes
+  try {
+    accountsRes = await fetch(
+      "https://api.derivws.com/trading/v1/options/accounts",
+      {
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+          "Content-Type": "application/json"
+        }
+      }
+    )
+  } catch(e) {
+    console.error("[NEW SYSTEM] Failed to fetch accounts:", e)
+    return null
+  }
+
+  if (!accountsRes.ok) {
+    const errText = await accountsRes.text()
+    console.error("[NEW SYSTEM] Accounts error:", errText)
+    return null
+  }
+
+  const accountsData = await accountsRes.json()
+  console.log("[NEW SYSTEM] Accounts response:", accountsData)
+
+  // Extract first account - handle different response formats
+  let accountId = null
+  if (Array.isArray(accountsData)) {
+    accountId = accountsData[0]?.id
+  } else if (accountsData.data && Array.isArray(accountsData.data)) {
+    accountId = accountsData.data[0]?.id
+  } else if (accountsData.id) {
+    accountId = accountsData.id
+  }
+
+  if (!accountId) {
+    console.error("[NEW SYSTEM] No account ID found in:", accountsData)
+    return null
+  }
+
+  // Step 2: Get OTP authenticated WebSocket URL
+  let otpRes
+  try {
+    otpRes = await fetch(
+      "https://api.derivws.com/trading/v1/options/accounts/" +
+      accountId + "/otp",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Deriv-App-ID": "337DJLKi2OJ4VsyFSLIt9",
+          "Content-Type": "application/json"
+        }
+      }
+    )
+  } catch(e) {
+    console.error("[NEW SYSTEM] Failed to get OTP:", e)
+    return null
+  }
+
+  if (!otpRes.ok) {
+    const errText = await otpRes.text()
+    console.error("[NEW SYSTEM] OTP error:", errText)
+    return null
+  }
+
+  const otpData = await otpRes.json()
+  console.log("[NEW SYSTEM] OTP response:", otpData)
+
+  // Extract WebSocket URL - handle different response formats
+  const wsUrl =
+    otpData?.data?.url ||
+    otpData?.data?.websocket_url ||
+    otpData?.url ||
+    otpData?.websocket_url
+
+  if (!wsUrl) {
+    console.error("[NEW SYSTEM] No WS URL in OTP response:", otpData)
+    return null
+  }
+
+  console.log("[NEW SYSTEM] Connecting to:", wsUrl)
+  const ws = new WebSocket(wsUrl)
 
   ws.onopen = () => {
-    // Try authorizing with Bearer token directly
-    ws.send(JSON.stringify({ authorize: token }))
+    console.log("[NEW SYSTEM] WebSocket connected via OTP")
+    window._newSystemWS = ws
+    window._newSystemWSReady = true
   }
 
   ws.onmessage = (msg) => {
     const data = JSON.parse(msg.data)
-    if (data.msg_type === "authorize") {
-      if (data.error) {
-        console.error("[NEW SYSTEM] WS auth error:", data.error.message)
-        console.error("[NEW SYSTEM] Token may not work with old WS")
-      } else {
-        console.log("[NEW SYSTEM] WS authorized:", data.authorize.loginid)
-        window._newSystemWS = ws
-        window._newSystemWSReady = true
-      }
-    }
+    console.log("[NEW SYSTEM] WS message:", data.msg_type)
   }
 
-  ws.onerror = (e) => console.error("[NEW SYSTEM] WS error:", e)
-  
+  ws.onerror = (e) => {
+    console.error("[NEW SYSTEM] WS error:", e)
+    window._newSystemWSReady = false
+  }
+
   ws.onclose = () => {
+    console.log("[NEW SYSTEM] WS closed")
     window._newSystemWSReady = false
     if (isNewLoggedIn()) {
       setTimeout(createNewWebSocket, 3000)

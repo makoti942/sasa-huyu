@@ -20,6 +20,14 @@ const setLocalStorageToken = async (
     paramsToDelete: string[],
     setIsAuthComplete: React.Dispatch<React.SetStateAction<boolean>>
 ) => {
+    // Check if new system is active - skip old session check
+    if (sessionStorage.getItem("NEW_AUTH_active") === "true" ||
+        sessionStorage.getItem("NEW_AUTH_token")) {
+      console.log("[OLD SYSTEM] Skipping sessions/active - new system active")
+      setIsAuthComplete(true)
+      return
+    }
+
     if (loginInfo.length) {
         try {
             const defaultActiveAccount = URLUtils.getDefaultActiveAccount(loginInfo);
