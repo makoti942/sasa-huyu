@@ -1,42 +1,32 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const DERIV_TOKEN_URL = 'https://auth.deriv.com/oauth2/token';
-const DERIV_REST_BASE = 'https://api.derivws.com';
-const CLIENT_ID       = '337DJLKi2OJ4VsyFSLIt9';
-const DERIV_APP_ID    = '101585';
-const AT_COOKIE       = 'deriv_at';
-const ACCT_COOKIE     = 'deriv_account_id';
-
-function parseCookies(req: VercelRequest): Record<string, string> {
-    return Object.fromEntries(
-        (req.headers.cookie ?? '')
-            .split(';')
-            .map(c => c.trim().split('='))
-            .filter(p => p.length >= 2)
-            .map(([k, ...v]) => [k.trim(), decodeURIComponent(v.join('=').trim())])
-    );
-}
+const DERIV_TOKEN_URL  = 'https://auth.deriv.com/oauth2/token';
+const DERIV_LEGACY_URL = 'https://auth.deriv.com/oauth2/legacy/tokens';
+const DERIV_REST_BASE  = 'https://api.derivws.com';
+const CLIENT_ID        = '337DJLKi2OJ4VsyFSLIt9';
+const DERIV_APP_ID     = '101585';
+const AT_COOKIE        = 'deriv_at';
+const ACCT_COOKIE      = 'deriv_account_id';
 
 function cookieStr(name: string, value: string, maxAge: number): string {
     return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-    res.setHeader('Access-Control-Allow-Origin',  req.headers.origin ?? '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Origin',      req.headers.origin ?? '*');
+    res.setHeader('Access-Control-Allow-Methods',     'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers',     'Content-Type');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
     const { code, codeVerifier, redirectUri } = (req.body ?? {}) as Record<string, string>;
-
     if (!code || !codeVerifier || !redirectUri) {
         return res.status(400).json({ error: 'Missing required parameters: code, codeVerifier, redirectUri' });
     }
 
-    // ── Step 1: Exchange auth code for access_token ─────────────────────────
+    // ── Step 1: Exchange auth code → access_token ────────────────────────────
     let tokenRes: Response;
     try {
         tokenRes = await fetch(DERIV_TOKEN_URL, {
@@ -74,7 +64,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const expiresIn: number = tokenData.expires_in ?? 3600;
 
-    // ── Step 2: Auto-fetch or create options account ─────────────────────────
+    // ── Step 2: Fetch legacy Deriv tokens (acct1/token1/cur1 …) ─────────────
+    // These are the tokens the existing app stores in localStorage. We return
+    // them to the client so the trading infrastructure can authorize normally.
+    let legacyTokens: Record<string, string> | null = null;
+    try {
+        const legacyRes = await fetch(DERIV_LEGACY_URL, {
+            method:  'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        if (legacyRes.ok) {
+            legacyTokens = await legacyRes.json() as Record<string, string>;
+        }
+    } catch (_) { /* non-fatal */ }
+
+    // ── Step 3: Auto-fetch or create options account ─────────────────────────
     let accountId: string | null = null;
     try {
         const listRes = await fetch(`${DERIV_REST_BASE}/trading/v1/options/accounts`, {
@@ -83,14 +87,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 'Deriv-App-ID':  DERIV_APP_ID,
             },
         });
-
         if (listRes.ok) {
             const listData = await listRes.json() as { data?: Array<{ id: string; account_type?: string }> };
             if (listData.data && listData.data.length > 0) {
                 const demo = listData.data.find(a => a.account_type === 'demo');
                 accountId  = (demo ?? listData.data[0]).id;
             } else {
-                // No accounts yet — create a demo account
                 const createRes = await fetch(`${DERIV_REST_BASE}/trading/v1/options/accounts`, {
                     method:  'POST',
                     headers: {
@@ -106,12 +108,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
         }
-    } catch (_) { /* non-fatal — account_id can be fetched lazily */ }
+    } catch (_) { /* non-fatal */ }
 
-    // ── Step 3: Set httpOnly cookies (token never reaches browser JS) ────────
+    // ── Step 4: Set httpOnly cookies (access_token never exposed to browser JS)
     const cookies = [cookieStr(AT_COOKIE, accessToken, expiresIn)];
     if (accountId) cookies.push(cookieStr(ACCT_COOKIE, accountId, expiresIn));
     res.setHeader('Set-Cookie', cookies);
 
-    return res.status(200).json({ success: true, expires_in: expiresIn, account_id: accountId });
+    // Return legacy tokens to the client so it can populate localStorage
+    // for the existing trading infrastructure (authorize via WebSocket).
+    return res.status(200).json({
+        success:       true,
+        expires_in:    expiresIn,
+        account_id:    accountId,
+        legacy_tokens: legacyTokens,
+    });
 }

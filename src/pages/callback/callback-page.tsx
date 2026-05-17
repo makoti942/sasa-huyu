@@ -118,9 +118,10 @@ const PkceCallbackHandler = () => {
             }
 
             const data = await response.json() as {
-                success: boolean;
-                expires_in?: number;
-                account_id?: string | null;
+                success:        boolean;
+                expires_in?:    number;
+                account_id?:    string | null;
+                legacy_tokens?: Record<string, string> | null;
             };
 
             // Clean up PKCE data
@@ -134,17 +135,57 @@ const PkceCallbackHandler = () => {
                 secure:  window.location.protocol === 'https:',
             });
 
-            // Store account_id for client-side use (non-sensitive)
+            // ── Populate localStorage from legacy tokens ─────────────────────
+            // The trading infrastructure uses authToken + accountsList in
+            // localStorage to authorize the Deriv WebSocket connection.
+            if (data.legacy_tokens && Object.keys(data.legacy_tokens).length > 0) {
+                const lt = data.legacy_tokens;
+                const accountsList:   Record<string, string>                                                        = {};
+                const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
+
+                for (const [key, value] of Object.entries(lt)) {
+                    if (key.startsWith('acct')) {
+                        const tokenKey = key.replace('acct', 'token');
+                        if (lt[tokenKey]) {
+                            accountsList[value]   = lt[tokenKey];
+                            clientAccounts[value] = { loginid: value, token: lt[tokenKey], currency: '' };
+                        }
+                    } else if (key.startsWith('cur')) {
+                        const accKey = key.replace('cur', 'acct');
+                        const loginId = lt[accKey];
+                        if (loginId && clientAccounts[loginId]) {
+                            clientAccounts[loginId].currency = value;
+                        }
+                    }
+                }
+
+                localStorage.setItem('accountsList',   JSON.stringify(accountsList));
+                localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
+
+                // Set the active account — prefer demo (VRTC), then first real account
+                const allIds    = Object.keys(accountsList);
+                const demoId    = allIds.find(id => id.startsWith('VR'));
+                const activeId  = demoId ?? allIds[0];
+                const activeToken = activeId ? accountsList[activeId] : lt.token1;
+                const loginId     = activeId ?? lt.acct1;
+
+                if (loginId && activeToken) {
+                    localStorage.setItem('authToken',      activeToken);
+                    localStorage.setItem('active_loginid', loginId);
+                }
+            } else if (data.account_id) {
+                // Fallback if legacy tokens unavailable: use options account_id
+                localStorage.setItem('active_loginid', data.account_id);
+                localStorage.setItem('authToken',      'pkce_session');
+            }
+
+            // Store options account_id in sessionStorage for OTP WebSocket flow
             if (data.account_id) {
                 sessionStorage.setItem('deriv_account_id', data.account_id);
-                // Set active_loginid so legacy MobX stores (Journal, Balance, etc.) can find it
-                localStorage.setItem('active_loginid', data.account_id);
-                // Sentinel authToken so AuthenticatedRoot's localStorage fallback works
-                localStorage.setItem('authToken', 'pkce_session');
             }
 
             setStatus('success');
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            await new Promise(resolve => setTimeout(resolve, 800));
             window.location.href = '/';
         };
 

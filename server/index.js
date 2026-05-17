@@ -120,7 +120,25 @@ app.post('/api/oauth/exchange', async (req, res) => {
             });
         }
 
-        return res.json({ success: true, expires_in: tokenData.expires_in || 3600, account_id: accountId });
+        // Fetch legacy tokens (acct1/token1/cur1...) so the client can
+        // populate localStorage and authorize via WebSocket like the old flow.
+        let legacyTokens = null;
+        try {
+            const legacyRes = await fetch('https://auth.deriv.com/oauth2/legacy/tokens', {
+                method:  'POST',
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+            if (legacyRes.ok) {
+                legacyTokens = await legacyRes.json();
+            }
+        } catch (_) { /* non-fatal */ }
+
+        return res.json({
+            success:       true,
+            expires_in:    tokenData.expires_in || 3600,
+            account_id:    accountId,
+            legacy_tokens: legacyTokens,
+        });
     } catch (err) {
         return res.status(500).json({ error: (err && err.message) || 'Token exchange failed' });
     }
