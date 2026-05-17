@@ -137,6 +137,10 @@ const PkceCallbackHandler = () => {
             // Store account_id for client-side use (non-sensitive)
             if (data.account_id) {
                 sessionStorage.setItem('deriv_account_id', data.account_id);
+                // Set active_loginid so legacy MobX stores (Journal, Balance, etc.) can find it
+                localStorage.setItem('active_loginid', data.account_id);
+                // Sentinel authToken so AuthenticatedRoot's localStorage fallback works
+                localStorage.setItem('authToken', 'pkce_session');
             }
 
             setStatus('success');
