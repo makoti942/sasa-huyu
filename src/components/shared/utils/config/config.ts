@@ -17,6 +17,12 @@ export const OAUTH_AUTH_URL = 'https://auth.deriv.com/oauth2/auth';
 /** The Deriv OAuth2 token endpoint (exchanges auth code for access token). */
 export const OAUTH_TOKEN_URL = 'https://auth.deriv.com/oauth2/token';
 
+/** The Deriv REST API base URL for all trading endpoints. */
+export const DERIV_REST_BASE = 'https://api.derivws.com';
+
+/** The Deriv-App-ID header value required on all REST and OTP calls. */
+export const DERIV_APP_ID_HEADER = String(APP_ID);
+
 /** The public Deriv trading WebSocket (no auth required). */
 export const PUBLIC_TRADING_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 
@@ -28,10 +34,7 @@ export const getCallbackURL = () => `${window.location.origin}/callback`;
 export const livechat_license_id = 12049137;
 export const livechat_client_id = '66aa088aad5a414484c1fd1fa8a5ace7';
 
-// All other App ID and domain-switching logic has been removed to ensure consistency.
-
 export const isProduction = () => {
-    // This can be simplified as we no longer rely on domain for App ID.
     return !/localhost|binary\.sx|pages\.dev/i.test(window.location.hostname);
 };
 
@@ -53,25 +56,21 @@ const getDefaultServerURL = () => {
 
 /**
  * Returns the App ID for the application.
- * This function is now simplified to always return the single, correct App ID.
  */
 export const getAppId = () => {
-    // Set the app_id in localStorage for other parts of the app that might read it.
     window.localStorage.setItem('config.app_id', String(APP_ID));
     return APP_ID;
 };
 
 /**
- * All App ID switching logic has been disabled and removed.
- * This function is now a no-op for backward compatibility.
+ * No-op for backward compatibility.
  */
 export const switchAppIdAfterTrade = () => {
-    // No-op. The App ID is now constant.
     return null;
 };
 
 /**
- * This function is a no-op as the App ID is now constant.
+ * No-op for backward compatibility.
  */
 export const forceUpdateAppId = () => {
     return getAppId();
@@ -133,9 +132,6 @@ export const generateOAuthURL = (is_new_account = false, state = '') => {
         return `https://${server_url}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
     }
 
-    // Note: App ID 101585 is currently only registered on the old API (oauth.deriv.com).
-    // The new endpoint (auth.deriv.com) will return 'invalid_client' until the App ID is registered there.
     const endpoint = is_new_account ? 'auth.deriv.com' : 'oauth.deriv.com';
-
     return `https://${endpoint}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
 };

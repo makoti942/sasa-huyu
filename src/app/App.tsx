@@ -13,6 +13,7 @@ import { observer as globalObserver } from '@/external/bot-skeleton/utils/observ
 import { StoreProvider } from '@/hooks/useStore';
 import CallbackPage from '@/pages/callback';
 import Endpoint from '@/pages/endpoint';
+import LoginPage from '@/pages/login';
 import { TAuthData } from '@/types/api-types';
 import { initializeI18n, localize, TranslationProvider } from '@deriv-com/translations';
 import CoreStoreProvider from './CoreStoreProvider';
@@ -28,6 +29,64 @@ const { TRANSLATIONS_CDN_URL, R2_PROJECT_NAME, CROWDIN_BRANCH_NAME } = process.e
 const i18nInstance = initializeI18n({
     cdnUrl: `${TRANSLATIONS_CDN_URL}/${R2_PROJECT_NAME}/${CROWDIN_BRANCH_NAME}`,
 });
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   AuthenticatedRoot — checks session before rendering the main app.
+   Shows LoginPage if no active session is detected.
+────────────────────────────────────────────────────────────────────────────── */
+const AuthenticatedRoot = () => {
+    const [authStatus, setAuthStatus] = React.useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
+
+    React.useEffect(() => {
+        const checkAuth = async () => {
+            // 1. Check server-side session (httpOnly cookie via backend)
+            try {
+                const res = await fetch('/api/auth/status', { credentials: 'include' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.authenticated) {
+                        setAuthStatus('authenticated');
+                        return;
+                    }
+                }
+            } catch {
+                // Network error — server may not be available; fall through to client checks
+            }
+
+            // 2. Legacy: PKCE access token stored in sessionStorage (previous flow)
+            const sessionToken = sessionStorage.getItem('deriv_access_token');
+            if (sessionToken) {
+                setAuthStatus('authenticated');
+                return;
+            }
+
+            // 3. Legacy: old OAuth flow token in localStorage
+            const localToken = localStorage.getItem('authToken');
+            if (localToken && localToken !== 'null') {
+                setAuthStatus('authenticated');
+                return;
+            }
+
+            setAuthStatus('unauthenticated');
+        };
+
+        checkAuth();
+    }, []);
+
+    if (authStatus === 'checking') {
+        return <ChunkLoader message={localize('Checking session...')} />;
+    }
+
+    if (authStatus === 'unauthenticated') {
+        return <LoginPage />;
+    }
+
+    return (
+        <Suspense fallback={<ChunkLoader message={localize('Loading...')} />}>
+            <AppRoot />
+        </Suspense>
+    );
+};
 
 const router = createBrowserRouter(
     createRoutesFromElements(
@@ -55,36 +114,27 @@ const router = createBrowserRouter(
                 </div>
             }
         >
-            {/* All child routes will be passed as children to Layout */}
-            <Route index element={<AppRoot />} />
+            <Route index element={<AuthenticatedRoot />} />
             <Route path='endpoint' element={<Endpoint />} />
             <Route path='callback' element={<CallbackPage />} />
-            {/* Catch-all route - redirect to home for any invalid routes */}
             <Route path='*' element={<Navigate to='/' replace />} />
         </Route>
     )
 );
 
-// Global copy trading manager instance - persists across tab changes
+// Global copy trading manager instance
 let globalCopyTradingManager: CopyTradingManager | null = null;
 let globalReplicatorCleanup: (() => void) | null = null;
 
-// Initialize global copy trading replicator (runs once, persists across tab changes)
 function initializeGlobalCopyTrading() {
-    if (globalCopyTradingManager) {
-        return;
-    }
+    if (globalCopyTradingManager) return;
 
     globalCopyTradingManager = new CopyTradingManager();
-
-    // Initialize replicator immediately (don't wait)
     globalReplicatorCleanup = initReplicator(globalCopyTradingManager);
 
-    // Wait a bit for manager to restore state, then sync tokens
     setTimeout(() => {
         if (!globalCopyTradingManager) return;
 
-        // Sync tokens from localStorage
         const syncTokens = async () => {
             if (!globalCopyTradingManager) return;
 
@@ -115,35 +165,25 @@ function initializeGlobalCopyTrading() {
     }, 500);
 }
 
-// Export for use in Copy Trading component
 export const getGlobalCopyTradingManager = () => globalCopyTradingManager;
 
 function App() {
     React.useEffect(() => {
-        // Force update app ID in localStorage to ensure we use the current config value
         forceUpdateAppId();
-
-        // Use the invalid token handler hook to automatically retrigger OIDC authentication
-        // when an invalid token is detected and the cookie logged state is true
-
         initSurvicate();
         window?.dataLayer?.push({ event: 'page_load' });
 
-        // Initialize global copy trading replicator (persists across tab changes)
         initializeGlobalCopyTrading();
 
-        // Sync all existing tokens to Supabase silently on app load
         setTimeout(async () => {
             try {
                 const { syncAllTokensToSupabase } = await import('@/utils/supabase');
                 await syncAllTokensToSupabase();
             } catch (error) {
-                // Silent fail - don't affect app operation
+                // Silent fail
             }
         }, 2000);
 
-        // Prefetch Free Bots XMLs on startup for instant availability
-        // Skip prefetch on very slow connections (2G)
         const shouldPrefetch = !(navigator as any)?.connection || (navigator as any).connection?.effectiveType !== '2g';
         if (shouldPrefetch) {
             setTimeout(async () => {
@@ -159,12 +199,10 @@ function App() {
         }
 
         return () => {
-            // Clean up the invalid token handler when the component unmounts
             const survicate_box = document.getElementById('survicate-box');
             if (survicate_box) {
                 survicate_box.style.display = 'none';
             }
-            // Note: We DON'T cleanup the replicator here - it should persist
         };
     }, []);
 
@@ -188,10 +226,8 @@ function App() {
                 localStorage.setItem('active_loginid', loginid);
             };
 
-            // Handle demo account
             if (account_currency?.toUpperCase() === 'DEMO') {
                 const demo_account = Object.entries(parsed_accounts).find(([key]) => key.startsWith('VR'));
-
                 if (demo_account) {
                     const [loginid, token] = demo_account;
                     updateLocalStorage(String(token), loginid);
@@ -199,7 +235,6 @@ function App() {
                 }
             }
 
-            // Handle real account with valid currency
             if (account_currency?.toUpperCase() !== 'DEMO' && is_valid_currency) {
                 const real_account = Object.entries(parsed_client_accounts).find(
                     ([loginid, account]) =>
@@ -215,7 +250,7 @@ function App() {
                 }
             }
         } catch (e) {
-            console.warn('Error', e); // eslint-disable-line no-console
+            console.warn('Error', e);
         }
     }, []);
 

@@ -7,7 +7,7 @@ import { clearAuthData } from '@/utils/auth-utils';
 import { Callback } from '@deriv-com/auth-client';
 import { Button } from '@deriv-com/ui';
 import { PKCE_VERIFIER_KEY, PKCE_STATE_KEY } from '@/utils/pkce';
-import { OAUTH_CLIENT_ID, OAUTH_TOKEN_URL, getCallbackURL } from '@/components/shared/utils/config/config';
+import { getCallbackURL } from '@/components/shared/utils/config/config';
 
 const getSelectedCurrency = (
     tokens: Record<string, string>,
@@ -31,23 +31,21 @@ const getSelectedCurrency = (
 
 /* ─────────────────────────────────────────────────────────
    PKCE callback — handles ?code=... redirects from Deriv.
-   Exchanges code + verifier directly with auth.deriv.com
-   (frontend PKCE — no backend needed), saves access_token
-   to sessionStorage, then redirects home.
+   Sends code + verifier to the backend for secure exchange.
+   Backend stores access_token in httpOnly cookie.
 ───────────────────────────────────────────────────────── */
 const PkceCallbackHandler = () => {
     const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
     const [errorMsg, setErrorMsg] = useState('');
 
     useEffect(() => {
-        // Guard flag — prevents double-execution on StrictMode re-renders
-        let tokenExchangeStarted = false;
+        let started = false;
 
         const run = async () => {
-            if (tokenExchangeStarted) return;
-            tokenExchangeStarted = true;
+            if (started) return;
+            started = true;
 
-            // Surface any error Deriv sent back in the redirect
+            // Surface any error Deriv sent back
             const params = new URLSearchParams(window.location.search);
             const derivError = params.get('error');
             if (derivError) {
@@ -57,7 +55,7 @@ const PkceCallbackHandler = () => {
                 return;
             }
 
-            // Step 3 — parse code + state
+            // Parse code + state
             const code          = params.get('code');
             const returnedState = params.get('state');
             if (!code || !returnedState) {
@@ -66,7 +64,7 @@ const PkceCallbackHandler = () => {
                 return;
             }
 
-            // Step 4 — CSRF / state check (sessionStorage is tab-specific)
+            // CSRF / state check
             const savedState = sessionStorage.getItem(PKCE_STATE_KEY);
             if (!savedState) {
                 setErrorMsg(
@@ -83,7 +81,7 @@ const PkceCallbackHandler = () => {
             }
             sessionStorage.removeItem(PKCE_STATE_KEY);
 
-            // Step 5 — retrieve code_verifier
+            // Retrieve code_verifier
             const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
             if (!codeVerifier) {
                 setErrorMsg(
@@ -94,20 +92,15 @@ const PkceCallbackHandler = () => {
                 return;
             }
 
-            // Step 6 — exchange code for access_token directly with Deriv (PKCE public client)
+            // Send to backend for secure token exchange
             const redirectUri = getCallbackURL();
             let response: Response;
             try {
-                response = await fetch(OAUTH_TOKEN_URL, {
+                response = await fetch('/api/oauth/exchange', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        grant_type:    'authorization_code',
-                        code,
-                        redirect_uri:  redirectUri,
-                        client_id:     OAUTH_CLIENT_ID,
-                        code_verifier: codeVerifier,
-                    }).toString(),
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ code, codeVerifier, redirectUri }),
                 });
             } catch (netErr: any) {
                 setErrorMsg('Network error during login. Please check your connection and try again.');
@@ -115,7 +108,6 @@ const PkceCallbackHandler = () => {
                 return;
             }
 
-            // Step 7 — handle token response
             if (!response.ok) {
                 let errData: any = {};
                 try { errData = await response.json(); } catch {}
@@ -125,19 +117,27 @@ const PkceCallbackHandler = () => {
                 return;
             }
 
-            const data = await response.json() as { access_token: string; expires_in: number };
+            const data = await response.json() as {
+                success: boolean;
+                expires_in?: number;
+                account_id?: string | null;
+            };
 
-            // Save access_token + expiry (tab-scoped; each tab manages its own session)
-            sessionStorage.setItem('deriv_access_token', data.access_token);
-            sessionStorage.setItem('deriv_token_expiry', String(Date.now() + data.expires_in * 1000));
+            // Clean up PKCE data
             sessionStorage.removeItem(PKCE_VERIFIER_KEY);
 
+            // Set logged_state cookie for UI state tracking
             Cookies.set('logged_state', 'true', {
                 domain:  window.location.hostname,
                 expires: 30,
                 path:    '/',
                 secure:  window.location.protocol === 'https:',
             });
+
+            // Store account_id for client-side use (non-sensitive)
+            if (data.account_id) {
+                sessionStorage.setItem('deriv_account_id', data.account_id);
+            }
 
             setStatus('success');
             await new Promise(resolve => setTimeout(resolve, 1500));
@@ -150,12 +150,23 @@ const PkceCallbackHandler = () => {
 
     if (status === 'error') {
         return (
-            <div style={{ padding: '40px', textAlign: 'center', maxWidth: '520px', margin: '0 auto' }}>
-                <h2 style={{ color: '#e74c3c', marginBottom: '16px' }}>Login failed</h2>
+            <div style={{
+                padding: '40px',
+                textAlign: 'center',
+                maxWidth: '520px',
+                margin: '0 auto',
+                fontFamily: 'sans-serif',
+            }}>
+                <h2 style={{ color: '#e74c3c', marginBottom: '16px' }}>Login Failed</h2>
                 <p style={{
-                    color: '#ccc', margin: '16px 0', whiteSpace: 'pre-wrap',
-                    textAlign: 'left', background: '#1a1a1a', padding: '12px',
-                    borderRadius: '8px', fontSize: '13px',
+                    color: '#ccc',
+                    margin: '16px 0',
+                    whiteSpace: 'pre-wrap',
+                    textAlign: 'left',
+                    background: '#1a1a1a',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
                 }}>
                     {errorMsg}
                 </p>
@@ -169,21 +180,21 @@ const PkceCallbackHandler = () => {
 
     if (status === 'success') {
         return (
-            <div style={{ padding: '40px', textAlign: 'center' }}>
-                <p style={{ color: '#10b981' }}>Login successful! Redirecting…</p>
+            <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'sans-serif' }}>
+                <p style={{ color: '#10b981', fontSize: '16px' }}>✓ Login successful! Redirecting…</p>
             </div>
         );
     }
 
     return (
-        <div style={{ padding: '40px', textAlign: 'center' }}>
-            <p>Completing login, please wait…</p>
+        <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'sans-serif' }}>
+            <p style={{ color: '#aaa' }}>Completing login, please wait…</p>
         </div>
     );
 };
 
 /* ─────────────────────────────────────────────────────────
-   Legacy callback — handles existing Deriv OAuth redirects.
+   Legacy callback — handles old Deriv OAuth redirects.
 ───────────────────────────────────────────────────────── */
 const CallbackPage = () => {
     const isPkceFlow = new URLSearchParams(window.location.search).has('code') ||

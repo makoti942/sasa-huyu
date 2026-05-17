@@ -8,20 +8,27 @@ import APIMiddleware from './api-middleware';
 let currentConnectionAppId = null;
 
 /**
- * Generate a Deriv API instance with a specific app_id
- * @param {number} specificAppId - Optional specific app_id to use. If not provided, uses getAppId()
+ * Build the legacy WebSocket URL (used as fallback when OTP is unavailable).
+ */
+function buildLegacyWsUrl() {
+    const cleanedServer = getSocketURL().replace(/[^a-zA-Z0-9.]/g, '');
+    const appId         = getAppId();
+    const cleanedAppId  = appId?.toString()?.replace?.(/[^a-zA-Z0-9]/g, '') ?? appId?.toString();
+    return `wss://${cleanedServer}/websockets/v3?app_id=${cleanedAppId}&l=${getInitialLanguage()}&brand=${website_name.toLowerCase()}`;
+}
+
+/**
+ * Generate a Deriv API instance using the legacy WebSocket URL.
+ * @param {number} specificAppId - Optional specific app_id to use.
  */
 export const generateDerivApiInstance = (specificAppId = null) => {
-    const cleanedServer = getSocketURL().replace(/[^a-zA-Z0-9.]/g, '');
-    const appId = specificAppId !== null ? specificAppId : getAppId(); // Use specific app_id or read from localStorage
+    const appId = specificAppId !== null ? specificAppId : getAppId();
     const cleanedAppId = appId?.toString()?.replace?.(/[^a-zA-Z0-9]/g, '') ?? appId?.toString();
+    const cleanedServer = getSocketURL().replace(/[^a-zA-Z0-9.]/g, '');
 
-    // Store the app_id used for this connection (only if not a specific app_id)
     if (specificAppId === null) {
         const previousAppId = currentConnectionAppId;
         currentConnectionAppId = appId;
-
-        // Log connection creation
         if (previousAppId !== appId) {
             console.log(`🔗 [WEBSOCKET] Creating new connection with App ID ${appId}`);
         }
@@ -29,10 +36,9 @@ export const generateDerivApiInstance = (specificAppId = null) => {
         console.log(`🔗 [WEBSOCKET] Creating connection with specific App ID ${appId}`);
     }
 
-    const socket_url = `wss://${cleanedServer}/websockets/v3?app_id=${cleanedAppId}&l=${getInitialLanguage()}&brand=${website_name.toLowerCase()}`;
-
+    const socket_url  = `wss://${cleanedServer}/websockets/v3?app_id=${cleanedAppId}&l=${getInitialLanguage()}&brand=${website_name.toLowerCase()}`;
     const deriv_socket = new WebSocket(socket_url);
-    const deriv_api = new DerivAPIBasic({
+    const deriv_api    = new DerivAPIBasic({
         connection: deriv_socket,
         middleware: new APIMiddleware({}),
     });
@@ -40,26 +46,53 @@ export const generateDerivApiInstance = (specificAppId = null) => {
 };
 
 /**
- * Check if the current app_id in localStorage has changed from the one used for the WebSocket connection
- * Returns true if app_id has changed and reconnection is needed
+ * Generate a Deriv API instance using the new OTP-based WebSocket URL.
+ * Fetches a fresh OTP URL from the backend, then connects with it.
+ * Falls back to the legacy URL if OTP is unavailable.
+ *
+ * @param {string} [accountId] - Override account_id (uses session cookie default if omitted).
+ * @returns {Promise<import('@deriv/deriv-api/dist/DerivAPIBasic').default>}
+ */
+export const generateDerivApiInstanceWithOTP = async (accountId = null) => {
+    try {
+        const body = accountId ? JSON.stringify({ accountId }) : JSON.stringify({});
+        const res  = await fetch('/api/trading/otp', {
+            method:      'POST',
+            headers:     { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body,
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data.url) {
+                console.log('🔗 [WEBSOCKET] Connecting via OTP URL');
+                const ws      = new WebSocket(data.url);
+                const api     = new DerivAPIBasic({
+                    connection: ws,
+                    middleware: new APIMiddleware({}),
+                });
+                return api;
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ [WEBSOCKET] OTP fetch failed, falling back to legacy URL:', err);
+    }
+
+    // Fallback to legacy connection
+    return generateDerivApiInstance();
+};
+
+/**
+ * Check if the current app_id in localStorage has changed.
  */
 export const hasAppIdChanged = () => {
     const currentAppId = getAppId();
     return currentConnectionAppId !== null && currentAppId !== currentConnectionAppId;
 };
 
-/**
- * Get the app_id that was used for the current WebSocket connection
- */
-export const getCurrentConnectionAppId = () => {
-    return currentConnectionAppId;
-};
+export const getCurrentConnectionAppId = () => currentConnectionAppId;
 
-/**
- * Ensure the API instance is using the current app_id from localStorage
- * If app_id has changed, returns true indicating a new instance should be created
- * This should be called before making trades to ensure correct app_id is used
- */
 export const shouldRecreateApiInstance = storedAppId => {
     const currentAppId = getAppId();
     return storedAppId !== currentAppId;
@@ -72,8 +105,7 @@ export const getLoginId = () => {
 };
 
 export const V2GetActiveToken = () => {
-    // CRITICAL: If show_as_cr flag is set, always use demo account token
-    // This ensures all trades are executed on demo account, even when CR account is displayed
+    // If show_as_cr flag is set, always use demo account token
     const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
     if (showAsCR) {
         const accountsList = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('accountsList') || '{}') : {};
@@ -89,15 +121,12 @@ export const V2GetActiveToken = () => {
 };
 
 export const V2GetActiveClientId = () => {
-    // CRITICAL: If show_as_cr flag is set, always return demo account ID
-    // This ensures API always uses demo account for trading
     const showAsCR = typeof window !== 'undefined' ? localStorage.getItem('show_as_cr') : null;
     if (showAsCR) {
         console.log('[V2GetActiveClientId] 🎯 Using demo account ID (show_as_cr:', showAsCR, ')');
         return 'VRTC10109979';
     }
     const token = V2GetActiveToken();
-
     if (!token) return null;
     const account_list = JSON.parse(localStorage.getItem('accountsList') || '{}');
     if (account_list && account_list !== 'null') {
@@ -108,11 +137,11 @@ export const V2GetActiveClientId = () => {
 };
 
 export const getToken = () => {
-    const active_loginid = getLoginId();
+    const active_loginid  = getLoginId();
     const client_accounts = JSON.parse(localStorage.getItem('accountsList')) ?? undefined;
-    const active_account = (client_accounts && client_accounts[active_loginid]) || {};
+    const active_account  = (client_accounts && client_accounts[active_loginid]) || {};
     return {
-        token: active_account ?? undefined,
+        token:      active_account ?? undefined,
         account_id: active_loginid ?? undefined,
     };
 };

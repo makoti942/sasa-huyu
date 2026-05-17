@@ -32,18 +32,73 @@ export function getToken(): string | null {
     return null;
 }
 
-// ─── WebSocket factory ────────────────────────────────────────────────────────
+// ─── WebSocket type ───────────────────────────────────────────────────────────
 
 export type MakotiWS = {
-    send: (msg: object) => void;
-    close: () => void;
+    send:   (msg: object) => void;
+    close:  () => void;
     isOpen: () => boolean;
 };
 
+// ─── OTP-based WebSocket factory (new API v2) ─────────────────────────────────
+
+/**
+ * Open a WebSocket using the new Deriv API v2 OTP flow.
+ * Fetches a one-time-use authenticated URL from the backend, connects,
+ * and returns a MakotiWS handle.  No `authorize` message is needed — the
+ * OTP URL is already authenticated.
+ *
+ * Falls back to `openMakotiWS` (legacy) if OTP is unavailable.
+ */
+export async function openMakotiWSWithOTP(
+    onMessage: (data: any) => void,
+    onReady:   () => void,
+    onClose:   () => void,
+    accountId?: string,
+): Promise<MakotiWS> {
+    try {
+        const body = accountId ? JSON.stringify({ accountId }) : JSON.stringify({});
+        const res  = await fetch('/api/trading/otp', {
+            method:      'POST',
+            headers:     { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body,
+        });
+
+        if (res.ok) {
+            const data = await res.json() as { success?: boolean; url?: string };
+            if (data.url) {
+                console.log('🔗 [MakotiWS] Connecting via OTP URL (new API v2)');
+                const ws = new WebSocket(data.url);
+
+                ws.onopen    = () => onReady();
+                ws.onmessage = (evt) => {
+                    try { onMessage(JSON.parse(evt.data)); } catch (_) {}
+                };
+                ws.onerror   = () => {};
+                ws.onclose   = () => onClose();
+
+                return {
+                    send:   (msg) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); },
+                    close:  ()    => { try { ws.close(); } catch (_) {} },
+                    isOpen: ()    => ws.readyState === WebSocket.OPEN,
+                };
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ [MakotiWS] OTP fetch failed, falling back to legacy WS:', err);
+    }
+
+    // Fallback: legacy WebSocket (authorize via token)
+    return openMakotiWS(onMessage, onReady, onClose);
+}
+
+// ─── Legacy WebSocket factory (old API, authorize via token) ──────────────────
+
 export function openMakotiWS(
     onMessage: (data: any) => void,
-    onReady: () => void,
-    onClose: () => void,
+    onReady:   () => void,
+    onClose:   () => void,
 ): MakotiWS {
     const appId     = getAppId();
     const serverUrl = getSocketURL();
@@ -90,13 +145,9 @@ export function calcEMA(prices: number[], period: number): number[] {
     return result;
 }
 
-/**
- * RSI — Wilder smoothing, fast 7-period by default.
- * Returns value 0-100. < 30 oversold, > 70 overbought.
- */
 function calcRSI(prices: number[], period = 7): number {
     if (prices.length < period + 1) return 50;
-    const slice   = prices.slice(-(period * 4 + 1));   // last 4× period for warm-up
+    const slice   = prices.slice(-(period * 4 + 1));
     const changes = slice.slice(1).map((p, i) => p - slice[i]);
     const gains   = changes.map(c => Math.max(0, c));
     const losses  = changes.map(c => Math.max(0, -c));
@@ -112,34 +163,24 @@ function calcRSI(prices: number[], period = 7): number {
     return 100 - (100 / (1 + avgGain / avgLoss));
 }
 
-/**
- * Bollinger Bands — returns the price's position within the bands (0 = lower, 1 = upper).
- * < 0.15 = near lower band (oversold), > 0.85 = near upper band (overbought).
- */
 function calcBBPosition(prices: number[], period = 14): number {
     if (prices.length < period) return 0.5;
-    const slice   = prices.slice(-period);
-    const mean    = slice.reduce((a, b) => a + b, 0) / period;
+    const slice    = prices.slice(-period);
+    const mean     = slice.reduce((a, b) => a + b, 0) / period;
     const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
-    const std     = Math.sqrt(variance);
+    const std      = Math.sqrt(variance);
     if (std === 0) return 0.5;
     const upper = mean + 2 * std;
     const lower = mean - 2 * std;
     return (prices[prices.length - 1] - lower) / (upper - lower);
 }
 
-/**
- * MACD — (EMA12 - EMA26). Returns current histogram value.
- * Positive and rising = bullish, negative and falling = bearish.
- */
 function calcMACDHistogram(prices: number[]): { hist: number; prevHist: number } {
     if (prices.length < 28) return { hist: 0, prevHist: 0 };
-    const ema12 = calcEMA(prices, 12);
-    const ema26 = calcEMA(prices, 26);
-    // align lengths
-    const offset = ema12.length - ema26.length;
-    const macdLine: number[] = ema26.map((v, i) => ema12[i + offset] - v);
-    // Signal line = EMA(9) of MACD
+    const ema12    = calcEMA(prices, 12);
+    const ema26    = calcEMA(prices, 26);
+    const offset   = ema12.length - ema26.length;
+    const macdLine = ema26.map((v, i) => ema12[i + offset] - v);
     if (macdLine.length < 9) return { hist: macdLine.at(-1) ?? 0, prevHist: 0 };
     const signal   = calcEMA(macdLine, 9);
     const hist     = macdLine.at(-1)! - signal.at(-1)!;
@@ -147,10 +188,6 @@ function calcMACDHistogram(prices: number[]): { hist: number; prevHist: number }
     return { hist, prevHist };
 }
 
-/**
- * Consecutive price direction streak.
- * Positive = N consecutive up ticks, negative = N consecutive down ticks.
- */
 function priceStreak(prices: number[]): number {
     if (prices.length < 2) return 0;
     const dir = prices.at(-1)! > prices.at(-2)! ? 1 : -1;
@@ -162,7 +199,6 @@ function priceStreak(prices: number[]): number {
     return dir * n;
 }
 
-/** Digit-percentage distribution over a window */
 function digitPcts(ticks: number[], window: number): number[] {
     const arr   = ticks.slice(-window);
     const total = arr.length || 1;
@@ -172,43 +208,34 @@ function digitPcts(ticks: number[], window: number): number[] {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  SIGNAL ENGINE  — Only OVER/UNDER and RISE/FALL. No DIGITDIFF.
+//  SIGNAL ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface TradeSignal {
     contract_type: string;
-    barrier: string;
-    confidence: number;
-    reason: string;
-    indicators: string;   // comma-separated list of triggered indicators
+    barrier:       string;
+    confidence:    number;
+    reason:        string;
+    indicators:    string;
 }
 
-/**
- * Core analysis function. Returns the best trade signal or null if nothing
- * is strong enough. Strategies fire in priority order; the first one that
- * clears its confidence threshold is returned immediately.
- *
- * Minimum history: 30 ticks / 15 prices before any signal fires.
- */
 export function analyzeSignal(ticks: number[], prices: number[]): TradeSignal | null {
     if (ticks.length < 30 || prices.length < 15) return null;
 
-    // ── Digit distributions (all timeframes) ─────────────────────────────────
     const p20  = digitPcts(ticks, 20);
     const p50  = digitPcts(ticks, 50);
     const p100 = ticks.length >= 100 ? digitPcts(ticks, 100) : p50;
 
-    // ── Price indicators ──────────────────────────────────────────────────────
     const rsi    = calcRSI(prices, 7);
     const bbPos  = calcBBPosition(prices, 14);
     const streak = priceStreak(prices.slice(-20));
     const { hist: macdH, prevHist: macdPrev } = calcMACDHistogram(prices);
-    const macdBull = macdH > 0 && macdPrev <= 0;   // just crossed bullish
-    const macdBear = macdH < 0 && macdPrev >= 0;   // just crossed bearish
+    const macdBull = macdH > 0 && macdPrev <= 0;
+    const macdBear = macdH < 0 && macdPrev >= 0;
 
-    let ema9Cross  = '';
+    let ema9Cross = '';
     if (prices.length >= 22) {
-        const e9 = calcEMA(prices, 9);
+        const e9  = calcEMA(prices, 9);
         const e21 = calcEMA(prices, 21);
         if (e9.length >= 2 && e21.length >= 2) {
             const l = e9.length - 1;
@@ -217,12 +244,9 @@ export function analyzeSignal(ticks: number[], prices: number[]): TradeSignal | 
         }
     }
 
-    // ── Composite confluence scoring ──────────────────────────────────────────
-    // Each bullish/bearish indicator votes. We count votes before deciding.
     let bullVotes = 0, bearVotes = 0;
     const bullReasons: string[] = [], bearReasons: string[] = [];
 
-    // RSI
     if (rsi < 20)  { bullVotes += 3; bullReasons.push(`RSI ${rsi.toFixed(1)}`); }
     else if (rsi < 30) { bullVotes += 2; bullReasons.push(`RSI ${rsi.toFixed(1)}`); }
     else if (rsi < 40) { bullVotes += 1; bullReasons.push(`RSI ${rsi.toFixed(1)}`); }
@@ -230,7 +254,6 @@ export function analyzeSignal(ticks: number[], prices: number[]): TradeSignal | 
     else if (rsi > 70) { bearVotes += 2; bearReasons.push(`RSI ${rsi.toFixed(1)}`); }
     else if (rsi > 60) { bearVotes += 1; bearReasons.push(`RSI ${rsi.toFixed(1)}`); }
 
-    // Bollinger Bands
     if (bbPos < 0.10) { bullVotes += 3; bullReasons.push('at lower BB'); }
     else if (bbPos < 0.20) { bullVotes += 2; bullReasons.push('near lower BB'); }
     else if (bbPos < 0.30) { bullVotes += 1; bullReasons.push('approaching lower BB'); }
@@ -238,139 +261,75 @@ export function analyzeSignal(ticks: number[], prices: number[]): TradeSignal | 
     else if (bbPos > 0.80) { bearVotes += 2; bearReasons.push('near upper BB'); }
     else if (bbPos > 0.70) { bearVotes += 1; bearReasons.push('approaching upper BB'); }
 
-    // MACD crossover
     if (macdBull) { bullVotes += 2; bullReasons.push('MACD bull cross'); }
     if (macdBear) { bearVotes += 2; bearReasons.push('MACD bear cross'); }
     if (macdH > 0 && macdH > macdPrev) { bullVotes += 1; bullReasons.push('MACD rising'); }
     if (macdH < 0 && macdH < macdPrev) { bearVotes += 1; bearReasons.push('MACD falling'); }
 
-    // EMA crossover
     if (ema9Cross === 'bull') { bullVotes += 2; bullReasons.push('EMA9×EMA21 bull'); }
     if (ema9Cross === 'bear') { bearVotes += 2; bearReasons.push('EMA9×EMA21 bear'); }
 
-    // Consecutive momentum streak
     if (streak >= 5) { bullVotes += 2; bullReasons.push(`${streak} up streak`); }
     else if (streak >= 3) { bullVotes += 1; bullReasons.push(`${streak} up streak`); }
     if (streak <= -5) { bearVotes += 2; bearReasons.push(`${Math.abs(streak)} dn streak`); }
     else if (streak <= -3) { bearVotes += 1; bearReasons.push(`${Math.abs(streak)} dn streak`); }
 
-    // ── RISE / FALL — fires when vote margin is clear ─────────────────────────
     const voteMargin = Math.abs(bullVotes - bearVotes);
     const totalVotes = bullVotes + bearVotes;
 
     if (bullVotes > bearVotes && totalVotes >= 3 && voteMargin >= 2) {
         const conf = Math.min(92, 65 + bullVotes * 3 + voteMargin * 2);
-        return {
-            contract_type: 'CALL',
-            barrier: '',
-            confidence: conf,
-            reason: `RISE — ${bullReasons.join(', ')}`,
-            indicators: bullReasons.join(' | '),
-        };
+        return { contract_type: 'CALL', barrier: '', confidence: conf, reason: `RISE — ${bullReasons.join(', ')}`, indicators: bullReasons.join(' | ') };
     }
 
     if (bearVotes > bullVotes && totalVotes >= 3 && voteMargin >= 2) {
         const conf = Math.min(92, 65 + bearVotes * 3 + voteMargin * 2);
-        return {
-            contract_type: 'PUT',
-            barrier: '',
-            confidence: conf,
-            reason: `FALL — ${bearReasons.join(', ')}`,
-            indicators: bearReasons.join(' | '),
-        };
+        return { contract_type: 'PUT', barrier: '', confidence: conf, reason: `FALL — ${bearReasons.join(', ')}`, indicators: bearReasons.join(' | ') };
     }
 
-    // ── OVER / UNDER — multi-timeframe digit convergence ─────────────────────
-    // All three timeframes (20t, 50t, 100t) must agree for high confidence.
-    // We never trade digit-based unless the distribution is consistent.
-
-    // High digit bias → OVER (barrier auto-selected)
     const hi69_20  = p20[6] + p20[7] + p20[8] + p20[9];
     const hi69_50  = p50[6] + p50[7] + p50[8] + p50[9];
     const hi69_100 = p100[6] + p100[7] + p100[8] + p100[9];
-
     const hi59_20  = p20[5]  + hi69_20;
     const hi59_50  = p50[5]  + hi69_50;
-    const hi59_100 = p100[5] + hi69_100;
-
-    // Low digit bias → UNDER (barrier auto-selected)
     const lo03_20  = p20[0]  + p20[1]  + p20[2]  + p20[3];
     const lo03_50  = p50[0]  + p50[1]  + p50[2]  + p50[3];
     const lo03_100 = p100[0] + p100[1] + p100[2] + p100[3];
+    const lo04_20  = lo03_20 + p20[4];
+    const lo04_50  = lo03_50 + p50[4];
 
-    const lo04_20  = lo03_20  + p20[4];
-    const lo04_50  = lo03_50  + p50[4];
-    const lo04_100 = lo03_100 + p100[4];
-
-    // Triple convergence: all three timeframes strongly agree → highest confidence
     if (hi69_20 > 52 && hi69_50 > 46 && hi69_100 > 40) {
-        const barrier = hi69_50 > 54 ? '5' : '5';
         const conf = Math.min(90, 70 + (hi69_50 - 40) * 1.0 + (hi69_20 - 46) * 0.5);
-        return {
-            contract_type: 'DIGITOVER', barrier,
-            confidence: conf,
-            reason: `Digits 6-9: ${hi69_20.toFixed(0)}%/20t · ${hi69_50.toFixed(0)}%/50t · ${hi69_100.toFixed(0)}%/100t — OVER ${barrier}`,
-            indicators: `3-TF digit convergence HIGH`,
-        };
+        return { contract_type: 'DIGITOVER', barrier: '5', confidence: conf, reason: `Digits 6-9: ${hi69_20.toFixed(0)}%/20t · ${hi69_50.toFixed(0)}%/50t · ${hi69_100.toFixed(0)}%/100t — OVER 5`, indicators: '3-TF digit convergence HIGH' };
     }
 
     if (lo03_20 > 52 && lo03_50 > 46 && lo03_100 > 40) {
         const conf = Math.min(90, 70 + (lo03_50 - 40) * 1.0 + (lo03_20 - 46) * 0.5);
-        return {
-            contract_type: 'DIGITUNDER', barrier: '4',
-            confidence: conf,
-            reason: `Digits 0-3: ${lo03_20.toFixed(0)}%/20t · ${lo03_50.toFixed(0)}%/50t · ${lo03_100.toFixed(0)}%/100t — UNDER 4`,
-            indicators: `3-TF digit convergence LOW`,
-        };
+        return { contract_type: 'DIGITUNDER', barrier: '4', confidence: conf, reason: `Digits 0-3: ${lo03_20.toFixed(0)}%/20t · ${lo03_50.toFixed(0)}%/50t · ${lo03_100.toFixed(0)}%/100t — UNDER 4`, indicators: '3-TF digit convergence LOW' };
     }
 
-    // Dual convergence: 20t + 50t agree, 100t neutral or supporting
     if (hi59_20 > 60 && hi59_50 > 56) {
         const barrier = hi69_50 > 48 ? '5' : '4';
         const conf = Math.min(85, 68 + (hi59_50 - 50) * 1.2);
-        return {
-            contract_type: 'DIGITOVER', barrier,
-            confidence: conf,
-            reason: `Digits 5-9: ${hi59_20.toFixed(0)}%/20t · ${hi59_50.toFixed(0)}%/50t — OVER ${barrier}`,
-            indicators: `2-TF digit convergence HIGH`,
-        };
+        return { contract_type: 'DIGITOVER', barrier, confidence: conf, reason: `Digits 5-9: ${hi59_20.toFixed(0)}%/20t · ${hi59_50.toFixed(0)}%/50t — OVER ${barrier}`, indicators: '2-TF digit convergence HIGH' };
     }
 
     if (lo04_20 > 60 && lo04_50 > 56) {
         const barrier = lo03_50 > 48 ? '4' : '5';
         const conf = Math.min(85, 68 + (lo04_50 - 50) * 1.2);
-        return {
-            contract_type: 'DIGITUNDER', barrier,
-            confidence: conf,
-            reason: `Digits 0-4: ${lo04_20.toFixed(0)}%/20t · ${lo04_50.toFixed(0)}%/50t — UNDER ${barrier}`,
-            indicators: `2-TF digit convergence LOW`,
-        };
+        return { contract_type: 'DIGITUNDER', barrier, confidence: conf, reason: `Digits 0-4: ${lo04_20.toFixed(0)}%/20t · ${lo04_50.toFixed(0)}%/50t — UNDER ${barrier}`, indicators: '2-TF digit convergence LOW' };
     }
 
-    // Single-timeframe strong signal — only fire if RSI is neutral (not conflicting)
     if (hi69_50 > 50 && hi69_20 > 50 && rsi >= 35 && rsi <= 65) {
-        return {
-            contract_type: 'DIGITOVER', barrier: '5',
-            confidence: Math.min(80, 66 + (hi69_50 - 44) * 1.0),
-            reason: `Digits 6-9 at ${hi69_50.toFixed(0)}%/50t, RSI neutral — OVER 5`,
-            indicators: 'Digit bias HIGH + RSI neutral',
-        };
+        return { contract_type: 'DIGITOVER', barrier: '5', confidence: Math.min(80, 66 + (hi69_50 - 44) * 1.0), reason: `Digits 6-9 at ${hi69_50.toFixed(0)}%/50t, RSI neutral — OVER 5`, indicators: 'Digit bias HIGH + RSI neutral' };
     }
 
     if (lo03_50 > 50 && lo03_20 > 50 && rsi >= 35 && rsi <= 65) {
-        return {
-            contract_type: 'DIGITUNDER', barrier: '4',
-            confidence: Math.min(80, 66 + (lo03_50 - 44) * 1.0),
-            reason: `Digits 0-3 at ${lo03_50.toFixed(0)}%/50t, RSI neutral — UNDER 4`,
-            indicators: 'Digit bias LOW + RSI neutral',
-        };
+        return { contract_type: 'DIGITUNDER', barrier: '4', confidence: Math.min(80, 66 + (lo03_50 - 44) * 1.0), reason: `Digits 0-3 at ${lo03_50.toFixed(0)}%/50t, RSI neutral — UNDER 4`, indicators: 'Digit bias LOW + RSI neutral' };
     }
 
-    // Nothing qualifies — sit out this tick
     return null;
 }
-
-// ─── Digit pct helper (used by scanner) ──────────────────────────────────────
 
 export function getDigitPcts(ticks: number[], count = 100): number[] {
     return digitPcts(ticks, count);
