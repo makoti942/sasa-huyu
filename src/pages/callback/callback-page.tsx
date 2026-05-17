@@ -1,41 +1,22 @@
+/**
+ * /callback — PKCE OAuth2 callback handler.
+ *
+ * Handles the redirect from Deriv after the user logs in.
+ * Reads ?code=&state= from the URL, verifies the state against
+ * sessionStorage, then sends the code + verifier to the backend
+ * (/api/oauth/exchange) for a secure server-side token exchange.
+ *
+ * The old Callback component from @deriv-com/auth-client (acct1/token1 URL
+ * params) has been removed — all logins now go through this PKCE handler.
+ */
 import React, { useEffect, useState } from 'react';
 import Cookies from 'js-cookie';
-import { crypto_currencies_display_order, fiat_currencies_display_order } from '@/components/shared';
-import { generateDerivApiInstance } from '@/external/bot-skeleton/services/api/appId';
-import { observer as globalObserver } from '@/external/bot-skeleton/utils/observer';
-import { clearAuthData } from '@/utils/auth-utils';
-import { Callback } from '@deriv-com/auth-client';
 import { Button } from '@deriv-com/ui';
 import { PKCE_VERIFIER_KEY, PKCE_STATE_KEY } from '@/utils/pkce';
 import { getCallbackURL } from '@/components/shared/utils/config/config';
 
-const getSelectedCurrency = (
-    tokens: Record<string, string>,
-    clientAccounts: Record<string, any>,
-    state: any
-): string => {
-    const getQueryParams = new URLSearchParams(window.location.search);
-    const currency =
-        (state && state?.account) ||
-        getQueryParams.get('account') ||
-        sessionStorage.getItem('query_param_currency') ||
-        '';
-    const firstAccountKey = tokens.acct1;
-    const firstAccountCurrency = clientAccounts[firstAccountKey]?.currency;
-
-    const validCurrencies = [...fiat_currencies_display_order, ...crypto_currencies_display_order];
-    if (tokens.acct1?.startsWith('VR') || currency === 'demo') return 'demo';
-    if (currency && validCurrencies.includes(currency.toUpperCase())) return currency;
-    return firstAccountCurrency || 'USD';
-};
-
-/* ─────────────────────────────────────────────────────────
-   PKCE callback — handles ?code=... redirects from Deriv.
-   Sends code + verifier to the backend for secure exchange.
-   Backend stores access_token in httpOnly cookie.
-───────────────────────────────────────────────────────── */
-const PkceCallbackHandler = () => {
-    const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
+const CallbackPage = () => {
+    const [status, setStatus]     = useState<'processing' | 'success' | 'error'>('processing');
     const [errorMsg, setErrorMsg] = useState('');
 
     useEffect(() => {
@@ -45,12 +26,12 @@ const PkceCallbackHandler = () => {
             if (started) return;
             started = true;
 
-            // Surface any error Deriv sent back
             const params = new URLSearchParams(window.location.search);
+
+            // Surface any error Deriv sent back
             const derivError = params.get('error');
             if (derivError) {
-                const desc = params.get('error_description') ?? derivError;
-                setErrorMsg(`Deriv error: ${desc}. Please go back and try again.`);
+                setErrorMsg(`Deriv error: ${params.get('error_description') ?? derivError}. Please go back and try again.`);
                 setStatus('error');
                 return;
             }
@@ -75,7 +56,7 @@ const PkceCallbackHandler = () => {
                 return;
             }
             if (savedState !== returnedState) {
-                setErrorMsg('Security check failed. Please go back and try again.');
+                setErrorMsg('Security check failed (state mismatch). Please go back and try again.');
                 setStatus('error');
                 return;
             }
@@ -85,24 +66,24 @@ const PkceCallbackHandler = () => {
             const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
             if (!codeVerifier) {
                 setErrorMsg(
-                    'Login session data is missing. This happens if you opened the login in a new ' +
-                    'tab, or if your browser blocks sessionStorage. Please go back and try again in the same tab.'
+                    'Login session data is missing. This happens if you opened the login in a new tab ' +
+                    'or if your browser blocks sessionStorage. Please go back and try again in the same tab.'
                 );
                 setStatus('error');
                 return;
             }
 
-            // Send to backend for secure token exchange
+            // Send code + verifier to backend for secure token exchange
             const redirectUri = getCallbackURL();
             let response: Response;
             try {
                 response = await fetch('/api/oauth/exchange', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method:      'POST',
+                    headers:     { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({ code, codeVerifier, redirectUri }),
+                    body:        JSON.stringify({ code, codeVerifier, redirectUri }),
                 });
-            } catch (netErr: any) {
+            } catch {
                 setErrorMsg('Network error during login. Please check your connection and try again.');
                 setStatus('error');
                 return;
@@ -111,8 +92,7 @@ const PkceCallbackHandler = () => {
             if (!response.ok) {
                 let errData: any = {};
                 try { errData = await response.json(); } catch {}
-                const desc = errData.error_description || errData.error || `HTTP ${response.status}`;
-                setErrorMsg(`Login failed: ${desc}`);
+                setErrorMsg(`Login failed: ${errData.error_description ?? errData.error ?? `HTTP ${response.status}`}`);
                 setStatus('error');
                 return;
             }
@@ -135,12 +115,12 @@ const PkceCallbackHandler = () => {
                 secure:  window.location.protocol === 'https:',
             });
 
-            // ── Populate localStorage from legacy tokens ─────────────────────
-            // The trading infrastructure uses authToken + accountsList in
-            // localStorage to authorize the Deriv WebSocket connection.
+            // ── Populate localStorage from legacy tokens ──────────────────────────
+            // The trading infrastructure needs authToken + accountsList in localStorage
+            // to authorize the Deriv WebSocket connection (authorize: <token>).
             if (data.legacy_tokens && Object.keys(data.legacy_tokens).length > 0) {
                 const lt = data.legacy_tokens;
-                const accountsList:   Record<string, string>                                                        = {};
+                const accountsList:   Record<string, string>                                                         = {};
                 const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
 
                 for (const [key, value] of Object.entries(lt)) {
@@ -151,8 +131,7 @@ const PkceCallbackHandler = () => {
                             clientAccounts[value] = { loginid: value, token: lt[tokenKey], currency: '' };
                         }
                     } else if (key.startsWith('cur')) {
-                        const accKey = key.replace('cur', 'acct');
-                        const loginId = lt[accKey];
+                        const loginId = lt[key.replace('cur', 'acct')];
                         if (loginId && clientAccounts[loginId]) {
                             clientAccounts[loginId].currency = value;
                         }
@@ -162,10 +141,10 @@ const PkceCallbackHandler = () => {
                 localStorage.setItem('accountsList',   JSON.stringify(accountsList));
                 localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
 
-                // Set the active account — prefer demo (VRTC), then first real account
-                const allIds    = Object.keys(accountsList);
-                const demoId    = allIds.find(id => id.startsWith('VR'));
-                const activeId  = demoId ?? allIds[0];
+                // Prefer demo (VRTC) account as default active account
+                const allIds      = Object.keys(accountsList);
+                const demoId      = allIds.find(id => id.startsWith('VR'));
+                const activeId    = demoId ?? allIds[0];
                 const activeToken = activeId ? accountsList[activeId] : lt.token1;
                 const loginId     = activeId ?? lt.acct1;
 
@@ -174,15 +153,18 @@ const PkceCallbackHandler = () => {
                     localStorage.setItem('active_loginid', loginId);
                 }
             } else if (data.account_id) {
-                // Fallback if legacy tokens unavailable: use options account_id
+                // Fallback if legacy tokens are unavailable
                 localStorage.setItem('active_loginid', data.account_id);
                 localStorage.setItem('authToken',      'pkce_session');
             }
 
-            // Store options account_id in sessionStorage for OTP WebSocket flow
+            // Store Options REST account_id for OTP WebSocket flow
             if (data.account_id) {
                 sessionStorage.setItem('deriv_account_id', data.account_id);
             }
+
+            // Mark TMB as enabled so the app stays on the new auth path
+            localStorage.setItem('is_tmb_enabled', 'true');
 
             setStatus('success');
             await new Promise(resolve => setTimeout(resolve, 800));
@@ -190,34 +172,33 @@ const PkceCallbackHandler = () => {
         };
 
         run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     if (status === 'error') {
         return (
             <div style={{
-                padding: '40px',
-                textAlign: 'center',
-                maxWidth: '520px',
-                margin: '0 auto',
+                padding:    '40px',
+                textAlign:  'center',
+                maxWidth:   '520px',
+                margin:     '80px auto',
                 fontFamily: 'sans-serif',
             }}>
                 <h2 style={{ color: '#e74c3c', marginBottom: '16px' }}>Login Failed</h2>
                 <p style={{
-                    color: '#ccc',
-                    margin: '16px 0',
+                    color:      '#ccc',
+                    margin:     '16px 0',
                     whiteSpace: 'pre-wrap',
-                    textAlign: 'left',
+                    textAlign:  'left',
                     background: '#1a1a1a',
-                    padding: '12px',
+                    padding:    '12px',
                     borderRadius: '8px',
-                    fontSize: '13px',
+                    fontSize:   '13px',
                 }}>
                     {errorMsg}
                 </p>
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
-                    <Button onClick={() => { window.location.reload(); }}>Retry</Button>
-                    <Button onClick={() => { window.location.href = '/'; }}>Return to App</Button>
+                    <Button onClick={() => window.location.href = '/'}>Try Again</Button>
                 </div>
             </div>
         );
@@ -235,104 +216,6 @@ const PkceCallbackHandler = () => {
         <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'sans-serif' }}>
             <p style={{ color: '#aaa' }}>Completing login, please wait…</p>
         </div>
-    );
-};
-
-/* ─────────────────────────────────────────────────────────
-   Legacy callback — handles old Deriv OAuth redirects.
-───────────────────────────────────────────────────────── */
-const CallbackPage = () => {
-    const isPkceFlow = new URLSearchParams(window.location.search).has('code') ||
-                       new URLSearchParams(window.location.search).has('error');
-
-    if (isPkceFlow) {
-        return <PkceCallbackHandler />;
-    }
-
-    return (
-        <Callback
-            onSignInSuccess={async (tokens: Record<string, string>, rawState: unknown) => {
-                const state = rawState as { account?: string } | null;
-                const accountsList: Record<string, string> = {};
-                const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
-
-                for (const [key, value] of Object.entries(tokens)) {
-                    if (key.startsWith('acct')) {
-                        const tokenKey = key.replace('acct', 'token');
-                        if (tokens[tokenKey]) {
-                            accountsList[value] = tokens[tokenKey];
-                            clientAccounts[value] = {
-                                loginid: value,
-                                token: tokens[tokenKey],
-                                currency: '',
-                            };
-                        }
-                    } else if (key.startsWith('cur')) {
-                        const accKey = key.replace('cur', 'acct');
-                        if (tokens[accKey]) {
-                            clientAccounts[tokens[accKey]].currency = value;
-                        }
-                    }
-                }
-
-                localStorage.setItem('accountsList', JSON.stringify(accountsList));
-                localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
-
-                let is_token_set = false;
-                const api = await generateDerivApiInstance();
-                if (api) {
-                    const { authorize, error } = await api.authorize(tokens.token1);
-                    api.disconnect();
-                    if (error) {
-                        if (error.code === 'InvalidToken') {
-                            is_token_set = true;
-                            const is_tmb_enabled = window.is_tmb_enabled === true;
-                            if (Cookies.get('logged_state') === 'true' && !is_tmb_enabled) {
-                                globalObserver.emit('InvalidToken', { error });
-                            }
-                            if (Cookies.get('logged_state') === 'false') {
-                                clearAuthData();
-                            }
-                        }
-                    } else {
-                        localStorage.setItem('callback_token', authorize.toString());
-                        const clientAccountsArray = Object.values(clientAccounts);
-                        const firstId = authorize?.account_list[0]?.loginid;
-                        const filteredTokens = clientAccountsArray.filter(account => account.loginid === firstId);
-                        if (filteredTokens.length) {
-                            localStorage.setItem('authToken', filteredTokens[0].token);
-                            localStorage.setItem('active_loginid', filteredTokens[0].loginid);
-                            is_token_set = true;
-                        }
-                    }
-                }
-                if (!is_token_set) {
-                    localStorage.setItem('authToken', tokens.token1);
-                    localStorage.setItem('active_loginid', tokens.acct1);
-                }
-
-                Cookies.set('logged_state', 'true', {
-                    domain: window.location.hostname,
-                    expires: 30,
-                    path: '/',
-                    secure: window.location.protocol === 'https:',
-                });
-
-                const selected_currency = getSelectedCurrency(tokens, clientAccounts, state);
-                await new Promise(resolve => setTimeout(resolve, 100));
-                window.location.replace(window.location.origin + `/?account=${selected_currency}`);
-            }}
-            renderReturnButton={() => {
-                return (
-                    <Button
-                        className='callback-return-button'
-                        onClick={() => { window.location.href = '/'; }}
-                    >
-                        {'Return to Bot'}
-                    </Button>
-                );
-            }}
-        />
     );
 };
 

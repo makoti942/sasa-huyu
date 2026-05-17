@@ -1,42 +1,37 @@
+/**
+ * Login helpers — new PKCE flow only.
+ *
+ * The old OAuth URL builder (oauth.deriv.com / acct1/token1 URL params) has been
+ * removed entirely.  All login/signup now goes through the PKCE flow in pkce.ts,
+ * which redirects to /callback for the server-side token exchange.
+ */
+import { startLogin, startSignup } from '@/utils/pkce';
+import { isStorageSupported } from '../storage/storage';
 
-import { website_name } from '@/utils/site-config';
-import { getAppId } from '../config/config';
-import { CookieStorage, isStorageSupported, LocalStore } from '../storage/storage';
-import { getStaticUrl, urlForCurrentDomain } from '../url';
-import { deriv_urls } from '../url/constants';
+export { startLogin, startSignup };
 
-export const redirectToLogin = (is_logged_in: boolean, language: string, has_params = true, redirect_delay = 0) => {
+/**
+ * Redirect to Deriv login when the user is not logged in.
+ * Stores the current URL so we can return after login.
+ */
+export const redirectToLogin = (is_logged_in: boolean, _language?: string) => {
     if (!is_logged_in && isStorageSupported(sessionStorage)) {
-        const l = window.location;
-        const redirect_url = has_params ? window.location.href : `${l.protocol}//${l.host}${l.pathname}`;
-        sessionStorage.setItem('redirect_url', redirect_url);
-        setTimeout(() => {
-            const new_href = loginUrl({ language });
-            window.location.href = new_href;
-        }, redirect_delay);
+        sessionStorage.setItem('redirect_url', window.location.href);
+        startLogin();
     }
 };
 
+/**
+ * Redirect to Deriv sign-up.
+ */
 export const redirectToSignUp = () => {
-    window.open(getStaticUrl('/signup/'));
+    startSignup();
 };
 
-type TLoginUrl = {
-    language: string;
-};
-
-export const loginUrl = ({ language, is_new_account = false }: TLoginUrl & { is_new_account?: boolean }) => {
-    const server_url = LocalStore.get('config.server_url');
-    const getOAuthUrl = () => {
-        const redirect_uri = `${window.location.origin}/callback`;
-        const endpoint = is_new_account ? 'auth.deriv.com' : 'oauth.deriv.com';
-        return `https://${endpoint}/oauth2/authorize?app_id=${getAppId()}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home`;
-    };
-
-    if (server_url && /qa/.test(server_url)) {
-        const redirect_uri = `${window.location.origin}/callback`;
-        return `https://${server_url}/oauth2/authorize?app_id=${getAppId()}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home`;
-    }
-
-    return getOAuthUrl();
+/**
+ * @deprecated Use startLogin() instead.
+ * Kept as a no-op shim so any remaining call-sites compile without error.
+ */
+export const loginUrl = (_opts?: { language?: string; is_new_account?: boolean }) => {
+    return 'https://auth.deriv.com/oauth2/auth';
 };

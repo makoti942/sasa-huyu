@@ -1,26 +1,21 @@
-import { useState } from 'react';
-import { useEffect } from 'react';
+/**
+ * useOauth2 — logout & login-retrigger hook, new PKCE flow only.
+ *
+ * oAuthLogout:
+ *   1. Clears localStorage / sessionStorage
+ *   2. Clears the server-side httpOnly deriv_at cookie via POST /api/auth/logout
+ *   3. Sets logged_state=false cookie
+ *   4. Redirects to /
+ *
+ * retriggerOAuth2Login:
+ *   Starts a fresh PKCE login flow instead of generating the old OAuth URL.
+ */
+import { useState, useEffect } from 'react';
 import Cookies from 'js-cookie';
 import RootStore from '@/stores/root-store';
-import { handleOidcAuthFailure } from '@/utils/auth-utils';
+import { startLogin } from '@/utils/pkce';
 import { Analytics } from '@deriv-com/analytics';
-import { OAuth2Logout } from '@deriv-com/auth-client';
 
-/**
- * Provides an object with properties: `oAuthLogout`, `retriggerOAuth2Login`, and `isSingleLoggingIn`.
- *
- * `oAuthLogout` is a function that logs out the user of the OAuth2-enabled app.
- *
- * `retriggerOAuth2Login` is a function that retriggers the OAuth2 login flow to get a new token.
- *
- * `isSingleLoggingIn` is a boolean that indicates whether the user is currently logging in.
- *
- * The `handleLogout` argument is an optional function that will be called after logging out the user.
- * If `handleLogout` is not provided, the function will resolve immediately.
- *
- * @param {{ handleLogout?: () => Promise<void> }} [options] - An object with an optional `handleLogout` property.
- * @returns {{ oAuthLogout: () => Promise<void>; retriggerOAuth2Login: () => Promise<void>; isSingleLoggingIn: boolean }}
- */
 export const useOauth2 = ({
     handleLogout,
     client,
@@ -29,11 +24,11 @@ export const useOauth2 = ({
     client?: RootStore['client'];
 } = {}) => {
     const [isSingleLoggingIn, setIsSingleLoggingIn] = useState(false);
-    const accountsList = JSON.parse(localStorage.getItem('accountsList') ?? '{}');
-    const isClientAccountsPopulated = Object.keys(accountsList).length > 0;
-    const isSilentLoginExcluded =
-        window.location.pathname.includes('callback') || window.location.pathname.includes('endpoint');
 
+    const accountsList        = JSON.parse(localStorage.getItem('accountsList') ?? '{}');
+    const isClientAccountsPopulated = Object.keys(accountsList).length > 0;
+    const isSilentLoginExcluded     =
+        window.location.pathname.includes('callback') || window.location.pathname.includes('endpoint');
     const loggedState = Cookies.get('logged_state');
 
     useEffect(() => {
@@ -61,58 +56,63 @@ export const useOauth2 = ({
         try {
             const domain = window.location.hostname.split('.').slice(-2).join('.');
 
+            // Clear logged_state cookie
             try {
                 Cookies.set('logged_state', 'false', { domain: '.' + domain, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
                 Cookies.set('logged_state', 'false', { domain: window.location.hostname, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
                 Cookies.remove('logged_state', { domain: '.' + domain, path: '/' });
                 Cookies.remove('logged_state', { domain: window.location.hostname, path: '/' });
-            } catch { /* cookie ops can fail silently */ }
+            } catch { /* ignore */ }
 
+            // Clear localStorage auth keys
             try {
-                const keysToRemove = [
+                [
                     'active_loginid', 'accountsList', 'authToken', 'clientAccounts',
                     'show_as_cr', 'adminMirrorModeEnabled', 'adminRealAccountUsingDemo',
                     'adminRealAccountDisplayLoginId', 'adminSwitchingFromRealTab',
                     'cr_loginid', 'fullAccountsList', 'client.accounts', 'client.country',
-                    'callback_token',
-                ];
-                keysToRemove.forEach(k => localStorage.removeItem(k));
-            } catch { /* localStorage can fail silently */ }
+                    'callback_token', 'is_tmb_enabled',
+                ].forEach(k => localStorage.removeItem(k));
+            } catch { /* ignore */ }
 
-            try { sessionStorage.clear(); } catch { /* sessionStorage can fail silently */ }
+            // Clear sessionStorage
+            try { sessionStorage.clear(); } catch { /* ignore */ }
 
-            try { Analytics.reset(); } catch { /* analytics may not be configured */ }
+            // Clear analytics
+            try { Analytics.reset(); } catch { /* ignore */ }
 
+            // Reset client MobX store
             try {
                 if (client) {
                     client.account_list = [];
-                    client.accounts = {};
+                    client.accounts     = {};
                     client.is_logged_in = false;
-                    client.loginid = '';
-                    client.balance = '0';
-                    client.currency = 'USD';
+                    client.loginid      = '';
+                    client.balance      = '0';
+                    client.currency     = 'USD';
                     client._all_accounts_balance = null;
                 }
-            } catch { /* client state reset can fail silently */ }
+            } catch { /* ignore */ }
 
-            OAuth2Logout({
-                redirectCallbackUri: `${window.location.origin}/callback`,
-                WSLogoutAndRedirect: handleLogout ?? (() => Promise.resolve()),
-                postLogoutRedirectUri: window.location.origin,
-            }).catch(() => {});
+            // Call server logout to clear the httpOnly deriv_at cookie
+            try {
+                await fetch('/api/auth/logout', {
+                    method:      'POST',
+                    credentials: 'include',
+                });
+            } catch { /* non-fatal */ }
 
-            client?.logout().catch(() => {});
-        } catch { /* safety net — nothing should block the redirect below */ }
+            // Run app-level logout handler
+            try { await handleLogout?.(); } catch { /* ignore */ }
+
+        } catch { /* safety net */ }
 
         window.location.replace('/');
     };
+
+    // Restart the PKCE login flow instead of going to the old OAuth URL
     const retriggerOAuth2Login = async () => {
-        try {
-            const { generateOAuthURL } = await import('@/components/shared');
-            window.location.replace(generateOAuthURL());
-        } catch (error) {
-            handleOidcAuthFailure(error);
-        }
+        startLogin();
     };
 
     return { oAuthLogout: logoutHandler, retriggerOAuth2Login, isSingleLoggingIn };

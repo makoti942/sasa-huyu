@@ -7,14 +7,12 @@ import { getLoaderDuration, isLoaderEnabled } from '@/components/app-loader/load
 import ChunkLoader from '@/components/loader/chunk-loader';
 import RoutePromptDialog from '@/components/route-prompt-dialog';
 import { getBotsManifest, prefetchAllXmlInBackground } from '@/utils/freebots-cache';
-import { crypto_currencies_display_order, fiat_currencies_display_order } from '@/components/shared';
 import { forceUpdateAppId } from '@/components/shared/utils/config/config';
 import { observer as globalObserver } from '@/external/bot-skeleton/utils/observer';
 import { StoreProvider } from '@/hooks/useStore';
 import CallbackPage from '@/pages/callback';
 import Endpoint from '@/pages/endpoint';
 import LoginPage from '@/pages/login';
-import { TAuthData } from '@/types/api-types';
 import { initializeI18n, localize, TranslationProvider } from '@deriv-com/translations';
 import CoreStoreProvider from './CoreStoreProvider';
 import SecurityProtection from '@/components/security/security-protection';
@@ -39,7 +37,7 @@ const AuthenticatedRoot = () => {
 
     React.useEffect(() => {
         const checkAuth = async () => {
-            // 1. Check server-side session (httpOnly cookie via backend)
+            // 1. Primary: server-side session check (httpOnly deriv_at cookie set by /api/oauth/exchange)
             try {
                 const res = await fetch('/api/auth/status', { credentials: 'include' });
                 if (res.ok) {
@@ -50,17 +48,10 @@ const AuthenticatedRoot = () => {
                     }
                 }
             } catch {
-                // Network error — server may not be available; fall through to client checks
+                // Network error — fall through to localStorage check
             }
 
-            // 2. Legacy: PKCE access token stored in sessionStorage (previous flow)
-            const sessionToken = sessionStorage.getItem('deriv_access_token');
-            if (sessionToken) {
-                setAuthStatus('authenticated');
-                return;
-            }
-
-            // 3. Legacy: old OAuth flow token in localStorage
+            // 2. Fallback: legacy token in localStorage (set by /callback after legacy token exchange)
             const localToken = localStorage.getItem('authToken');
             if (localToken && localToken !== 'null') {
                 setAuthStatus('authenticated');
@@ -206,53 +197,6 @@ function App() {
         };
     }, []);
 
-    React.useEffect(() => {
-        const accounts_list = localStorage.getItem('accountsList');
-        const client_accounts = localStorage.getItem('clientAccounts');
-        const url_params = new URLSearchParams(window.location.search);
-        const account_currency = url_params.get('account');
-        const validCurrencies = [...fiat_currencies_display_order, ...crypto_currencies_display_order];
-
-        const is_valid_currency = account_currency && validCurrencies.includes(account_currency?.toUpperCase());
-
-        if (!accounts_list || !client_accounts) return;
-
-        try {
-            const parsed_accounts = JSON.parse(accounts_list);
-            const parsed_client_accounts = JSON.parse(client_accounts) as TAuthData['account_list'];
-
-            const updateLocalStorage = (token: string, loginid: string) => {
-                localStorage.setItem('authToken', token);
-                localStorage.setItem('active_loginid', loginid);
-            };
-
-            if (account_currency?.toUpperCase() === 'DEMO') {
-                const demo_account = Object.entries(parsed_accounts).find(([key]) => key.startsWith('VR'));
-                if (demo_account) {
-                    const [loginid, token] = demo_account;
-                    updateLocalStorage(String(token), loginid);
-                    return;
-                }
-            }
-
-            if (account_currency?.toUpperCase() !== 'DEMO' && is_valid_currency) {
-                const real_account = Object.entries(parsed_client_accounts).find(
-                    ([loginid, account]) =>
-                        !loginid.startsWith('VR') && account.currency.toUpperCase() === account_currency?.toUpperCase()
-                );
-
-                if (real_account) {
-                    const [loginid, account] = real_account;
-                    if ('token' in account) {
-                        updateLocalStorage(String(account?.token), loginid);
-                    }
-                    return;
-                }
-            }
-        } catch (e) {
-            console.warn('Error', e);
-        }
-    }, []);
 
     return (
         <>
