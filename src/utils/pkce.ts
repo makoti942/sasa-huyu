@@ -8,6 +8,15 @@
  *   4. Store BOTH in sessionStorage (tab-specific, survives same-tab redirects)
  *   5. Redirect to https://auth.deriv.com/oauth2/auth
  *   6. On /callback: verify state, exchange code for token via direct POST
+ *
+ * Valid OAuth2 scopes for Deriv's new auth system (auth.deriv.com):
+ *   - trade          : required for all trading operations and account reads
+ *   - account_manage : required for creating/managing accounts
+ *   - application_read : required for markup statistics endpoint
+ *
+ * NOTE: The legacy 'admin' scope does NOT exist in the new OAuth2 system.
+ * Using 'admin' causes: "The requested scope is invalid, unknown, or malformed."
+ * Always use 'trade account_manage' for standard app login flows.
  */
 
 import { OAUTH_AUTH_URL, OAUTH_CLIENT_ID, getCallbackURL } from '@/components/shared/utils/config/config';
@@ -63,12 +72,16 @@ async function startPkceFlow(prompt?: 'registration'): Promise<void> {
     sessionStorage.setItem(PKCE_STATE_KEY,    state);
 
     // Step 8 — build the authorization URL
+    // IMPORTANT: Use 'trade account_manage' — NOT 'trade admin'.
+    // The 'admin' scope is a legacy WebSocket API concept and does NOT exist
+    // in Deriv's new OAuth2 system (auth.deriv.com / Hydra). Requesting it
+    // causes: "The requested scope is invalid, unknown, or malformed."
     const redirectUri = getCallbackURL();
     const params = new URLSearchParams({
         response_type:         'code',
         client_id:             OAUTH_CLIENT_ID,
         redirect_uri:          redirectUri,
-        scope:                 'trade admin',
+        scope:                 'trade account_manage',
         state,
         code_challenge:        codeChallenge,
         code_challenge_method: 'S256',

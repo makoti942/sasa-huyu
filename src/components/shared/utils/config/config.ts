@@ -129,5 +129,7 @@ export const getDebugServiceWorker = () => {
  */
 export const generateOAuthURL = (_is_new_account = false, _state = '') => {
     const redirect_uri = encodeURIComponent(`${window.location.origin}/callback`);
-    return `${OAUTH_AUTH_URL}?client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=${redirect_uri}&scope=trade+admin`;
+    // NOTE: 'admin' is NOT a valid scope in Deriv's new OAuth2 system.
+    // The correct scopes are 'trade' and 'account_manage'.
+    return `${OAUTH_AUTH_URL}?client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=${redirect_uri}&scope=trade+account_manage`;
 };
