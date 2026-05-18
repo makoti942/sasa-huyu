@@ -93,7 +93,7 @@ const AppWrapper = observer(() => {
         return Number(hash.indexOf(String(tab_val)));
     };
     const active_hash_tab = GetHashedValue(active_tab);
-    const { onRenderTMBCheck, isTmbEnabled } = useTMB();
+    const { onRenderTMBCheck } = useTMB();
 
     useEffect(() => {
         if (connectionStatus !== CONNECTION_STATUS.OPENED) {

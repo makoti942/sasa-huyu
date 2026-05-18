@@ -86,13 +86,19 @@ export default class AppStore {
         const { client, common } = this.core;
         const { is_landing_company_loaded } = client;
 
-        // Check if we're in the process of logging in
-        // When isSingleLoggingIn is true, we don't want to show the EU error message
-        const is_tmb_enabled = window.is_tmb_enabled === true;
+        // Check if we're in the process of logging in.
+        // Suppress EU/restriction errors while:
+        //  1. On the /callback page (PKCE token exchange in progress)
+        //  2. Has an authToken but WS hasn't authorized yet (app still initializing)
+        //  3. Logged-in cookie present but accountsList not populated yet (transitional)
+        const hasTokenButNotAuthorized =
+            !client?.is_logged_in &&
+            !!localStorage.getItem('authToken') &&
+            localStorage.getItem('authToken') !== 'null';
         const isSingleLoggingIn =
             window.location.pathname === '/callback' ||
+            hasTokenButNotAuthorized ||
             (Cookies.get('logged_state') === 'true' &&
-                !is_tmb_enabled &&
                 Object.keys(JSON.parse(localStorage.getItem('accountsList') || '{}')).length === 0);
 
         if (isSingleLoggingIn) {

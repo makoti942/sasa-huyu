@@ -51,9 +51,13 @@ const AuthenticatedRoot = () => {
                 // Network error — fall through to localStorage check
             }
 
-            // 2. Fallback: legacy token in localStorage (set by /callback after legacy token exchange)
-            const localToken = localStorage.getItem('authToken');
-            if (localToken && localToken !== 'null') {
+            // 2. Fallback: localStorage token + valid Deriv loginid (set by /callback)
+            // Require active_loginid with a real Deriv prefix (VR/CR/MF/MLT/MX/VRTC) so that
+            // placeholder values like 'pkce_session' never pass the check.
+            const localToken   = localStorage.getItem('authToken');
+            const activeLogin  = localStorage.getItem('active_loginid') ?? '';
+            const hasValidLogin = /^(VR|CR|MF|MLT|MX|VRTC)\w+/.test(activeLogin);
+            if (localToken && localToken !== 'null' && hasValidLogin) {
                 setAuthStatus('authenticated');
                 return;
             }
