@@ -68,7 +68,7 @@ async function startPkceFlow(prompt?: 'registration'): Promise<void> {
         response_type:         'code',
         client_id:             OAUTH_CLIENT_ID,
         redirect_uri:          redirectUri,
-        scope:                 'read trade trading_information payments admin',
+        scope:                 'trade account_manage',
         state,
         code_challenge:        codeChallenge,
         code_challenge_method: 'S256',
