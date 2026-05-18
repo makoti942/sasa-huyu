@@ -77,13 +77,15 @@ const CallbackPage = () => {
             const redirectUri = getCallbackURL();
             let response: Response;
             try {
+                console.log('[callback] 🔄 Exchanging code for token...', { redirectUri });
                 response = await fetch('/api/oauth/exchange', {
                     method:      'POST',
                     headers:     { 'Content-Type': 'application/json' },
                     credentials: 'include',
                     body:        JSON.stringify({ code, codeVerifier, redirectUri }),
                 });
-            } catch {
+            } catch (err) {
+                console.error('[callback] ❌ Network error:', err);
                 setErrorMsg('Network error during login. Please check your connection and try again.');
                 setStatus('error');
                 return;
@@ -92,10 +94,14 @@ const CallbackPage = () => {
             if (!response.ok) {
                 let errData: any = {};
                 try { errData = await response.json(); } catch {}
-                setErrorMsg(`Login failed: ${errData.error_description ?? errData.error ?? `HTTP ${response.status}`}`);
+                const errorMsg = `Login failed: ${errData.error_description ?? errData.error ?? `HTTP ${response.status}`}`;
+                console.error('[callback] ❌ Exchange failed:', errorMsg);
+                setErrorMsg(errorMsg);
                 setStatus('error');
                 return;
             }
+            
+            console.log('[callback] ✅ Exchange successful, status:', response.status);
 
             const data = await response.json() as {
                 success:        boolean;
@@ -103,6 +109,13 @@ const CallbackPage = () => {
                 account_id?:    string | null;
                 legacy_tokens?: Record<string, string> | null;
             };
+            
+            console.log('[callback] 📦 Response data:', {
+                success: data.success,
+                hasAccountId: !!data.account_id,
+                hasLegacyTokens: !!data.legacy_tokens,
+                expiresIn: data.expires_in,
+            });
 
             // Clean up PKCE data
             sessionStorage.removeItem(PKCE_VERIFIER_KEY);
@@ -127,12 +140,18 @@ const CallbackPage = () => {
             // Ensure we have at least a placeholder loginid so AuthenticatedRoot doesn't bounce us
             if (!localStorage.getItem('active_loginid') && data.account_id) {
                 localStorage.setItem('active_loginid', data.account_id);
+                console.log('[callback] 📝 Set active_loginid:', data.account_id);
             }
 
             // ── Populate localStorage from legacy tokens ──────────────────────────
             // The trading infrastructure needs authToken + accountsList in localStorage
             // to authorize the Deriv WebSocket connection (authorize: <token>).
-            console.log('[callback] legacy_tokens received:', JSON.stringify(data.legacy_tokens));
+            console.log('[callback] 🔑 legacy_tokens received:', JSON.stringify(data.legacy_tokens));
+            
+            // CRITICAL FIX: Validate legacy tokens before using them
+            if (!data.legacy_tokens) {
+                console.warn('[callback] ⚠️ No legacy_tokens returned from backend!');
+            }
 
             const lt = data.legacy_tokens;
             const hasTokens = lt && typeof lt === 'object' && (
@@ -179,6 +198,11 @@ const CallbackPage = () => {
                     localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
                     localStorage.setItem('authToken',      activeToken);
                     localStorage.setItem('active_loginid', activeId);
+                    console.log('[callback] 💾 Stored tokens in localStorage:', {
+                        accountCount: allIds.length,
+                        activeId,
+                        demoId,
+                    });
                 } else {
                     console.warn('[callback] ⚠️ legacy_tokens present but no valid account parsed:', lt);
                 }
@@ -188,6 +212,7 @@ const CallbackPage = () => {
                 console.warn('[callback] ⚠️ legacy_tokens null/empty — will recover via cookie on next load');
                 if (data.account_id) {
                     localStorage.setItem('active_loginid', data.account_id);
+                    console.log('[callback] 📝 Fallback: Set active_loginid from account_id:', data.account_id);
                 }
             }
 
@@ -200,6 +225,13 @@ const CallbackPage = () => {
             localStorage.setItem('is_tmb_enabled', 'true');
 
             setStatus('success');
+            console.log('[callback] ✨ Login successful! Redirecting to /...');
+            console.log('[callback] 📊 Final localStorage state:', {
+                hasAuthToken: !!localStorage.getItem('authToken'),
+                hasActiveLoginid: !!localStorage.getItem('active_loginid'),
+                hasAccountsList: !!localStorage.getItem('accountsList'),
+                isTmbEnabled: localStorage.getItem('is_tmb_enabled'),
+            });
             await new Promise(resolve => setTimeout(resolve, 800));
             window.location.href = '/';
         };

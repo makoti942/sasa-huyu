@@ -37,31 +37,44 @@ const AuthenticatedRoot = () => {
 
     React.useEffect(() => {
         const checkAuth = async () => {
+            console.log('[AuthenticatedRoot] 🔍 Checking authentication status...');
+            
             // 1. Primary: server-side session check (httpOnly deriv_at cookie set by /api/oauth/exchange)
             try {
                 const res = await fetch('/api/auth/status', { credentials: 'include' });
                 if (res.ok) {
                     const data = await res.json();
+                    console.log('[AuthenticatedRoot] 🍪 Cookie check result:', data);
                     if (data.authenticated) {
+                        console.log('[AuthenticatedRoot] ✅ Authenticated via cookie');
                         setAuthStatus('authenticated');
                         return;
                     }
+                } else {
+                    console.warn('[AuthenticatedRoot] ⚠️ Cookie check failed:', res.status);
                 }
-            } catch {
-                // Network error — fall through to localStorage check
+            } catch (err) {
+                console.warn('[AuthenticatedRoot] ⚠️ Cookie check error:', err);
             }
 
             // 2. Fallback: localStorage token + valid Deriv loginid (set by /callback)
-            // Require active_loginid with a real Deriv prefix (VR/CR/MF/MLT/MX/VRTC) so that
-            // placeholder values like 'pkce_session' never pass the check.
             const localToken   = localStorage.getItem('authToken');
             const activeLogin  = localStorage.getItem('active_loginid') ?? '';
             const hasValidLogin = /^(VR|CR|MF|MLT|MX|VRTC)\w+/.test(activeLogin);
+            
+            console.log('[AuthenticatedRoot] 📦 localStorage check:', {
+                hasToken: !!localToken,
+                activeLogin,
+                hasValidLogin,
+            });
+            
             if (localToken && localToken !== 'null' && hasValidLogin) {
+                console.log('[AuthenticatedRoot] ✅ Authenticated via localStorage');
                 setAuthStatus('authenticated');
                 return;
             }
 
+            console.log('[AuthenticatedRoot] ❌ Not authenticated');
             setAuthStatus('unauthenticated');
         };
 
