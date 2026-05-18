@@ -118,44 +118,63 @@ const CallbackPage = () => {
             // ── Populate localStorage from legacy tokens ──────────────────────────
             // The trading infrastructure needs authToken + accountsList in localStorage
             // to authorize the Deriv WebSocket connection (authorize: <token>).
-            if (data.legacy_tokens && Object.keys(data.legacy_tokens).length > 0) {
-                const lt = data.legacy_tokens;
-                const accountsList:   Record<string, string>                                                         = {};
+            console.log('[callback] legacy_tokens received:', JSON.stringify(data.legacy_tokens));
+
+            const lt = data.legacy_tokens;
+            const hasTokens = lt && typeof lt === 'object' && (
+                Object.keys(lt).some(k => k.startsWith('acct')) ||
+                Array.isArray((lt as any).tokens)
+            );
+
+            if (hasTokens) {
+                const accountsList:   Record<string, string>                                               = {};
                 const clientAccounts: Record<string, { loginid: string; token: string; currency: string }> = {};
 
-                for (const [key, value] of Object.entries(lt)) {
-                    if (key.startsWith('acct')) {
-                        const tokenKey = key.replace('acct', 'token');
-                        if (lt[tokenKey]) {
-                            accountsList[value]   = lt[tokenKey];
-                            clientAccounts[value] = { loginid: value, token: lt[tokenKey], currency: '' };
+                // Handle array format: { tokens: [{loginid, token, currency}] }
+                if (Array.isArray((lt as any).tokens)) {
+                    for (const entry of (lt as any).tokens as Array<{ loginid: string; token: string; currency?: string }>) {
+                        if (entry.loginid && entry.token) {
+                            accountsList[entry.loginid]   = entry.token;
+                            clientAccounts[entry.loginid] = { loginid: entry.loginid, token: entry.token, currency: entry.currency ?? '' };
                         }
-                    } else if (key.startsWith('cur')) {
-                        const loginId = lt[key.replace('cur', 'acct')];
-                        if (loginId && clientAccounts[loginId]) {
-                            clientAccounts[loginId].currency = value;
+                    }
+                } else {
+                    // Handle flat format: { acct1, token1, cur1, acct2, token2, cur2, ... }
+                    for (const [key, value] of Object.entries(lt as Record<string, string>)) {
+                        if (key.startsWith('acct') && typeof value === 'string') {
+                            const num      = key.replace('acct', '');
+                            const tok      = (lt as any)[`token${num}`];
+                            const currency = (lt as any)[`cur${num}`] ?? '';
+                            if (tok) {
+                                accountsList[value]   = tok;
+                                clientAccounts[value] = { loginid: value, token: tok, currency };
+                            }
                         }
                     }
                 }
 
-                localStorage.setItem('accountsList',   JSON.stringify(accountsList));
-                localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
-
-                // Prefer demo (VRTC) account as default active account
                 const allIds      = Object.keys(accountsList);
                 const demoId      = allIds.find(id => id.startsWith('VR'));
-                const activeId    = demoId ?? allIds[0];
-                const activeToken = activeId ? accountsList[activeId] : lt.token1;
-                const loginId     = activeId ?? lt.acct1;
+                const activeId    = demoId ?? allIds[0] ?? null;
+                const activeToken = activeId ? accountsList[activeId] : null;
 
-                if (loginId && activeToken) {
+                console.log('[callback] parsed accounts:', allIds, '→ active:', activeId);
+
+                if (activeId && activeToken) {
+                    localStorage.setItem('accountsList',   JSON.stringify(accountsList));
+                    localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
                     localStorage.setItem('authToken',      activeToken);
-                    localStorage.setItem('active_loginid', loginId);
+                    localStorage.setItem('active_loginid', activeId);
+                } else {
+                    console.warn('[callback] ⚠️ legacy_tokens present but no valid account parsed:', lt);
                 }
-            } else if (data.account_id) {
-                // Fallback if legacy tokens are unavailable
-                localStorage.setItem('active_loginid', data.account_id);
-                localStorage.setItem('authToken',      'pkce_session');
+            } else {
+                // Legacy tokens unavailable — the api-base init() will recover them
+                // from the httpOnly cookie via GET /api/auth/tokens on first load.
+                console.warn('[callback] ⚠️ legacy_tokens null/empty — will recover via cookie on next load');
+                if (data.account_id) {
+                    localStorage.setItem('active_loginid', data.account_id);
+                }
             }
 
             // Store Options REST account_id for OTP WebSocket flow

@@ -69,14 +69,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // them to the client so the trading infrastructure can authorize normally.
     let legacyTokens: Record<string, string> | null = null;
     try {
-        const legacyRes = await fetch(DERIV_LEGACY_URL, {
+        const legacyRes = await fetch(`${DERIV_LEGACY_URL}?app_id=${DERIV_APP_ID}`, {
             method:  'POST',
-            headers: { 'Authorization': `Bearer ${accessToken}` },
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type':  'application/x-www-form-urlencoded',
+            },
+            body: `app_id=${DERIV_APP_ID}`,
         });
         if (legacyRes.ok) {
             legacyTokens = await legacyRes.json() as Record<string, string>;
+        } else {
+            console.error('[exchange] legacy/tokens HTTP', legacyRes.status, await legacyRes.text());
         }
-    } catch (_) { /* non-fatal */ }
+    } catch (legacyErr: any) {
+        console.error('[exchange] legacy/tokens fetch error:', legacyErr?.message);
+    }
 
     // ── Step 3: Auto-fetch or create options account ─────────────────────────
     let accountId: string | null = null;

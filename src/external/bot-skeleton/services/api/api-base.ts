@@ -121,6 +121,11 @@ class APIBase {
         if (V2GetActiveToken()) {
             setIsAuthorizing(true);
             await this.authorizeAndSubscribe();
+        } else {
+            // No legacy token in localStorage.
+            // Try to recover from the httpOnly cookie — happens when localStorage
+            // was cleared (incognito, manual clear) but the session cookie is still valid.
+            await this.tryRecoverAuthFromCookie();
         }
 
         chart_api.init(force_create_connection);
@@ -310,6 +315,46 @@ class APIBase {
             this.init(true);
         }
     };
+
+    async tryRecoverAuthFromCookie() {
+        try {
+            const statusRes = await fetch('/api/auth/status', { credentials: 'include' });
+            if (!statusRes.ok) return;
+            const { authenticated } = await statusRes.json() as { authenticated: boolean };
+            if (!authenticated) return;
+
+            console.log('[api-base] 🔑 No local token found — recovering from session cookie…');
+            const tokensRes = await fetch('/api/auth/tokens', { credentials: 'include' });
+            if (!tokensRes.ok) {
+                console.warn('[api-base] ⚠️ Token recovery failed:', tokensRes.status);
+                return;
+            }
+
+            const data = await tokensRes.json() as {
+                accountsList:   Record<string, string>;
+                clientAccounts: Record<string, { loginid: string; token: string; currency: string }>;
+                authToken:      string | null;
+                activeLoginId:  string | null;
+            };
+
+            if (!data.authToken || !data.activeLoginId) {
+                console.warn('[api-base] ⚠️ Token recovery returned empty tokens');
+                return;
+            }
+
+            localStorage.setItem('accountsList',   JSON.stringify(data.accountsList));
+            localStorage.setItem('clientAccounts', JSON.stringify(data.clientAccounts));
+            localStorage.setItem('authToken',      data.authToken);
+            localStorage.setItem('active_loginid', data.activeLoginId);
+            localStorage.setItem('is_tmb_enabled', 'true');
+
+            console.log('[api-base] ✅ Recovered tokens for', data.activeLoginId, '— authorizing…');
+            setIsAuthorizing(true);
+            await this.authorizeAndSubscribe();
+        } catch (e) {
+            console.warn('[api-base] ⚠️ Cookie recovery error:', e);
+        }
+    }
 
     async authorizeAndSubscribe() {
         const token = V2GetActiveToken();

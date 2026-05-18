@@ -124,14 +124,25 @@ app.post('/api/oauth/exchange', async (req, res) => {
         // populate localStorage and authorize via WebSocket like the old flow.
         let legacyTokens = null;
         try {
-            const legacyRes = await fetch('https://auth.deriv.com/oauth2/legacy/tokens', {
-                method:  'POST',
-                headers: { 'Authorization': `Bearer ${accessToken}` },
-            });
+            const legacyRes = await fetch(
+                `https://auth.deriv.com/oauth2/legacy/tokens?app_id=${DERIV_APP_ID}`,
+                {
+                    method:  'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type':  'application/x-www-form-urlencoded',
+                    },
+                    body: `app_id=${DERIV_APP_ID}`,
+                }
+            );
             if (legacyRes.ok) {
                 legacyTokens = await legacyRes.json();
+            } else {
+                console.error('[/api/oauth/exchange] legacy/tokens HTTP', legacyRes.status, await legacyRes.text());
             }
-        } catch (_) { /* non-fatal */ }
+        } catch (legacyErr) {
+            console.error('[/api/oauth/exchange] legacy/tokens fetch error:', legacyErr?.message);
+        }
 
         return res.json({
             success:       true,
@@ -141,6 +152,80 @@ app.post('/api/oauth/exchange', async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ error: (err && err.message) || 'Token exchange failed' });
+    }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   GET /api/auth/tokens
+   Reads the stored httpOnly deriv_at cookie and re-fetches legacy tokens.
+   Called by the frontend when localStorage is empty but the user is still
+   authenticated (e.g. cleared storage, incognito, new tab).
+────────────────────────────────────────────────────────────────────────────── */
+function parseLegacyTokens(lt) {
+    const accountsList   = {};
+    const clientAccounts = {};
+
+    if (Array.isArray(lt?.tokens)) {
+        for (const entry of lt.tokens) {
+            if (entry.loginid && entry.token) {
+                accountsList[entry.loginid]   = entry.token;
+                clientAccounts[entry.loginid] = { loginid: entry.loginid, token: entry.token, currency: entry.currency ?? '' };
+            }
+        }
+    } else {
+        for (const [key, value] of Object.entries(lt)) {
+            if (key.startsWith('acct') && typeof value === 'string') {
+                const num      = key.replace('acct', '');
+                const token    = lt[`token${num}`];
+                const currency = lt[`cur${num}`] ?? '';
+                if (token) {
+                    accountsList[value]   = token;
+                    clientAccounts[value] = { loginid: value, token, currency };
+                }
+            }
+        }
+    }
+
+    const allIds   = Object.keys(accountsList);
+    const demoId   = allIds.find(id => id.startsWith('VR'));
+    const activeId = demoId ?? allIds[0] ?? null;
+
+    return {
+        accountsList,
+        clientAccounts,
+        authToken:     activeId ? accountsList[activeId] : null,
+        activeLoginId: activeId,
+    };
+}
+
+app.get('/api/auth/tokens', async (req, res) => {
+    const accessToken = req.cookies[ACCESS_TOKEN_COOKIE];
+    if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
+
+    try {
+        const legacyRes = await fetch(
+            `https://auth.deriv.com/oauth2/legacy/tokens?app_id=${DERIV_APP_ID}`,
+            {
+                method:  'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type':  'application/x-www-form-urlencoded',
+                },
+                body: `app_id=${DERIV_APP_ID}`,
+            }
+        );
+        if (!legacyRes.ok) {
+            const text = await legacyRes.text();
+            return res.status(legacyRes.status).json({ error: 'Legacy tokens fetch failed', detail: text });
+        }
+        const lt     = await legacyRes.json();
+        const parsed = parseLegacyTokens(lt);
+        if (!parsed.authToken) {
+            return res.status(502).json({ error: 'Legacy tokens returned but could not be parsed', raw: lt });
+        }
+        return res.json(parsed);
+    } catch (err) {
+        return res.status(502).json({ error: 'Network error', detail: err?.message });
     }
 });
 
