@@ -6,13 +6,10 @@
  * Login is now always initiated via startLogin() (PKCE) and session state is
  * checked via our /api/auth/status endpoint.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Cookies from 'js-cookie';
 import { removeCookies } from '@/components/shared/utils/storage/storage';
-import { api_base } from '@/external/bot-skeleton';
-import { setAuthData } from '@/external/bot-skeleton/services/api/observables/connection-status-stream';
 import { startLogin, startSignup } from '@/utils/pkce';
-import { TAuthData } from '@/types/api-types';
 
 declare global {
     interface Window { is_tmb_enabled?: boolean; }
@@ -43,8 +40,6 @@ const useTMB = (): UseTMBReturn => {
     const [is_tmb_enabled, setIsTmbEnabled] = useState(true);
     const [isInitialized, setIsInitialized] = useState(false);
     const [isTmbCheckComplete, setIsTmbCheckComplete] = useState(false);
-    const authTokenRef = useRef(localStorage.getItem('authToken'));
-
     const isOAuth2Enabled = true;
 
     // Always returns true — we are permanently on the new PKCE flow

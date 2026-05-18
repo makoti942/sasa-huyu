@@ -1,44 +1,68 @@
 /**
- * Utility functions for authentication-related operations
+ * Authentication utility functions — PKCE flow.
+ *
+ * clearAuthData: wipes all client-side auth state AND the server-side httpOnly
+ * deriv_at cookie, then reloads the page.
+ *
+ * handleOidcAuthFailure: logs and clears auth state when the OIDC/PKCE
+ * exchange fails, returning the user to the login screen.
  */
 import Cookies from 'js-cookie';
 
+const AUTH_LS_KEYS = [
+    'authToken',
+    'active_loginid',
+    'clientAccounts',
+    'accountsList',
+    'callback_token',
+    'client.accounts',
+    'client.country',
+    'is_tmb_enabled',
+];
+
 /**
- * Clears authentication data from local storage and reloads the page
+ * Clears all authentication data (local storage, session storage, cookies)
+ * and the server-side httpOnly cookie, then reloads the page.
  */
-export const clearAuthData = (): void => {
-    localStorage.removeItem('accountsList');
-    localStorage.removeItem('clientAccounts');
-    localStorage.removeItem('callback_token');
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('active_loginid');
-    localStorage.removeItem('client.accounts');
-    localStorage.removeItem('client.country');
-    location.reload();
+export const clearAuthData = async (): Promise<void> => {
+    // Clear local storage auth keys
+    AUTH_LS_KEYS.forEach(k => {
+        try { localStorage.removeItem(k); } catch { /* ignore */ }
+    });
+
+    // Clear session storage
+    try { sessionStorage.clear(); } catch { /* ignore */ }
+
+    // Set logged_state to false
+    try {
+        const domain = window.location.hostname.split('.').slice(-2).join('.');
+        Cookies.set('logged_state', 'false', { domain, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
+        Cookies.remove('logged_state', { domain, path: '/' });
+    } catch { /* ignore */ }
+
+    // Clear server-side httpOnly deriv_at cookie
+    try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch { /* non-fatal — server might be unavailable */ }
+
+    window.location.reload();
 };
 
 /**
- * Handles OIDC authentication failure by clearing auth data and showing logged out view
- * @param error - The error that occurred during OIDC authentication
+ * Handles PKCE/OIDC auth failures: clears local auth state and reloads
+ * so the user sees the login screen.
  */
-export const handleOidcAuthFailure = (error: any): void => {
-    // Log the error
+export const handleOidcAuthFailure = (error: unknown): void => {
     console.error('OIDC authentication failed:', error);
 
-    // Clear auth data
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('active_loginid');
-    localStorage.removeItem('clientAccounts');
-    localStorage.removeItem('accountsList');
-
-    // Set logged_state cookie to false
-    Cookies.set('logged_state', 'false', {
-        domain: window.location.hostname.split('.').slice(-2).join('.'),
-        expires: 30,
-        path: '/',
-        secure: true,
+    AUTH_LS_KEYS.forEach(k => {
+        try { localStorage.removeItem(k); } catch { /* ignore */ }
     });
 
-    // Reload the page to show the logged out view
+    try {
+        const domain = window.location.hostname.split('.').slice(-2).join('.');
+        Cookies.set('logged_state', 'false', { domain, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
+    } catch { /* ignore */ }
+
     window.location.reload();
 };

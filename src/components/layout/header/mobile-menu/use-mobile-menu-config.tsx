@@ -1,7 +1,7 @@
 import { ComponentProps, ReactNode, useMemo } from 'react';
 import Livechat from '@/components/chat/Livechat';
 import useIsLiveChatWidgetAvailable from '@/components/chat/useIsLiveChatWidgetAvailable';
-import { generateOAuthURL, standalone_routes } from '@/components/shared';
+import { standalone_routes } from '@/components/shared';
 import { useOauth2 } from '@/hooks/auth/useOauth2';
 import { useFirebaseCountriesConfig } from '@/hooks/firebase/useFirebaseCountriesConfig';
 import useRemoteConfig from '@/hooks/growthbook/useRemoteConfig';
@@ -61,8 +61,9 @@ const useMobileMenuConfig = (client?: RootStore['client']) => {
     const is_logged_in = client?.is_logged_in;
     const client_residence = client?.residence;
     const accounts = client?.accounts || {};
-    const { isTmbEnabled, onRenderTMBCheck } = useTMB();
-    const is_tmb_enabled = window.is_tmb_enabled === true;
+    const { onRenderTMBCheck } = useTMB();
+    // PKCE is always enabled — no runtime check needed
+    const is_tmb_enabled = true;
 
     const { hubEnabledCountryList } = useFirebaseCountriesConfig();
 
@@ -110,12 +111,7 @@ const useMobileMenuConfig = (client?: RootStore['client']) => {
                     label: localize('Log in'),
                     LeftComponent: LegacyProfileSmIcon,
                     onClick: async () => {
-                        const tmbEnabled = await isTmbEnabled();
-                        if (tmbEnabled) {
-                            await onRenderTMBCheck(true, undefined, false);
-                        } else {
-                            window.location.href = generateOAuthURL(false, 'home');
-                        }
+                        await onRenderTMBCheck(true, undefined, false);
                     },
                 },
                 {

@@ -17,7 +17,7 @@ const Layout = () => {
     const { isDesktop } = useDevice();
 
     const isCallbackPage = window.location.pathname === '/callback';
-    const { onRenderTMBCheck, is_tmb_enabled: tmb_enabled_from_hook, isTmbEnabled } = useTMB();
+    const { onRenderTMBCheck, is_tmb_enabled: tmb_enabled_from_hook } = useTMB();
     const is_tmb_enabled = useMemo(
         () => window.is_tmb_enabled === true || tmb_enabled_from_hook,
         [tmb_enabled_from_hook]
@@ -142,29 +142,8 @@ const Layout = () => {
         // Create an async IIFE to handle authentication
         (async () => {
             try {
-                // First, explicitly wait for TMB status to be determined
-                // This ensures we have the correct TMB status before proceeding
-                const tmbEnabled = await isTmbEnabled();
-
-                // Now use the result of the explicit check
-                if (tmbEnabled) {
-                    await onRenderTMBCheck();
-                } else if (shouldAuthenticate) {
-                    const query_param_currency = currency || sessionStorage.getItem('query_param_currency') || 'USD';
-
-                    // Make sure we have the currency in session storage before redirecting
-                    if (query_param_currency) {
-                        sessionStorage.setItem('query_param_currency', query_param_currency);
-                    }
-                    try {
-                        const { generateOAuthURL } = await import('@/components/shared');
-                        // For auto-auth, default to old account endpoint as it is the most common fallback
-                        window.location.replace(generateOAuthURL(false));
-                    } catch (err) {
-                        setIsAuthenticating(false);
-                        handleOidcAuthFailure(err);
-                    }
-                }
+                // PKCE is always enabled — onRenderTMBCheck is a no-op unless fromLoginButton=true
+                await onRenderTMBCheck();
             } catch (err) {
                 // eslint-disable-next-line no-console
                 setIsAuthenticating(false);

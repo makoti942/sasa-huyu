@@ -121,17 +121,13 @@ export const getDebugServiceWorker = () => {
     return false;
 };
 
-export const generateOAuthURL = (is_new_account = false, state = '') => {
-    const language = 'EN';
-    const server_url = localStorage.getItem('config.server_url');
-    const redirect_uri = `${window.location.origin}/callback`;
-    const app_id = getAppId();
-    const state_param = state ? `&state=${state}` : '';
-
-    if (server_url && /qa/.test(server_url)) {
-        return `https://${server_url}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
-    }
-
-    const endpoint = is_new_account ? 'auth.deriv.com' : 'oauth.deriv.com';
-    return `https://${endpoint}/oauth2/authorize?app_id=${app_id}&l=${language}&redirect_uri=${redirect_uri}&brand=deriv&redirect=home${state_param}`;
+/**
+ * @deprecated All login flows now use PKCE via startLogin() / startSignup() in src/utils/pkce.ts.
+ * This shim is kept so legacy call-sites compile. It returns the PKCE auth URL instead
+ * of the old oauth.deriv.com implicit-grant URL — but callers should migrate to
+ * import { startLogin, startSignup } from '@/utils/pkce' and call those directly.
+ */
+export const generateOAuthURL = (_is_new_account = false, _state = '') => {
+    const redirect_uri = encodeURIComponent(`${window.location.origin}/callback`);
+    return `${OAUTH_AUTH_URL}?client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=${redirect_uri}&scope=trade+account_manage`;
 };
