@@ -115,6 +115,11 @@ const CallbackPage = () => {
                 secure:  window.location.protocol === 'https:',
             });
 
+            // Ensure we have at least a placeholder loginid so AuthenticatedRoot doesn't bounce us
+            if (!localStorage.getItem('active_loginid') && data.account_id) {
+                localStorage.setItem('active_loginid', data.account_id);
+            }
+
             // ── Populate localStorage from legacy tokens ──────────────────────────
             // The trading infrastructure needs authToken + accountsList in localStorage
             // to authorize the Deriv WebSocket connection (authorize: <token>).
