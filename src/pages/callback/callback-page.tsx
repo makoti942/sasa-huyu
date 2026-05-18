@@ -108,11 +108,20 @@ const CallbackPage = () => {
             sessionStorage.removeItem(PKCE_VERIFIER_KEY);
 
             // Set logged_state cookie for UI state tracking
+            const domain = window.location.hostname.split('.').slice(-2).join('.');
+            Cookies.set('logged_state', 'true', {
+                domain:  '.' + domain,
+                expires: 30,
+                path:    '/',
+                secure:  window.location.protocol === 'https:',
+                sameSite: 'lax'
+            });
             Cookies.set('logged_state', 'true', {
                 domain:  window.location.hostname,
                 expires: 30,
                 path:    '/',
                 secure:  window.location.protocol === 'https:',
+                sameSite: 'lax'
             });
 
             // Ensure we have at least a placeholder loginid so AuthenticatedRoot doesn't bounce us

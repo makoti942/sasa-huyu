@@ -8,8 +8,11 @@ const DERIV_APP_ID     = '101585';
 const AT_COOKIE        = 'deriv_at';
 const ACCT_COOKIE      = 'deriv_account_id';
 
-function cookieStr(name: string, value: string, maxAge: number): string {
-    return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure`;
+function cookieStr(name: string, value: string, maxAge: number, req: VercelRequest): string {
+    const host = req.headers.host || '';
+    const domain = host.split('.').slice(-2).join('.');
+    const domainAttr = domain ? `; Domain=.${domain}` : '';
+    return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure${domainAttr}`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -119,8 +122,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (_) { /* non-fatal */ }
 
     // ── Step 4: Set httpOnly cookies (access_token never exposed to browser JS)
-    const cookies = [cookieStr(AT_COOKIE, accessToken, expiresIn)];
-    if (accountId) cookies.push(cookieStr(ACCT_COOKIE, accountId, expiresIn));
+    const cookies = [cookieStr(AT_COOKIE, accessToken, expiresIn, req)];
+    if (accountId) cookies.push(cookieStr(ACCT_COOKIE, accountId, expiresIn, req));
     res.setHeader('Set-Cookie', cookies);
 
     // Return legacy tokens to the client so it can populate localStorage
