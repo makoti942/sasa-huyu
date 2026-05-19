@@ -10,26 +10,12 @@ const ACCT_COOKIE      = 'deriv_account_id';
 
 function cookieStr(name: string, value: string, maxAge: number, req: VercelRequest): string {
     const host = req.headers.host || '';
-    // Extract domain: handle localhost, subdomains, and standard domains
-    let domain = '';
     let domainAttr = '';
-    
-    if (host && !host.includes('localhost') && !host.match(/^\d+\.\d+\.\d+\.\d+/)) {
-        // For non-localhost and non-IP addresses, extract the root domain
-        const parts = host.split(':')[0].split('.');
-        if (parts.length >= 2) {
-            domain = parts.slice(-2).join('.');
-            domainAttr = `; Domain=.${domain}`;
-        }
+    if (host.includes('.') && !host.startsWith('localhost')) {
+        const baseDomain = '.' + host.split('.').slice(-2).join('.');
+        domainAttr = `; Domain=${baseDomain}`;
     }
-    
-    // Determine if Secure flag should be set based on request protocol
-    const isSecure = req.headers['x-forwarded-proto'] === 'https' || 
-                     req.headers['x-proto'] === 'https' || 
-                     req.url?.startsWith('https');
-    const secureFlag = isSecure ? '; Secure' : '';
-    
-    return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax${secureFlag}${domainAttr}`;
+    return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure${domainAttr}`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -141,31 +127,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── Step 4: Set httpOnly cookies (access_token never exposed to browser JS)
     const cookies = [cookieStr(AT_COOKIE, accessToken, expiresIn, req)];
     if (accountId) cookies.push(cookieStr(ACCT_COOKIE, accountId, expiresIn, req));
-    
-    // Log cookie setup for debugging
-    console.log('[exchange] 🍪 Setting cookies:', {
-        host: req.headers.host,
-        cookies: cookies.map(c => c.split('=')[0]),
-        isSecure: req.headers['x-forwarded-proto'] === 'https',
-    });
-    
     res.setHeader('Set-Cookie', cookies);
 
     // Return legacy tokens to the client so it can populate localStorage
     // for the existing trading infrastructure (authorize via WebSocket).
-    const responseData = {
+    return res.status(200).json({
         success:       true,
         expires_in:    expiresIn,
         account_id:    accountId,
         legacy_tokens: legacyTokens,
-    };
-    
-    console.log('[exchange] ✅ Token exchange successful:', {
-        hasAccessToken: !!accessToken,
-        hasLegacyTokens: !!legacyTokens,
-        accountId,
-        expiresIn,
     });
-    
-    return res.status(200).json(responseData);
 }

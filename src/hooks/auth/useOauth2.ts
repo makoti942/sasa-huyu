@@ -54,14 +54,15 @@ export const useOauth2 = ({
         client?.setIsLoggingOut(true);
 
         try {
-            const domain = window.location.hostname.split('.').slice(-2).join('.');
+            let cookieDomain = window.location.hostname;
+            if (window.location.hostname.includes('.') && !window.location.hostname.startsWith('localhost')) {
+                cookieDomain = '.' + window.location.hostname.split('.').slice(-2).join('.');
+            }
 
             // Clear logged_state cookie
             try {
-                Cookies.set('logged_state', 'false', { domain: '.' + domain, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
-                Cookies.set('logged_state', 'false', { domain: window.location.hostname, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
-                Cookies.remove('logged_state', { domain: '.' + domain, path: '/' });
-                Cookies.remove('logged_state', { domain: window.location.hostname, path: '/' });
+                Cookies.set('logged_state', 'false', { domain: cookieDomain, expires: 0, path: '/', secure: window.location.protocol === 'https:' });
+                Cookies.remove('logged_state', { domain: cookieDomain, path: '/' });
             } catch { /* ignore */ }
 
             // Clear localStorage auth keys
