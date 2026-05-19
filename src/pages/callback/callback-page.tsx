@@ -255,9 +255,16 @@ const CallbackPage = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const hasCode = urlParams.has('code');
     const hasNewAuthActive = sessionStorage.getItem('NEW_AUTH_active') === 'true';
+    const hasNewVerifier = !!sessionStorage.getItem('NEW_AUTH_verifier');
 
-    // NEW SYSTEM: if code is present AND NEW_AUTH_active flag set, use new system handler
-    if (hasCode && hasNewAuthActive) {
+    // Use new system if:
+    // 1. URL has ?code= AND NEW_AUTH_active flag is set, OR
+    // 2. URL has ?code= AND NEW_AUTH_verifier exists in storage
+    // This handles cases where NEW_AUTH_active was cleared but
+    // verifier still exists (proves new system started the login)
+    const isNewSystemCallback = hasCode && (hasNewAuthActive || hasNewVerifier);
+
+    if (isNewSystemCallback) {
         return <NewSystemCallbackHandler />;
     }
 

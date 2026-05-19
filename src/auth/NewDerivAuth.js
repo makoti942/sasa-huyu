@@ -51,6 +51,11 @@ export async function startNewLogin() {
   sessionStorage.setItem(K.state, state)
   sessionStorage.setItem(K.active, "true")
   
+  console.log('[NEW AUTH] Login started. Storage state:')
+  console.log('[NEW AUTH] verifier saved:', !!sessionStorage.getItem('NEW_AUTH_verifier'))
+  console.log('[NEW AUTH] state saved:', !!sessionStorage.getItem('NEW_AUTH_state'))
+  console.log('[NEW AUTH] active saved:', sessionStorage.getItem('NEW_AUTH_active'))
+  
   const params = new URLSearchParams({
     response_type:         "code",
     client_id:             CONFIG.clientId,
@@ -63,7 +68,9 @@ export async function startNewLogin() {
     app_id:                CONFIG.legacyAppId
   })
   
-  window.location.href = CONFIG.authUrl + "?" + params.toString()
+  const authURL = CONFIG.authUrl + "?" + params.toString()
+  console.log('[NEW AUTH] About to redirect to:', authURL)
+  window.location.href = authURL
 }
 
 let _callbackHandled = false
@@ -75,8 +82,11 @@ export async function handleNewCallback() {
   }
   _callbackHandled = true
   
-  console.log("[NEW AUTH] Starting callback handler")
-  console.log("[NEW AUTH] URL:", window.location.search)
+  console.log('[NEW AUTH] handleNewCallback called')
+  console.log('[NEW AUTH] URL:', window.location.search)
+  console.log('[NEW AUTH] NEW_AUTH_active:', sessionStorage.getItem('NEW_AUTH_active'))
+  console.log('[NEW AUTH] NEW_AUTH_verifier exists:', !!sessionStorage.getItem('NEW_AUTH_verifier'))
+  console.log('[NEW AUTH] NEW_AUTH_state exists:', !!sessionStorage.getItem('NEW_AUTH_state'))
   
   const urlParams = new URLSearchParams(window.location.search)
   const code = urlParams.get("code")
