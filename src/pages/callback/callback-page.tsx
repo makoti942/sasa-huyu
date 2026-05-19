@@ -77,13 +77,16 @@ const CallbackPage = () => {
             const redirectUri = getCallbackURL();
             let response: Response;
             try {
+                console.log('[callback] Sending to /api/oauth/exchange:', { code, codeVerifier, redirectUri });
                 response = await fetch('/api/oauth/exchange', {
                     method:      'POST',
                     headers:     { 'Content-Type': 'application/json' },
                     credentials: 'include',
                     body:        JSON.stringify({ code, codeVerifier, redirectUri }),
                 });
-            } catch {
+                console.log('[callback] Exchange response status:', response.status);
+            } catch (err) {
+                console.error('[callback] Fetch error:', err);
                 setErrorMsg('Network error during login. Please check your connection and try again.');
                 setStatus('error');
                 return;
@@ -92,6 +95,7 @@ const CallbackPage = () => {
             if (!response.ok) {
                 let errData: any = {};
                 try { errData = await response.json(); } catch {}
+                console.error('[callback] Exchange failed:', errData);
                 setErrorMsg(`Login failed: ${errData.error_description ?? errData.error ?? `HTTP ${response.status}`}`);
                 setStatus('error');
                 return;
@@ -103,6 +107,7 @@ const CallbackPage = () => {
                 account_id?:    string | null;
                 legacy_tokens?: Record<string, string> | null;
             };
+            console.log('[callback] Exchange response:', { success: data.success, account_id: data.account_id, hasLegacyTokens: !!data.legacy_tokens });
 
             // Clean up PKCE data
             sessionStorage.removeItem(PKCE_VERIFIER_KEY);
@@ -178,6 +183,7 @@ const CallbackPage = () => {
                     localStorage.setItem('clientAccounts', JSON.stringify(clientAccounts));
                     localStorage.setItem('authToken',      activeToken);
                     localStorage.setItem('active_loginid', activeId);
+                    console.log('[callback] ✅ Stored to localStorage - activeId:', activeId, 'token length:', activeToken.length);
                 } else {
                     console.warn('[callback] ⚠️ legacy_tokens present but no valid account parsed:', lt);
                 }
@@ -187,6 +193,7 @@ const CallbackPage = () => {
                 console.warn('[callback] ⚠️ legacy_tokens null/empty — will recover via cookie on next load');
                 if (data.account_id) {
                     localStorage.setItem('active_loginid', data.account_id);
+                    console.log('[callback] Stored account_id:', data.account_id);
                 }
             }
 
@@ -198,8 +205,17 @@ const CallbackPage = () => {
             // Mark TMB as enabled so the app stays on the new auth path
             localStorage.setItem('is_tmb_enabled', 'true');
 
+            // Verify data was stored before redirecting
+            console.log('[callback] Verifying localStorage before redirect:', {
+                authToken: !!localStorage.getItem('authToken'),
+                active_loginid: localStorage.getItem('active_loginid'),
+                accountsList: !!localStorage.getItem('accountsList'),
+                is_tmb_enabled: localStorage.getItem('is_tmb_enabled'),
+            });
+
             setStatus('success');
-            await new Promise(resolve => setTimeout(resolve, 800));
+            await new Promise(resolve => setTimeout(resolve, 1200));
+            console.log('[callback] Redirecting to / now');
             window.location.href = '/';
         };
 

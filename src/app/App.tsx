@@ -38,6 +38,12 @@ const AuthenticatedRoot = () => {
     React.useEffect(() => {
         const checkAuth = async () => {
             console.log('[AuthenticatedRoot] 🔍 Checking authentication status...');
+            console.log('[AuthenticatedRoot] Current URL:', window.location.href);
+            console.log('[AuthenticatedRoot] localStorage:', {
+                authToken: localStorage.getItem('authToken'),
+                active_loginid: localStorage.getItem('active_loginid'),
+                accountsList: localStorage.getItem('accountsList'),
+            });
             
             // 1. Primary: server-side session check (httpOnly deriv_at cookie set by /api/oauth/exchange)
             try {
@@ -61,20 +67,35 @@ const AuthenticatedRoot = () => {
             const localToken   = localStorage.getItem('authToken');
             const activeLogin  = localStorage.getItem('active_loginid') ?? '';
             const hasValidLogin = /^(VR|CR|MF|MLT|MX|VRTC)\w+/.test(activeLogin);
+            const accountsList  = localStorage.getItem('accountsList');
+            const isTmbEnabled  = localStorage.getItem('is_tmb_enabled') === 'true';
             
             console.log('[AuthenticatedRoot] 📦 localStorage check:', {
                 hasToken: !!localToken,
+                hasTokenLength: localToken?.length,
                 activeLogin,
                 hasValidLogin,
+                hasAccountsList: !!accountsList,
+                isTmbEnabled,
+                tokenValue: localToken ? `${localToken.substring(0, 20)}...` : 'null',
             });
             
+            // Check if we have valid auth data in localStorage (from /callback)
             if (localToken && localToken !== 'null' && hasValidLogin) {
-                console.log('[AuthenticatedRoot] ✅ Authenticated via localStorage');
+                console.log('[AuthenticatedRoot] ✅ Authenticated via localStorage (full auth)');
                 setAuthStatus('authenticated');
                 return;
             }
 
-            console.log('[AuthenticatedRoot] ❌ Not authenticated');
+            // Fallback: if we have an active_loginid and TMB is enabled, allow access
+            // (tokens might be recovered from backend on first API call)
+            if (hasValidLogin && isTmbEnabled) {
+                console.log('[AuthenticatedRoot] ✅ Authenticated via loginid + TMB flag');
+                setAuthStatus('authenticated');
+                return;
+            }
+
+            console.log('[AuthenticatedRoot] ❌ Not authenticated - showing login page');
             setAuthStatus('unauthenticated');
         };
 

@@ -75,7 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // them to the client so the trading infrastructure can authorize normally.
     let legacyTokens: Record<string, string> | null = null;
     try {
-        const legacyRes = await fetch(`${DERIV_LEGACY_URL}?app_id=${DERIV_APP_ID}`, {
+        console.log('[exchange] Fetching legacy tokens for app_id:', DERIV_APP_ID);
+        const legacyRes = await fetch(DERIV_LEGACY_URL, {
             method:  'POST',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -83,10 +84,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
             body: `app_id=${DERIV_APP_ID}`,
         });
+        console.log('[exchange] Legacy tokens response status:', legacyRes.status);
         if (legacyRes.ok) {
             legacyTokens = await legacyRes.json() as Record<string, string>;
+            console.log('[exchange] Legacy tokens received:', Object.keys(legacyTokens).length, 'keys');
         } else {
-            console.error('[exchange] legacy/tokens HTTP', legacyRes.status, await legacyRes.text());
+            const errText = await legacyRes.text();
+            console.error('[exchange] legacy/tokens HTTP', legacyRes.status, errText);
         }
     } catch (legacyErr: any) {
         console.error('[exchange] legacy/tokens fetch error:', legacyErr?.message);
@@ -127,6 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── Step 4: Set httpOnly cookies (access_token never exposed to browser JS)
     const cookies = [cookieStr(AT_COOKIE, accessToken, expiresIn, req)];
     if (accountId) cookies.push(cookieStr(ACCT_COOKIE, accountId, expiresIn, req));
+    console.log('[exchange] Setting cookies for domain:', req.headers.host);
     res.setHeader('Set-Cookie', cookies);
 
     // Return legacy tokens to the client so it can populate localStorage

@@ -34,6 +34,7 @@
         "@deriv/quill-icons": "^2.4.18",
         "@svgr/core": "^8.1.0",
         "@tanstack/react-query": "^5.100.10",
+        "@vercel/node": "^5.8.2",
         "blockly": "^10.4.3",
         "brace-expansion": "^3.0.2",
         "braces": "^3.0.3",
