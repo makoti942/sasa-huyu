@@ -57,7 +57,7 @@ async function deriveChallenge(verifier: string): Promise<string> {
 }
 
 /** Core PKCE launch — shared by startLogin and startSignup. */
-async function startPkceFlow(prompt?: 'registration'): Promise<void> {
+async function startPkceFlow(prompt?: 'registration' | 'consent'): Promise<void> {
     // Step 1 — clear stale data so a previous abandoned login never poisons this one
     sessionStorage.removeItem(PKCE_VERIFIER_KEY);
     sessionStorage.removeItem(PKCE_STATE_KEY);
@@ -94,7 +94,7 @@ async function startPkceFlow(prompt?: 'registration'): Promise<void> {
 
 /** Start OAuth2 PKCE login and redirect to Deriv. */
 export async function startLogin(): Promise<void> {
-    return startPkceFlow();
+    return startPkceFlow('consent');
 }
 
 /** Start OAuth2 PKCE sign-up flow (opens Deriv registration screen). */
