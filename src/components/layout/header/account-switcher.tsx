@@ -11,6 +11,7 @@ import { useStore } from '@/hooks/useStore';
 import { isCustomDemoIconActive } from '@/utils/custom-demo-icon-utils';
 import { localize } from '@deriv-com/translations';
 import { AccountSwitcher as UIAccountSwitcher, Loader, useDevice } from '@deriv-com/ui';
+import CustomDemoIcon from './common/custom-demo-icon';
 import DemoAccounts from './common/demo-accounts';
 import RealAccounts from './common/real-accounts';
 import { TAccountSwitcher, TAccountSwitcherProps, TModifiedAccount } from './common/types';
@@ -98,13 +99,15 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
 
             const finalBalance = showAsReal && !isOriginalVirtual && account.currency === 'USD' ? demoBalance : originalBalanceNum;
 
+            const icon = isOriginalVirtual && showAsReal ? <CustomDemoIcon /> : <CurrencyIcon currency={account?.currency?.toLowerCase()} isVirtual={isOriginalVirtual} />;
+
             return {
                 ...account,
                 balance: addComma(finalBalance?.toFixed(getDecimalPlaces(account.currency)) ?? '0'),
                 currencyLabel: isOriginalVirtual
                     ? tabs_labels.demo
                     : website_status?.currencies_config?.[account?.currency]?.name ?? account?.currency,
-                icon: <CurrencyIcon currency={account?.currency?.toLowerCase()} isVirtual={isOriginalVirtual} />,
+                icon: icon,
                 isVirtual: isOriginalVirtual,
                 isActive: account?.loginid === activeAccount?.loginid,
             };
