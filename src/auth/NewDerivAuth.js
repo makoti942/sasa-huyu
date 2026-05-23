@@ -112,6 +112,26 @@ export function sendViaNewSystemWithPromise(data) {
   })
 }
 
+/**
+ * Subscribe to balance and POC updates on the OTP WebSocket.
+ * This should only be called after the proxy bridge (_setupNewSystemApiProxy)
+ * is active, so the proxy handler in _newSystemHandlers can forward messages
+ * to api.onMessage() subscribers like handleMessages in CoreStoreProvider.
+ */
+export function subscribeNewSystemTopics() {
+  const ws = window._newSystemWS
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false
+  try {
+    ws.send(JSON.stringify({ balance: 1, subscribe: 1, account: 'all' }))
+    ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }))
+    console.log("[NEW WS] Subscribed to balance & POC updates")
+  } catch(e) {
+    console.warn("[NEW WS] Could not subscribe:", e)
+    return false
+  }
+  return true
+}
+
 const CONFIG = {
   clientId:    "337DJLKi2OJ4VsyFSLIt9",
   legacyAppId: "101585",
@@ -559,21 +579,19 @@ export async function createNewWebSocket() {
       console.warn("[NEW WS] Could not wire legacy auth state:", e)
     }
 
-    // Subscribe to balance updates so CoreStoreProvider.handleMessages receives
-    // live balance via the api-base.ts OTP WS bridge → api.onMessage() → all_accounts_balance.
-    try {
-      ws.send(JSON.stringify({ balance: 1, subscribe: 1, account: 'all' }))
-    } catch(e) {
-      console.warn("[NEW WS] Could not subscribe to balance:", e)
-    }
-
-    // Subscribe to all POC updates (matches legacy behavior in over-under-store line 886).
-    // This ensures contract lifecycle events start flowing immediately without waiting
-    // for the first trade.
-    try {
-      ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }))
-    } catch(e) {
-      console.warn("[NEW WS] Could not subscribe to POC:", e)
+    // Don't subscribe to balance/POC here — the proxy bridge in api-base.ts
+    // might not be set up yet. Instead, wait for it and subscribe when ready.
+    // See subscribeNewSystemTopics() and _setupNewSystemApiProxy().
+    if (window._newSystemProxyReady) {
+      subscribeNewSystemTopics()
+    } else {
+      // Check periodically until the proxy is ready
+      const checkProxy = setInterval(() => {
+        if (window._newSystemProxyReady || !window._newSystemWS) {
+          clearInterval(checkProxy)
+          subscribeNewSystemTopics()
+        }
+      }, 200)
     }
   }
   

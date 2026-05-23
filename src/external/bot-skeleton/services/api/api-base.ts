@@ -26,6 +26,7 @@ import {
     isNewLoggedIn,
     sendViaNewSystemWithPromise,
     onNewSystemMessage,
+    subscribeNewSystemTopics,
 } from '@/auth/NewDerivAuth';
 
 type CurrentSubscription = {
@@ -335,6 +336,7 @@ class APIBase {
             this._newSystemProxyCleanup();
             this._newSystemProxyCleanup = null;
         }
+        window._newSystemProxyReady = false;
 
         const originalApi = this.api;
         if (!originalApi) return;
@@ -391,6 +393,15 @@ class APIBase {
             unsubMsg();
             otpCallbacks.clear();
         };
+
+        // Flag that the proxy bridge is ready, so createNewWebSocket can
+        // subscribe to balance/POC at the right time (after this handler
+        // is registered in _newSystemHandlers).
+        window._newSystemProxyReady = true;
+
+        // Subscribe to balance/POC now that the proxy handler is active.
+        // If the OTP WS isn't connected yet, createNewWebSocket will retry.
+        subscribeNewSystemTopics();
     }
 
     async authorizeAndSubscribe() {
