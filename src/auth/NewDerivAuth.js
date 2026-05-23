@@ -388,16 +388,33 @@ export async function createNewWebSocket() {
     : accounts
   const accountId = account?.id || account?.account_id
   
-  // Save legacy accountsList/clientAccounts so the app recognizes login state
+  // Save legacy accountsList/clientAccounts/client_account_details so the app
+  // recognizes login state and the dashboard can render without crashing.
   const legacyAccountsList = {}
   const legacyClientAccounts = {}
+  const legacyClientDetails = []
   accountsArray.forEach(acc => {
     const lid = acc.account_id || acc.id
     legacyAccountsList[lid] = lid
     legacyClientAccounts[lid] = { loginid: lid, token: lid, currency: acc.currency || 'USD' }
+    legacyClientDetails.push({
+      loginid: lid,
+      currency: acc.currency || 'USD',
+      token: lid,
+      created_at: 0,
+      is_virtual: acc.account_type === 'demo' ? 1 : 0,
+      is_disabled: 0,
+      landing_company_name: 'virtual',
+      account_type: 'trading',
+      account_category: 'trading',
+      broker: '',
+      currency_type: 'crypto',
+      linked_to: [],
+    })
   })
   localStorage.setItem('accountsList', JSON.stringify(legacyAccountsList))
   localStorage.setItem('clientAccounts', JSON.stringify(legacyClientAccounts))
+  localStorage.setItem('client_account_details', JSON.stringify(legacyClientDetails))
   
   if (!accountId) {
     console.error("[NEW WS] No account ID found:", accountsData)
