@@ -599,16 +599,34 @@ export async function createNewWebSocket() {
     try {
       const data = JSON.parse(event.data)
       if (data.error) {
-        console.warn("[NEW WS] Error for", data.msg_type || data.echo_req?.proposal_open_contract || data.echo_req?.balance, ":", data.error?.message || data.error?.code)
+        console.warn("[NEW WS] Error for", data.msg_type || JSON.stringify(data.echo_req).slice(0,80), ":", data.error?.message || data.error?.code)
       } else if (data.msg_type) {
-        const preview = data.msg_type === 'balance' ? JSON.stringify(data.balance).slice(0, 200) : ''
-        console.log("[NEW WS] Message:", data.msg_type, preview)
-        // Direct balance update — bypass proxy bridge to ensure updates reach the store
-        if (data.msg_type === 'balance' && data.balance?.accounts) {
-          window.dispatchEvent(new CustomEvent('new-system-balance', { detail: data.balance }))
+        console.log("[NEW WS] Message:", data.msg_type)
+        // Handle balance updates — OTP WS may return single-account format instead of
+        // the multi-account { accounts: {...} } format that handleMessages expects.
+        if (data.msg_type === 'balance' && data.balance) {
+          let balanceData = data.balance
+          // Single-account format: { balance: 100, currency: 'USD', loginid: 'CR123' }
+          if (!balanceData.accounts && typeof balanceData.balance === 'number') {
+            const lid = balanceData.loginid || localStorage.getItem('active_loginid') || 'unknown'
+            balanceData = {
+              accounts: {
+                [lid]: {
+                  balance: balanceData.balance,
+                  currency: balanceData.currency || 'USD',
+                  loginid: lid,
+                }
+              }
+            }
+          }
+          if (balanceData.accounts) {
+            window.dispatchEvent(new CustomEvent('new-system-balance', { detail: balanceData }))
+          }
         }
       }
-    } catch(e) {}
+    } catch(e) {
+      console.warn("[NEW WS] Message parse error:", e)
+    }
   })
   
   ws.onerror = (e) => {
