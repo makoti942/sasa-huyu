@@ -5,16 +5,19 @@ import { Outlet } from 'react-router-dom';
 import { api_base } from '@/external/bot-skeleton';
 import useTMB from '@/hooks/useTMB';
 import { handleOidcAuthFailure } from '@/utils/auth-utils';
+import { useApiBase } from '@/hooks/useApiBase';
 
 import { useDevice } from '@deriv-com/ui';
 import { crypto_currencies_display_order, fiat_currencies_display_order } from '../shared';
 import Footer from './footer';
 import AppHeader from './header';
 import Body from './main-body';
+import StandaloneLoginScreen from '@/components/login-screen/StandaloneLoginScreen';
 import './layout.scss';
 
 const Layout = () => {
     const { isDesktop } = useDevice();
+    const { activeLoginid } = useApiBase();
 
     const isCallbackPage = window.location.pathname === '/callback';
     const { onRenderTMBCheck, is_tmb_enabled: tmb_enabled_from_hook, isTmbEnabled } = useTMB();
@@ -200,8 +203,11 @@ const Layout = () => {
         }
     }, [isAuthenticating, isInitialAuthCheckComplete]);
 
+    const showLoginScreen = isInitialAuthCheckComplete && !activeLoginid && !isCallbackPage;
+
     return (
         <div className={clsx('layout', { responsive: isDesktop })}>
+            {showLoginScreen && <StandaloneLoginScreen />}
             {!isCallbackPage && <AppHeader isAuthenticating={isAuthenticating || !isInitialAuthCheckComplete} />}
             <Body>
                 <Outlet />

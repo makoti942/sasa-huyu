@@ -6,6 +6,7 @@ import { observer as globalObserver } from '@/external/bot-skeleton/utils/observ
 import { clearAuthData } from '@/utils/auth-utils';
 import { localize } from '@deriv-com/translations';
 import { URLUtils } from '@deriv-com/utils';
+import StandaloneLoginScreen from '@/components/login-screen/StandaloneLoginScreen';
 import App from './App';
 
 // Extend Window interface to include is_tmb_enabled property
@@ -113,6 +114,13 @@ export const AuthWrapper = () => {
     }, [loginInfo, paramsToDelete]);
 
     if (!isAuthComplete) {
+        const hasLoginSession =
+            Cookies.get('logged_state') === 'true' ||
+            Object.keys(JSON.parse(localStorage.getItem('accountsList') ?? '{}')).length > 0;
+
+        if (!hasLoginSession && window.location.pathname !== '/callback' && !window.location.pathname.includes('endpoint')) {
+            return <StandaloneLoginScreen />;
+        }
         return <ChunkLoader message={localize('Initializing...')} />;
     }
 
