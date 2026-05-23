@@ -143,9 +143,12 @@ class MakotiMagicStore {
                 this.is_initialized = true;
             });
 
-            const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-            if (token) {
-                this.ws.send(JSON.stringify({ authorize: token }));
+            // For new auth users the legacy WS cannot authorize — skip.
+            if (!isNewLoggedIn()) {
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+                if (token) {
+                    this.ws.send(JSON.stringify({ authorize: token }));
+                }
             }
             this.subscribeToTicks(this.selected_symbol);
         };

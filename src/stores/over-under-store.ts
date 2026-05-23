@@ -763,7 +763,16 @@ export default class OverUnderStore {
             this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
             this.ws.onopen = () => {
                 runInAction(() => { this.connection_status = STATUS_LIVE; });
-                this.addLog(`Connection opened (App ID: ${app_id}). Requesting authorization...`);
+                this.addLog(`Connection opened (App ID: ${app_id})${isNewLoggedIn() ? '. New auth — public ticks only.' : '. Requesting authorization...'}`);
+
+                // For new auth users, the legacy WS cannot authorize (no valid legacy token).
+                // Connect for public ticks only — trades go through the OTP WebSocket.
+                if (isNewLoggedIn()) {
+                    runInAction(() => { this.is_authorizing = false; });
+                    this.subscribeToTicks(this.selected_symbol);
+                    return;
+                }
+
                 if (window.self !== window.top) {
                     window.parent.postMessage({ name: 'request_auth_token' }, '*');
                 } else {
