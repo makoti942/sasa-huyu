@@ -1004,7 +1004,7 @@ export default class OverUnderStore {
                                     this.is_recovery_enabled &&
                                     this.active_contracts.has(contract_id)
                                 ) {
-                                    const profit = contract.profit;
+                                    const profit = Number(contract.profit) || 0;
                                     const is_loss = profit < 0;
                                     this.addLog(`Manual result on ${symbol}: ${is_loss ? 'LOST' : 'WON'} ($${profit})`);
                                     if (is_loss) {
@@ -1039,7 +1039,7 @@ export default class OverUnderStore {
                                 }
 
                                 if (this.active_contracts.has(contract_id)) {
-                                    const profit = contract.profit;
+                                    const profit = Number(contract.profit) || 0;
                                     this.contract_results.set(contract_id, { profit, symbol });
                                     this.session_trades++;
                                     if (profit >= 0) { this.session_wins++; } else { this.session_losses++; }

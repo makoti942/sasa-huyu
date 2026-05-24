@@ -44,9 +44,10 @@ const Dtrader = observer(() => {
         }
 
         const appId = getAppId();
+        const effectiveToken = token || loginId;
         const params = new URLSearchParams({
             acct1: loginId,
-            token1: token,
+            token1: effectiveToken,
             cur1: currency,
             lang: 'EN',
             app_id: appId.toString(),
@@ -72,9 +73,12 @@ const Dtrader = observer(() => {
         const token = getEffectiveToken();
         const activeLoginId = getEffectiveLoginId();
 
-        if (activeLoginId) {
+        if (activeLoginId && token) {
             setIsAuthenticated(true);
-            buildIframeUrl(token || activeLoginId, activeLoginId);
+            buildIframeUrl(token, activeLoginId);
+        } else if (activeLoginId) {
+            setIsAuthenticated(true);
+            buildIframeUrl(activeLoginId, activeLoginId);
         } else {
             setIsAuthenticated(false);
             setIframeSrc('');
@@ -86,11 +90,16 @@ const Dtrader = observer(() => {
             const token = getEffectiveToken();
             const activeLoginId = getEffectiveLoginId();
 
-            if (activeLoginId) {
+            if (activeLoginId && token) {
                 if (!isAuthenticated) {
                     setIsAuthenticated(true);
                 }
-                buildIframeUrl(token || activeLoginId, activeLoginId);
+                buildIframeUrl(token, activeLoginId);
+            } else if (activeLoginId) {
+                if (!isAuthenticated) {
+                    setIsAuthenticated(true);
+                }
+                buildIframeUrl(activeLoginId, activeLoginId);
             } else if (isAuthenticated) {
                 setIsAuthenticated(false);
                 setIframeSrc('');
