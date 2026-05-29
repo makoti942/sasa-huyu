@@ -36,10 +36,21 @@ const contractLabels: Record<string, string> = {
   ACCU: 'Buy',
 };
 
+interface Candle { open: number; high: number; low: number; close: number; epoch: number }
+
+const GRANULARITIES = [
+  { label: '1m', value: 60 },
+  { label: '5m', value: 300 },
+  { label: '15m', value: 900 },
+  { label: '30m', value: 1800 },
+  { label: '1h', value: 3600 },
+];
+
 const NewDTrader: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const tickPrices = useRef<number[]>([]);
+  const candleData = useRef<Candle[]>([]);
   const animRef = useRef<number>(0);
   const priceRef = useRef<number | null>(null);
   const digitRef = useRef<number | null>(null);
@@ -52,6 +63,8 @@ const NewDTrader: React.FC = () => {
   const tradeTypeRef = useRef('rise_fall');
   const pipSizeRef = useRef(2);
   const growthRateRef = useRef(0.01);
+  const chartStyleRef = useRef<'line' | 'candle'>('line');
+  const timeframeRef = useRef(60);
 
   const [symbol, setSymbol] = useState('R_100');
   const [tradeType, setTradeType] = useState('rise_fall');
@@ -77,6 +90,8 @@ const NewDTrader: React.FC = () => {
   const [tradeResult, setTradeResult] = useState<{ isWin: boolean; profit: number; contract_type: string; entry_digit: number; exit_digit: number } | null>(null);
   const [growthRate, setGrowthRate] = useState(0.01);
   const [takeProfit, setTakeProfit] = useState('');
+  const [chartStyle, setChartStyle] = useState<'line' | 'candle'>('line');
+  const [timeframe, setTimeframe] = useState(60);
 
   const isPhone = typeof window !== 'undefined' && window.innerWidth < 768;
   const contractTypes = TRADE_TYPES.find(t => t.value === tradeType)?.label || 'Rise/Fall';
@@ -85,6 +100,7 @@ const NewDTrader: React.FC = () => {
   durationRef.current = duration; durationUnitRef.current = durationUnit;
   tradeTypeRef.current = tradeType; pipSizeRef.current = getPipSize(symbol);
   growthRateRef.current = growthRate;
+  chartStyleRef.current = chartStyle; timeframeRef.current = timeframe;
 
   const drawChart = useCallback(() => {
     const canvas = canvasRef.current;
@@ -102,6 +118,77 @@ const NewDTrader: React.FC = () => {
     const chartW = W - pad.left - pad.right;
     const chartH = H - pad.top - pad.bottom;
     ctx.clearRect(0, 0, W, H);
+
+    if (chartStyleRef.current === 'candle') {
+      const candles = candleData.current;
+      if (candles.length < 1) {
+        ctx.fillStyle = '#555';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Waiting for candles...', W / 2, H / 2);
+        return;
+      }
+      const vis = candles.slice(-80);
+      let cMin = Infinity, cMax = -Infinity;
+      vis.forEach(c => { cMin = Math.min(cMin, c.low); cMax = Math.max(cMax, c.high); });
+      const cRange = cMax - cMin || 1;
+      const cPadding = cRange * 0.05;
+      const cYMin = cMin - cPadding;
+      const cYMax = cMax + cPadding;
+      const cYRange = cYMax - cYMin;
+      const cToY = (v: number) => pad.top + chartH - ((v - cYMin) / cYRange) * chartH;
+
+      // Grid
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i++) {
+        const y = pad.top + (i / 5) * chartH;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+        const val = cYMax - (i / 5) * cYRange;
+        ctx.fillStyle = '#666';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(val.toFixed(2), W - pad.right + 55, y + 3);
+      }
+
+      const candleW = Math.max(2, (chartW / vis.length) - 1);
+      vis.forEach((c, idx) => {
+        const x = pad.left + idx * (candleW + 1) + candleW / 2;
+        const oY = cToY(c.open);
+        const clY = cToY(c.close);
+        const hY = cToY(c.high);
+        const lY = cToY(c.low);
+        const isUp = c.close >= c.open;
+        ctx.strokeStyle = isUp ? '#4caf50' : '#f44336';
+        ctx.fillStyle = isUp ? '#4caf50' : '#f44336';
+        ctx.lineWidth = 1;
+        // Wick
+        ctx.beginPath(); ctx.moveTo(x, hY); ctx.lineTo(x, lY); ctx.stroke();
+        // Body
+        const bT = Math.min(oY, clY);
+        const bB = Math.max(oY, clY);
+        ctx.fillRect(x - candleW / 2, bT, candleW, Math.max(1, bB - bT));
+      });
+      // Price label
+      const lastC = vis[vis.length - 1];
+      const lastY = cToY(lastC.close);
+      ctx.fillStyle = '#333';
+      ctx.strokeStyle = '#85acb0';
+      ctx.lineWidth = 1;
+      const label = lastC.close.toFixed(2);
+      const tw = ctx.measureText(label).width + 16;
+      const lx = W - pad.right - tw;
+      const ly = lastY > pad.top + chartH / 2 ? lastY - 20 : lastY + 10;
+      ctx.fillStyle = '#85acb0';
+      ctx.beginPath();
+      ctx.roundRect(lx, ly, tw, 18, 3);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, lx + tw / 2, ly + 13);
+      return;
+    }
 
     const prices = tickPrices.current;
     if (prices.length < 2) {
@@ -219,6 +306,9 @@ const NewDTrader: React.FC = () => {
       if (ws !== wsRef.current) return;
       ws.send(JSON.stringify({ ticks: sym, subscribe: 1 }));
       ws.send(JSON.stringify({ ticks_history: sym, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
+      if (chartStyleRef.current === 'candle') {
+        ws.send(JSON.stringify({ ticks_history: sym, style: 'candles', granularity: timeframeRef.current, count: 500, end: 'latest' }));
+      }
       setConnectionStatus('Live');
     };
     ws.onmessage = (event) => {
@@ -238,6 +328,20 @@ const NewDTrader: React.FC = () => {
             next.forEach(d => { if (d >= 0 && d <= 9) counts[d]++; });
             setDigitCounts(counts); return next;
           });
+          // Update forming candle for real-time
+          if (chartStyleRef.current === 'candle' && tick.epoch) {
+            const gran = timeframeRef.current;
+            const ce = Math.floor(tick.epoch / gran) * gran;
+            const cd = candleData.current;
+            if (cd.length > 0 && cd[cd.length - 1].epoch === ce) {
+              const last = cd[cd.length - 1];
+              last.high = Math.max(last.high, tick.quote);
+              last.low = Math.min(last.low, tick.quote);
+              last.close = tick.quote;
+            } else {
+              cd.push({ open: tick.quote, high: tick.quote, low: tick.quote, close: tick.quote, epoch: ce });
+            }
+          }
         } else if (data.msg_type === 'history' && data.history?.prices) {
           const prices: number[] = data.history.prices;
           const ps = getPipSize(sym);
@@ -252,6 +356,12 @@ const NewDTrader: React.FC = () => {
             digits.slice(-MAX_TICKS).forEach((d: number) => { if (d >= 0 && d <= 9) counts[d]++; });
             setDigitCounts(counts);
           }
+        } else if (data.msg_type === 'candles' && data.candles) {
+          const gran = timeframeRef.current;
+          candleData.current = data.candles.map((c: any) => ({
+            open: c.open, high: c.high, low: c.low, close: c.close,
+            epoch: Math.floor(c.epoch / gran) * gran,
+          }));
         }
       } catch {}
     };
@@ -267,6 +377,12 @@ const NewDTrader: React.FC = () => {
     connectTicks(symbol);
     return () => { if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }};
   }, [symbol, connectTicks]);
+
+  useEffect(() => {
+    if (chartStyle !== 'candle' || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    candleData.current = [];
+    wsRef.current.send(JSON.stringify({ ticks_history: symbolRef.current, style: 'candles', granularity: timeframe, count: 500, end: 'latest' }));
+  }, [chartStyle, timeframe]);
 
   useEffect(() => {
     const unsub = onNewSystemMessage((event: MessageEvent) => {
@@ -465,6 +581,31 @@ const NewDTrader: React.FC = () => {
                   {currentPrice.toFixed(2)} ({((currentPrice - (tickPrices.current[tickPrices.current.length - 2] || currentPrice)) / currentPrice * 100).toFixed(2)}%)
                 </span>
               )}
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                <button onClick={() => setChartStyle('line')}
+                  style={{
+                    padding: '2px 10px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                    fontSize: '10px', fontWeight: chartStyle === 'line' ? 'bold' : 'normal',
+                    background: chartStyle === 'line' ? '#333' : 'transparent',
+                    color: chartStyle === 'line' ? '#fff' : '#666',
+                  }}>Line</button>
+                <button onClick={() => setChartStyle('candle')}
+                  style={{
+                    padding: '2px 10px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                    fontSize: '10px', fontWeight: chartStyle === 'candle' ? 'bold' : 'normal',
+                    background: chartStyle === 'candle' ? '#333' : 'transparent',
+                    color: chartStyle === 'candle' ? '#fff' : '#666',
+                  }}>Candle</button>
+                {chartStyle === 'candle' && GRANULARITIES.map(g => (
+                  <button key={g.value} onClick={() => setTimeframe(g.value)}
+                    style={{
+                      padding: '2px 6px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                      fontSize: '9px', fontWeight: timeframe === g.value ? 'bold' : 'normal',
+                      background: timeframe === g.value ? '#333' : 'transparent',
+                      color: timeframe === g.value ? '#fff' : '#666',
+                    }}>{g.label}</button>
+                ))}
+              </div>
             </div>
             <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
               <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
@@ -695,8 +836,36 @@ const NewDTrader: React.FC = () => {
 
       {/* CHART (rise_fall / accumulator) OR DIGIT CIRCLES */}
       {tradeType === 'rise_fall' || tradeType === 'accumulator' ? (
-        <div style={{ flex: '1 1 auto', position: 'relative', minHeight: 0, background: '#111' }}>
-          <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+        <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 6px', background: '#1a1a1a', borderBottom: '1px solid #333' }}>
+            <button onClick={() => setChartStyle('line')}
+              style={{
+                padding: '2px 8px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                fontSize: '9px', fontWeight: chartStyle === 'line' ? 'bold' : 'normal',
+                background: chartStyle === 'line' ? '#333' : 'transparent',
+                color: chartStyle === 'line' ? '#fff' : '#888',
+              }}>Line</button>
+            <button onClick={() => setChartStyle('candle')}
+              style={{
+                padding: '2px 8px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                fontSize: '9px', fontWeight: chartStyle === 'candle' ? 'bold' : 'normal',
+                background: chartStyle === 'candle' ? '#333' : 'transparent',
+                color: chartStyle === 'candle' ? '#fff' : '#888',
+              }}>Candle</button>
+            {chartStyle === 'candle' && GRANULARITIES.map(g => (
+              <button key={g.value} onClick={() => setTimeframe(g.value)}
+                style={{
+                  padding: '2px 6px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                  fontSize: '9px', fontWeight: timeframe === g.value ? 'bold' : 'normal',
+                  background: timeframe === g.value ? '#333' : 'transparent',
+                  color: timeframe === g.value ? '#fff' : '#888',
+                }}>{g.label}</button>
+            ))}
+            <span style={{ marginLeft: 'auto', color: '#666', fontSize: '8px' }}>{chartStyle === 'candle' ? GRANULARITIES.find(g => g.value === timeframe)?.label : ''}</span>
+          </div>
+          <div style={{ flex: '1 1 auto', position: 'relative', minHeight: 0, background: '#111' }}>
+            <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+          </div>
         </div>
       ) : (
         <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', background: '#fff', minHeight: 0 }}>
