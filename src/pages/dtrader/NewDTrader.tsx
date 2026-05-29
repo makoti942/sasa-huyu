@@ -101,6 +101,7 @@ const NewDTrader: React.FC = () => {
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig[]>([]);
   const indicatorRef = useRef<IndicatorConfig[]>([]);
   const indicatorValues = useRef<Map<string, (number | null)[]>>(new Map());
+  const contractHistoryRef = useRef<ContractInfo[]>([]);
   const panPx = useRef(0);
   const isPanning = useRef(false);
   const panStartX = useRef(0);
@@ -235,10 +236,17 @@ const NewDTrader: React.FC = () => {
 
     const visibleCount = Math.max(10, Math.floor(300 / zoomRef.current));
     const visible = prices.slice(-visibleCount);
-    const minP = Math.min(...visible);
-    const maxP = Math.max(...visible);
+    let minP = Math.min(...visible);
+    let maxP = Math.max(...visible);
+    // Extend y-range to include accumulator barrier and entry price
+    const accuContracts = activeContractsRef.current.filter(c => !c.is_sold && (c.contract_type === 'ACCU' || tradeTypeRef.current === 'accumulator') && c.entry_tick > 0);
+    for (const ac of accuContracts) {
+      const barrier = ac.entry_tick * 2;
+      if (barrier > maxP) maxP = barrier;
+      if (ac.entry_tick < minP) minP = ac.entry_tick;
+    }
     const range = maxP - minP || 1;
-    const padding = range * 0.05;
+    const padding = range * 0.08;
     const yMin = minP - padding;
     const yMax = maxP + padding;
     const yRange = yMax - yMin;
@@ -523,7 +531,7 @@ const NewDTrader: React.FC = () => {
     contracts.forEach(c => {
       if (c.is_sold) return;
       const entryPrice = c.entry_tick;
-      if (!entryPrice) return;
+      if (entryPrice <= 0 && c.contract_type !== 'ACCU' && tradeTypeRef.current !== 'accumulator') return;
 
       // Entry horizontal line
       const ey = toY(entryPrice);
@@ -593,7 +601,7 @@ const NewDTrader: React.FC = () => {
       }
 
       // Accumulator boundary lines
-      if (c.contract_type === 'ACCU' && c.entry_index != null) {
+      if ((c.contract_type === 'ACCU' || tradeTypeRef.current === 'accumulator') && c.entry_index != null && entryPrice > 0) {
         const barrier = entryPrice * 2;
         const rate = growthRateRef.current;
         // Barrier line (red, horizontal)
@@ -640,7 +648,8 @@ const NewDTrader: React.FC = () => {
   }
 
   function drawExitOverlay(ctx: CanvasRenderingContext2D, W: number, pad: any, chartW: number, toY: (v: number) => number) {
-    const lastResult = contractHistory.length > 0 ? contractHistory[contractHistory.length - 1] : null;
+    const hist = contractHistoryRef.current;
+    const lastResult = hist.length > 0 ? hist[hist.length - 1] : null;
     if (!lastResult || !lastResult.exit_tick) return;
 
     const exitPrice = lastResult.exit_tick;
@@ -700,12 +709,14 @@ const NewDTrader: React.FC = () => {
 
       setContractHistory(prev => {
         if (prev.find(p => p.id === c.id)) return prev;
-        return [...prev, {
+        const next = [...prev, {
           ...c,
           exit_tick: exitPrice, exit_digit: exitD,
           exit_epoch: tickEpochs.current[tickEpochs.current.length - 1],
           profit: 0, is_sold: true, is_win: false,
         }];
+        contractHistoryRef.current = next;
+        return next;
       });
     }
   }
@@ -957,7 +968,7 @@ const NewDTrader: React.FC = () => {
             setActiveContracts(prev => { activeContractsRef.current = prev.filter(c => c.id !== cid); return activeContractsRef.current; });
             setContractHistory(prev => {
               if (prev.find(c => c.id === cid)) return prev;
-              return [...prev, {
+              const next = [...prev, {
                 id: cid, contract_type: poc.contract_type || ac?.contract_type || '',
                 stake: Number(poc.buy_price ?? ac?.stake ?? 0),
                 symbol: poc.symbol || ac?.symbol || '',
@@ -968,6 +979,8 @@ const NewDTrader: React.FC = () => {
                 exit_digit: exitD, profit, is_sold: true, is_win: isWin,
                 duration: ac?.duration, duration_unit: ac?.duration_unit,
               }];
+              contractHistoryRef.current = next;
+              return next;
             });
             setSessionStats(prev => ({ wins: prev.wins + (isWin ? 1 : 0), losses: prev.losses + (isWin ? 0 : 1), profit: prev.profit + profit }));
             sendViaNewSystem({ balance: 1 });
@@ -1025,13 +1038,17 @@ const NewDTrader: React.FC = () => {
   };
 
   const handleSellContract = async (contractId: string) => {
+    if (isTrading) return;
+    setIsTrading(true);
     try {
       const res = await sendViaNewSystemWithPromise({ sell: 1, contract_id: contractId });
       if (res?.error) {
         console.error('Sell error:', res.error);
+        setIsTrading(false);
       }
     } catch (e) {
       console.error('Sell failed:', e);
+      setIsTrading(false);
     }
   };
 
