@@ -36,7 +36,7 @@ interface ContractInfo {
 const contractLabels: Record<string, string> = {
   CALL: 'Rise', PUT: 'Fall', DIGITOVER: 'Over', DIGITUNDER: 'Under',
   DIGITMATCH: 'Match', DIGITDIFF: 'Diff', DIGITEVEN: 'Even', DIGITODD: 'Odd',
-  ACCU: 'Buy',
+  ACCU: 'Accu',
 };
 
 interface Candle { open: number; high: number; low: number; close: number; epoch: number }
@@ -94,6 +94,7 @@ const NewDTrader: React.FC = () => {
   const [tradeResult, setTradeResult] = useState<{ isWin: boolean; profit: number; contract_type: string; entry_digit: number; exit_digit: number } | null>(null);
   const [growthRate, setGrowthRate] = useState(0.01);
   const [takeProfit, setTakeProfit] = useState('');
+  const contractTypeRef = useRef('CALL');
   const [chartStyle, setChartStyle] = useState<'line' | 'candle'>('line');
   const [timeframe, setTimeframe] = useState(60);
   const [showIndicators, setShowIndicators] = useState(false);
@@ -112,13 +113,14 @@ const NewDTrader: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const settledContractIds = useRef<Set<string>>(new Set());
 
+  const activeAccuContract = activeContracts.find(c => c.contract_type === 'ACCU');
   const isPhone = typeof window !== 'undefined' && window.innerWidth < 768;
   const contractTypes = TRADE_TYPES.find(t => t.value === tradeType)?.label || 'Rise/Fall';
 
   stakeRef.current = stake; symbolRef.current = symbol; barrierRef.current = barrier;
   durationRef.current = duration; durationUnitRef.current = durationUnit;
   tradeTypeRef.current = tradeType; pipSizeRef.current = getPipSize(symbol);
-  growthRateRef.current = growthRate;
+  growthRateRef.current = growthRate; contractTypeRef.current = contractType;
   chartStyleRef.current = chartStyle; timeframeRef.current = timeframe;
   indicatorRef.current = activeIndicators;
 
@@ -589,6 +591,51 @@ const NewDTrader: React.FC = () => {
         ctx.fillText(remaining, rx + tw / 2, ry + 14);
         ctx.textAlign = 'right';
       }
+
+      // Accumulator boundary lines
+      if (c.contract_type === 'ACCU' && c.entry_index != null) {
+        const barrier = entryPrice * 2;
+        const rate = growthRateRef.current;
+        // Barrier line (red, horizontal)
+        const by = toY(barrier);
+        ctx.strokeStyle = '#f44336';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, by);
+        ctx.lineTo(W - pad.right, by);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#f44336';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Barrier ${barrier.toFixed(2)}`, pad.left + 4, by - 4);
+
+        // Growth curve (green dotted, from entry across visible range)
+        const lastIdx = tickPrices.current.length - 1;
+        const vc = Math.max(10, Math.floor(300 / zoomRef.current));
+        const visibleStart = Math.max(0, lastIdx - (vc - 1));
+        ctx.strokeStyle = '#4caf50';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        let started = false;
+        for (let i = Math.max(c.entry_index, visibleStart); i <= lastIdx; i++) {
+          const ticksSinceEntry = i - c.entry_index;
+          const growthVal = entryPrice * Math.pow(1 + rate, ticksSinceEntry);
+          const gx = pad.left + ((i - visibleStart) / (vc - 1)) * chartW;
+          const gy = toY(growthVal);
+          if (!started) { ctx.moveTo(gx, gy); started = true; } else ctx.lineTo(gx, gy);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Growth label
+        ctx.fillStyle = '#4caf50';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('Growth', W - pad.right - 4, toY(entryPrice * (1 + rate)) - 4);
+      }
     });
   }
 
@@ -874,8 +921,9 @@ const NewDTrader: React.FC = () => {
             const cid = String(data.buy.contract_id);
             const entryPrice = data.buy.entry_tick || priceRef.current || 0;
             const entryEpoch = data.buy.entry_tick_time || tickEpochs.current[tickEpochs.current.length - 1] || 0;
+            const ct = data.buy.contract_type || (tradeTypeRef.current === 'accumulator' ? 'ACCU' : contractTypeRef.current);
             const nc: ContractInfo = {
-              id: cid, contract_type: '', stake: stakeRef.current,
+              id: cid, contract_type: ct, stake: stakeRef.current,
               symbol: symbolRef.current, entry_tick: entryPrice,
               entry_digit: digitRef.current || extractDigit(entryPrice, pipSizeRef.current),
               entry_epoch: entryEpoch,
@@ -935,6 +983,11 @@ const NewDTrader: React.FC = () => {
           }
           return;
         }
+        if (data.msg_type === 'sell') {
+          setIsTrading(false);
+          sendViaNewSystem({ balance: 1 });
+          return;
+        }
       } catch {}
     });
     return unsub;
@@ -969,6 +1022,17 @@ const NewDTrader: React.FC = () => {
       console.error('Buy failed:', e);
     }
     setIsTrading(false);
+  };
+
+  const handleSellContract = async (contractId: string) => {
+    try {
+      const res = await sendViaNewSystemWithPromise({ sell: 1, contract_id: contractId });
+      if (res?.error) {
+        console.error('Sell error:', res.error);
+      }
+    } catch (e) {
+      console.error('Sell failed:', e);
+    }
   };
 
   const requestProposal = async (ct: string) => {
@@ -1014,7 +1078,10 @@ const NewDTrader: React.FC = () => {
     }
   })();
 
-  useEffect(() => { setContractType(currentContracts[0]); }, [tradeType, currentContracts[0]]);
+  useEffect(() => {
+    setContractType(currentContracts[0]);
+    if (tradeType === 'accumulator') setChartStyle('line');
+  }, [tradeType, currentContracts[0]]);
 
   useEffect(() => {
     if (!tradeResult) return;
@@ -1304,21 +1371,34 @@ const NewDTrader: React.FC = () => {
                 </div>
               )}
 
-              {/* Buy Button + Payout */}
+              {/* Buy / Sell Button */}
               <div style={{ marginTop: '16px' }}>
-                <button onClick={() => handleBuyContract(contractType)}
-                  disabled={isTrading || currentPrice === null}
-                  style={{
-                    width: '100%', padding: '14px', borderRadius: '6px', border: 'none',
-                    background: isTrading ? '#555' : (tradeType === 'accumulator' ? '#2e7d32' : '#d32f2f'), color: '#fff',
-                    cursor: isTrading ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold', fontSize: '15px',
-                  }}>
-                  {isTrading ? 'Buying...' : (tradeType === 'accumulator' ? 'Buy Accumulator' : `Buy ${contractLabels[contractType] || contractType}`)}
-                </button>
+                {activeAccuContract ? (
+                  <button onClick={() => handleSellContract(activeAccuContract.id)}
+                    disabled={isTrading}
+                    style={{
+                      width: '100%', padding: '14px', borderRadius: '6px', border: 'none',
+                      background: '#ff9800', color: '#fff',
+                      cursor: isTrading ? 'not-allowed' : 'pointer',
+                      fontWeight: 'bold', fontSize: '15px',
+                    }}>
+                    {isTrading ? 'Selling...' : 'Sell'}
+                  </button>
+                ) : (
+                  <button onClick={() => handleBuyContract(contractType)}
+                    disabled={isTrading || currentPrice === null}
+                    style={{
+                      width: '100%', padding: '14px', borderRadius: '6px', border: 'none',
+                      background: isTrading ? '#555' : (tradeType === 'accumulator' ? '#2e7d32' : '#d32f2f'), color: '#fff',
+                      cursor: isTrading ? 'not-allowed' : 'pointer',
+                      fontWeight: 'bold', fontSize: '15px',
+                    }}>
+                    {isTrading ? 'Buying...' : (tradeType === 'accumulator' ? 'Buy Accumulator' : `Buy ${contractLabels[contractType] || contractType}`)}
+                  </button>
+                )}
                 {tradeType === 'accumulator' ? (
                   <div style={{ textAlign: 'center', marginTop: '8px', color: '#888', fontSize: '11px' }}>
-                    Growth: {growthRate * 100}% · Stake: ${stake}
+                    {activeAccuContract ? 'Active · ' : ''}Growth: {growthRate * 100}% · Stake: ${stake}
                   </div>
                 ) : payout && (
                   <div style={{ textAlign: 'center', marginTop: '8px', color: '#888', fontSize: '12px' }}>
@@ -1618,20 +1698,33 @@ const NewDTrader: React.FC = () => {
           </div>
         )}
 
-        {/* Buy Button */}
-        <button onClick={() => handleBuyContract(contractType)}
-          disabled={isTrading || currentPrice === null}
-          style={{
-            width: '100%', padding: '12px', borderRadius: '6px', border: 'none',
-            background: isTrading ? '#aaa' : (tradeType === 'accumulator' ? '#2e7d32' : '#4caf50'), color: '#fff',
-            cursor: isTrading ? 'not-allowed' : 'pointer',
-            fontWeight: 'bold', fontSize: '15px',
-          }}>
-          {isTrading ? 'Buying...' : (tradeType === 'accumulator' ? 'Buy Accumulator' : 'Buy')}
-        </button>
+        {/* Buy / Sell Button */}
+        {activeAccuContract ? (
+          <button onClick={() => handleSellContract(activeAccuContract.id)}
+            disabled={isTrading}
+            style={{
+              width: '100%', padding: '12px', borderRadius: '6px', border: 'none',
+              background: '#ff9800', color: '#fff',
+              cursor: isTrading ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold', fontSize: '15px',
+            }}>
+            {isTrading ? 'Selling...' : 'Sell'}
+          </button>
+        ) : (
+          <button onClick={() => handleBuyContract(contractType)}
+            disabled={isTrading || currentPrice === null}
+            style={{
+              width: '100%', padding: '12px', borderRadius: '6px', border: 'none',
+              background: isTrading ? '#aaa' : (tradeType === 'accumulator' ? '#2e7d32' : '#4caf50'), color: '#fff',
+              cursor: isTrading ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold', fontSize: '15px',
+            }}>
+            {isTrading ? 'Buying...' : (tradeType === 'accumulator' ? 'Buy Accumulator' : 'Buy')}
+          </button>
+        )}
         {tradeType === 'accumulator' ? (
           <div style={{ textAlign: 'center', marginTop: '4px', color: '#999', fontSize: '10px' }}>
-            {growthRate * 100}% growth · ${stake} stake
+            {activeAccuContract ? 'Active · ' : ''}{growthRate * 100}% growth · ${stake} stake
           </div>
         ) : payout && (
           <div style={{ textAlign: 'center', marginTop: '4px', color: '#999', fontSize: '11px' }}>
