@@ -1119,9 +1119,13 @@ const NewDTrader: React.FC = () => {
       const res = await sendViaNewSystemWithPromise({ sell: 1, contract_id: contractId });
       if (res?.error) {
         console.error('Sell error:', res.error);
+        setTradeResult({ isWin: false, profit: 0, contract_type: 'SELL_ERR', entry_digit: 0, exit_digit: 0 });
+        setTimeout(() => setTradeResult(null), 3000);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Sell failed:', e);
+      setTradeResult({ isWin: false, profit: 0, contract_type: 'SELL_ERR', entry_digit: 0, exit_digit: 0 });
+      setTimeout(() => setTradeResult(null), 3000);
     }
     setIsTrading(false);
   };

@@ -74,11 +74,7 @@ function convertToNewFormat(data) {
     out.buy = String(out.buy)
   }
 
-  // sell: integer → string "1"
-  if ('sell' in out) {
-    out.sell = String(out.sell)
-  }
-
+  // sell: leave as-is (OTP API expects number)
   // buy.parameters: symbol → underlying_symbol
   if (out.parameters && typeof out.parameters === 'object') {
     out.parameters = { ...out.parameters }
