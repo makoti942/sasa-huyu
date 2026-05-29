@@ -693,58 +693,64 @@ const NewDTrader: React.FC = () => {
         <span style={{ marginLeft: 'auto', color: connectionStatus === 'Live' ? '#4caf50' : '#ff9800', fontSize: '8px' }}>\u25CF</span>
       </div>
 
-      {/* DIGIT CIRCLES — 2 rows of 5, ring style with inner circle */}
-      <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', background: '#fff', minHeight: 0 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px 14px', width: '100%', maxWidth: '340px' }}>
-          {Array.from({ length: 10 }, (_, i) => {
-            const isCurrent = currentDigit === i;
-            const isHighlight = exitHighlight?.digit === i;
-            const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
-            const isBarrier = String(i) === barrier;
-            const pct = tickHistory.length > 0 ? (digitCounts[i] / tickHistory.length) * 100 : 0;
-            const halfAngle = (pct / 100) * 180;
-            const barColor = isHighlight ? hlColor : (pct > 12 ? '#4caf50' : pct > 9 ? '#ff9800' : '#f44336');
-            return (
-              <div key={i} style={{ textAlign: 'center', cursor: 'pointer', position: 'relative' }} onClick={() => setBarrier(String(i))}>
-                {/* Pyramid cursor arrow for current digit */}
-                {isCurrent && (
-                  <div style={{
-                    position: 'absolute', top: '-10px', left: '50%', marginLeft: '-5px',
-                    width: '0', height: '0',
-                    borderLeft: '5px solid transparent',
-                    borderRight: '5px solid transparent',
-                    borderTop: '7px solid #ffeb3b',
-                    zIndex: 2,
-                  }} />
-                )}
-                {/* Outer ring container */}
-                <div style={{ position: 'relative', width: '48px', height: '48px', margin: '0 auto' }}>
-                  {/* Ring track */}
-                  <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: '#ddd' }} />
-                  {/* Ring fill — conic gradient growing upward on both sides */}
-                  <div style={{
-                    position: 'absolute', inset: 0, borderRadius: '50%',
-                    background: `conic-gradient(from ${180 - halfAngle}deg, ${barColor} 0deg, ${barColor} ${2 * halfAngle}deg, transparent ${2 * halfAngle}deg)`,
-                  }} />
-                  {/* Inner circle with digit */}
-                  <div style={{
-                    position: 'absolute', top: '6px', left: '6px',
-                    width: '36px', height: '36px', borderRadius: '50%',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: isHighlight ? hlColor : (isCurrent ? '#ffeb3b' : (isBarrier ? '#4fc3f7' : '#e0e0e0')),
-                    color: (isCurrent || isBarrier) && !isHighlight ? '#000' : '#333',
-                    fontWeight: 'bold', fontSize: '16px',
-                    boxShadow: isCurrent ? '0 0 8px rgba(255,235,59,0.6)' : (isBarrier ? '0 0 8px rgba(79,195,247,0.6)' : 'none'),
-                  }}>
-                    {i}
-                  </div>
-                </div>
-                <div style={{ fontSize: '9px', color: '#999', marginTop: '2px' }}>{pct.toFixed(1)}</div>
-              </div>
-            );
-          })}
+      {/* CHART (rise_fall / accumulator) OR DIGIT CIRCLES */}
+      {tradeType === 'rise_fall' || tradeType === 'accumulator' ? (
+        <div style={{ flex: '1 1 auto', position: 'relative', minHeight: 0, background: '#111' }}>
+          <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
         </div>
-      </div>
+      ) : (
+        <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px', background: '#fff', minHeight: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px 14px', width: '100%', maxWidth: '340px' }}>
+            {Array.from({ length: 10 }, (_, i) => {
+              const isCurrent = currentDigit === i;
+              const isHighlight = exitHighlight?.digit === i;
+              const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
+              const isBarrier = String(i) === barrier;
+              const pct = tickHistory.length > 0 ? (digitCounts[i] / tickHistory.length) * 100 : 0;
+              const halfAngle = (pct / 100) * 180;
+              const barColor = isHighlight ? hlColor : (pct > 12 ? '#4caf50' : pct > 9 ? '#ff9800' : '#f44336');
+              return (
+                <div key={i} style={{ textAlign: 'center', cursor: 'pointer', position: 'relative' }} onClick={() => setBarrier(String(i))}>
+                  {/* Pyramid cursor arrow for current digit */}
+                  {isCurrent && (
+                    <div style={{
+                      position: 'absolute', top: '-10px', left: '50%', marginLeft: '-5px',
+                      width: '0', height: '0',
+                      borderLeft: '5px solid transparent',
+                      borderRight: '5px solid transparent',
+                      borderTop: '7px solid #ffeb3b',
+                      zIndex: 2,
+                    }} />
+                  )}
+                  {/* Outer ring container */}
+                  <div style={{ position: 'relative', width: '48px', height: '48px', margin: '0 auto' }}>
+                    {/* Ring track */}
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: '#ddd' }} />
+                    {/* Ring fill — conic gradient growing upward on both sides */}
+                    <div style={{
+                      position: 'absolute', inset: 0, borderRadius: '50%',
+                      background: `conic-gradient(from ${180 - halfAngle}deg, ${barColor} 0deg, ${barColor} ${2 * halfAngle}deg, transparent ${2 * halfAngle}deg)`,
+                    }} />
+                    {/* Inner circle with digit */}
+                    <div style={{
+                      position: 'absolute', top: '6px', left: '6px',
+                      width: '36px', height: '36px', borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: isHighlight ? hlColor : (isCurrent ? '#ffeb3b' : (isBarrier ? '#4fc3f7' : '#e0e0e0')),
+                      color: (isCurrent || isBarrier) && !isHighlight ? '#000' : '#333',
+                      fontWeight: 'bold', fontSize: '16px',
+                      boxShadow: isCurrent ? '0 0 8px rgba(255,235,59,0.6)' : (isBarrier ? '0 0 8px rgba(79,195,247,0.6)' : 'none'),
+                    }}>
+                      {i}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '9px', color: '#999', marginTop: '2px' }}>{pct.toFixed(1)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* BOTTOM TRADING PANEL — fixed, no scroll */}
       <div style={{ background: '#fff', borderTop: '1px solid #e0e0e0', padding: '6px 10px 10px' }}>
