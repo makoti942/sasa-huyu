@@ -10,7 +10,6 @@ export const MakotiWidget: React.FC = () => {
     const [open, setOpen]         = useState(() => localStorage.getItem('mw_open') === 'true');
     const [tab, setTab]           = useState<Tab>(() => (localStorage.getItem('mw_tab') as Tab) || 'scanner');
     const [minimized, setMinimized] = useState(false);
-    const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 600);
 
     /* ── FAB position (refs for zero-rerender drag) ─────────── */
     const btnPosRef = useRef({ x: Math.max(PAD, window.innerWidth - 88), y: Math.max(PAD, window.innerHeight - 108) });
@@ -19,13 +18,6 @@ export const MakotiWidget: React.FC = () => {
     /* ── Persist open / tab state to localStorage ─────────── */
     useEffect(() => { localStorage.setItem('mw_open', String(open)); }, [open]);
     useEffect(() => { localStorage.setItem('mw_tab',  tab);          }, [tab]);
-
-    /* ── Track mobile breakpoint ───────────────────────────── */
-    useEffect(() => {
-        const onResize = () => setIsMobile(window.innerWidth <= 600);
-        window.addEventListener('resize', onResize);
-        return () => window.removeEventListener('resize', onResize);
-    }, []);
 
     /* ── Drag state (refs, never cause re-renders) ─────────── */
     const btnDragging  = useRef(false);
@@ -44,18 +36,23 @@ export const MakotiWidget: React.FC = () => {
         let pendingDx = 0, pendingDy = 0;
         let hasPending = false;
 
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const winW = Math.min(400, w - PAD * 2);
+        const winH = Math.min(620, h - 80);
+
         const applyDrag = () => {
             rafId.current = null;
             if (btnDragging.current && btnRef.current) {
-                const nx = Math.max(PAD, Math.min(window.innerWidth  - 72 - PAD, startElem.current.x + pendingDx));
-                const ny = Math.max(PAD, Math.min(window.innerHeight - 72 - PAD, startElem.current.y + pendingDy));
+                const nx = Math.max(PAD, Math.min(w - 72 - PAD, startElem.current.x + pendingDx));
+                const ny = Math.max(PAD, Math.min(h - 72 - PAD, startElem.current.y + pendingDy));
                 btnRef.current.style.left = nx + 'px';
                 btnRef.current.style.top  = ny + 'px';
                 btnPosRef.current = { x: nx, y: ny };
             }
-            if (winDragging.current && winRef.current && !isMobile) {
-                const nx = Math.max(PAD, Math.min(window.innerWidth  - 404 - PAD, startElem.current.x + pendingDx));
-                const ny = Math.max(PAD, Math.min(window.innerHeight - 60,        startElem.current.y + pendingDy));
+            if (winDragging.current && winRef.current) {
+                const nx = Math.max(PAD, Math.min(w - winW - PAD, startElem.current.x + pendingDx));
+                const ny = Math.max(PAD, Math.min(h - 60,        startElem.current.y + pendingDy));
                 winRef.current.style.left = nx + 'px';
                 winRef.current.style.top  = ny + 'px';
                 winPosRef.current = { x: nx, y: ny };
@@ -95,7 +92,7 @@ export const MakotiWidget: React.FC = () => {
             document.removeEventListener('pointerup',   onUp);
             if (rafId.current !== null) cancelAnimationFrame(rafId.current);
         };
-    }, [isMobile]);
+    }, []);
 
     /* ── Set initial positions via refs on first render ─────── */
     useEffect(() => {
@@ -106,11 +103,15 @@ export const MakotiWidget: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (winRef.current && !isMobile) {
-            winRef.current.style.left = winPosRef.current.x + 'px';
-            winRef.current.style.top  = winPosRef.current.y + 'px';
+        if (winRef.current && open) {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            const defX = Math.max(PAD, w - Math.min(400, w - PAD * 2) - PAD);
+            const defY = Math.max(PAD, h - 640);
+            winRef.current.style.left = (w <= 600 ? PAD : defX) + 'px';
+            winRef.current.style.top  = (w <= 600 ? PAD : defY) + 'px';
         }
-    }, [open, isMobile]);
+    }, [open]);
 
     /* ── FAB pointer down ─────────────────────────────────── */
     const onBtnPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
@@ -130,15 +131,14 @@ export const MakotiWidget: React.FC = () => {
 
     /* ── Window header pointer down ───────────────────────── */
     const onWinPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-        if (isMobile) return;
         const target = e.target as HTMLElement;
         if (
             target.closest('.mw-win-body')    ||
             target.closest('.mw-win-actions') ||
             target.closest('.mw-tabs')        ||
-            (target as HTMLElement).tagName === 'BUTTON' ||
-            (target as HTMLElement).tagName === 'INPUT'  ||
-            (target as HTMLElement).tagName === 'SELECT'
+            target.tagName === 'BUTTON' ||
+            target.tagName === 'INPUT'  ||
+            target.tagName === 'SELECT'
         ) return;
         e.preventDefault();
         winDragging.current = true;
@@ -148,13 +148,24 @@ export const MakotiWidget: React.FC = () => {
         winRef.current?.setPointerCapture(e.pointerId);
     };
 
+    /* ── Window initial position (computed inline, no flash) ── */
+    const initWinStyle = (() => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        if (w <= 600) return { left: PAD, top: PAD };
+        return {
+            left: Math.max(PAD, w - Math.min(400, w - PAD * 2) - PAD),
+            top: Math.max(PAD, h - 640),
+        };
+    })();
+
     return (
         <>
             {/* ── Floating button ── */}
             <button
                 ref={btnRef}
                 className={`mw-fab${open ? ' mw-fab--open' : ''}`}
-                style={{ position: 'fixed', left: btnPosRef.current.x, top: btnPosRef.current.y }}
+                style={{ position: 'fixed', left: btnPosRef.current.x, top: btnPosRef.current.y, zIndex: 100001 }}
                 onPointerDown={onBtnPointerDown}
                 onClick={onBtnClick}
                 title='MAKOTI — Scanner & Market Killer'
@@ -164,69 +175,57 @@ export const MakotiWidget: React.FC = () => {
                 <span className='mw-fab__label'>MAKOTI</span>
             </button>
 
-            {/* ── Floating window (bottom sheet on mobile, floating on desktop) ── */}
+            {/* ── Floating window (draggable, same on all devices) ── */}
             {open && (
-                <>
-                    {/* Backdrop for mobile bottom sheet */}
-                    {isMobile && (
-                        <div className='mw-backdrop' onClick={() => setOpen(false)} />
-                    )}
-                    <div
-                        ref={winRef}
-                        className={`mw-window${minimized ? ' mw-window--min' : ''}${isMobile ? ' mw-window--sheet' : ''}`}
-                        style={isMobile ? undefined : { position: 'fixed', left: winPosRef.current.x, top: winPosRef.current.y }}
-                        onPointerDown={onWinPointerDown}
-                    >
-                        {/* Sheet drag handle (mobile only) */}
-                        {isMobile && <div className='mw-sheet-handle' />}
-
-                        <div className='mw-win-header'>
-                            <div className='mw-win-title'>
-                                <span className='mw-win-logo'>⚔</span>
-                                <span>MAKOTI</span>
-                            </div>
-                            <div className='mw-win-actions'>
-                                <button
-                                    className='mw-win-action'
-                                    onClick={() => setMinimized(m => !m)}
-                                    title={minimized ? 'Expand' : 'Minimize'}
-                                >
-                                    {minimized ? '▲' : '▼'}
-                                </button>
-                                <button
-                                    className='mw-win-action mw-win-action--close'
-                                    onClick={() => setOpen(false)}
-                                    title='Close'
-                                >
-                                    ×
-                                </button>
-                            </div>
+                <div
+                    ref={winRef}
+                    className={`mw-window${minimized ? ' mw-window--min' : ''}`}
+                    style={{ position: 'fixed', left: initWinStyle.left + 'px', top: initWinStyle.top + 'px' }}
+                    onPointerDown={onWinPointerDown}
+                >
+                    <div className='mw-win-header'>
+                        <div className='mw-win-title'>
+                            <span className='mw-win-logo'>⚔</span>
+                            <span>MAKOTI</span>
                         </div>
-
-                        {!minimized && (
-                            <>
-                                <div className='mw-tabs'>
-                                    <button
-                                        className={`mw-tab${tab === 'scanner' ? ' mw-tab--active' : ''}`}
-                                        onClick={() => setTab('scanner')}
-                                    >
-                                        Scanner
-                                    </button>
-                                    <button
-                                        className={`mw-tab${tab === 'market_killer' ? ' mw-tab--active' : ''}`}
-                                        onClick={() => setTab('market_killer')}
-                                    >
-                                        Market Killer
-                                    </button>
-                                </div>
-
-                                <div className='mw-win-body'>
-                                    {tab === 'scanner' ? <Scanner /> : <MarketKiller />}
-                                </div>
-                            </>
-                        )}
+                        <div className='mw-win-actions'>
+                            <button
+                                className='mw-win-action'
+                                onClick={() => setMinimized(m => !m)}
+                                title={minimized ? 'Expand' : 'Minimize'}
+                            >
+                                {minimized ? '▲' : '▼'}
+                            </button>
+                            <button
+                                className='mw-win-action mw-win-action--close'
+                                onClick={() => setOpen(false)}
+                                title='Close'
+                            >
+                                ×
+                            </button>
+                        </div>
                     </div>
-                </>
+
+                    {/* Content always mounted (keeps WS/interval alive), just hidden when minimized */}
+                    <div className='mw-tabs' style={minimized ? { display: 'none' } : undefined}>
+                        <button
+                            className={`mw-tab${tab === 'scanner' ? ' mw-tab--active' : ''}`}
+                            onClick={() => setTab('scanner')}
+                        >
+                            Scanner
+                        </button>
+                        <button
+                            className={`mw-tab${tab === 'market_killer' ? ' mw-tab--active' : ''}`}
+                            onClick={() => setTab('market_killer')}
+                        >
+                            Market Killer
+                        </button>
+                    </div>
+
+                    <div className='mw-win-body' style={minimized ? { display: 'none' } : undefined}>
+                        {tab === 'scanner' ? <Scanner /> : <MarketKiller />}
+                    </div>
+                </div>
             )}
         </>
     );
