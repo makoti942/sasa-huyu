@@ -638,6 +638,126 @@ $mw-radius:   10px;
     font-family: monospace;
 }
 
+// ─── Scanner notification toast ─────────────────────────────────────────────
+.mw-scanner__notif {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 0.5px;
+    animation: mw-notif-in 0.3s ease-out;
+
+    &--info {
+        background: rgba(96, 165, 250, 0.15);
+        border: 1px solid rgba(96, 165, 250, 0.3);
+        color: #60a5fa;
+    }
+    &--success {
+        background: rgba(34, 197, 94, 0.15);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        color: #22c55e;
+    }
+}
+
+@keyframes mw-notif-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+// ─── Toggle switch ─────────────────────────────────────────────────────────
+.mw-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    cursor: pointer;
+}
+
+.mw-switch-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: $mw-text;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.mw-switch-active {
+    font-size: 9px;
+    font-weight: 800;
+    color: $mw-win;
+    letter-spacing: 1px;
+    animation: mw-blink 0.8s ease-in-out infinite alternate;
+}
+
+.mw-toggle {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+
+    &__track {
+        width: 40px;
+        height: 22px;
+        border-radius: 11px;
+        background: $mw-bg3;
+        border: 1px solid rgba(255,255,255,0.1);
+        position: relative;
+        transition: all 0.2s;
+
+        &--on {
+            background: linear-gradient(90deg, rgba(34,197,94,0.4), rgba(34,197,94,0.2));
+            border-color: rgba(34,197,94,0.4);
+        }
+    }
+
+    &__thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: $mw-muted;
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        transition: all 0.2s;
+
+        &--on {
+            left: 20px;
+            background: $mw-win;
+        }
+    }
+}
+
+@keyframes mw-blink {
+    from { opacity: 1; }
+    to   { opacity: 0.4; }
+}
+
+// ─── Direction bar (choppiness score) ──────────────────────────────────────
+.mw-scanner__dir-bar {
+    display: flex;
+    align-items: center;
+    height: 18px;
+    background: $mw-bg3;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.mw-scanner__dir-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    min-width: 4px;
+}
+
+.mw-scanner__dir-up, .mw-scanner__dir-down {
+    display: none; // hidden, replaced by dir-fill
+}
+
 .mw-killer__log-wrap {
     display: flex;
     flex-direction: column;
