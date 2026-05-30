@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ALL_SYMBOLS, SYMBOL_LABELS, PIP_SIZES, openMakotiWS, MakotiWS, analyzeSignal } from './makoti-ws';
+import { sendViaNewSystemWithPromise, onNewSystemMessage } from '@/auth/NewDerivAuth';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 interface SymbolState {
@@ -81,6 +82,63 @@ export const MarketKiller: React.FC = () => {
         saveLogs(logs);
     }, [logs]);
 
+    /* ── POC listener on the OTP new system WS ────────────────────────── */
+    useEffect(() => {
+        if (!running) return;
+        if (!window._newSystemWS) return;
+
+        // Subscribe to proposal_open_contract on the new system WS
+        window._newSystemWS.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+
+        const unsub = onNewSystemMessage((event: MessageEvent) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.msg_type !== 'proposal_open_contract') return;
+                const c = data.proposal_open_contract;
+                if (!c?.is_sold) return;
+                const cid = String(c.contract_id);
+                const entry = contractMapRef.current.get(cid);
+                if (!entry) return;
+                contractMapRef.current.delete(cid);
+
+                const { symbol: sym, stake: tradeStake } = entry;
+                const sd = symbolDataRef.current[sym];
+                if (!sd) return;
+
+                const profit = Number(c.profit);
+                const won = profit >= 0;
+                pnlRef.current += profit;
+                setPnl(pnlRef.current);
+
+                if (won) {
+                    sd.wins++;
+                    // Win → reset GLOBAL stake back to base
+                    globalStakeRef.current = stakeParsed.current;
+                    addLog(`✅ WON +$${profit.toFixed(2)} on ${SYMBOL_LABELS[sym]} | Next stake reset to $${stakeParsed.current.toFixed(2)} | P&L $${pnlRef.current.toFixed(2)}`, 'win');
+                } else {
+                    sd.losses++;
+                    // Loss → multiply GLOBAL stake
+                    globalStakeRef.current = Math.min(
+                        Number((tradeStake * martingaleParsed.current).toFixed(2)),
+                        100
+                    );
+                    addLog(`❌ LOST -$${Math.abs(profit).toFixed(2)} on ${SYMBOL_LABELS[sym]} | Next stake $${globalStakeRef.current.toFixed(2)} | P&L $${pnlRef.current.toFixed(2)}`, 'loss');
+                }
+
+                flushDisplay(sym);
+
+                globalLock.current = false;
+                activeContractsRef.current = 0;
+                setActiveContracts(0);
+
+                checkLimits();
+            } catch (_) {}
+        });
+
+        return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [running]);
+
     /* ── Log helper ──────────────────────────────────────────────────────── */
     const addLog = useCallback((msg: string, type: LogEntry['type'] = 'info') => {
         const time = new Date().toLocaleTimeString();
@@ -138,8 +196,8 @@ export const MarketKiller: React.FC = () => {
     }, [addLog]);
 
     /* ── Execute ONE trade using the global stake ────────────────────────── */
-    const executeTrade = useCallback((sym: string) => {
-        if (!runningRef.current || !wsRef.current?.isOpen()) return;
+    const executeTrade = useCallback(async (sym: string) => {
+        if (!runningRef.current) return;
         const sd = symbolDataRef.current[sym];
         if (!sd || sd.ticks.length < MIN_TICKS_BEFORE_TRADE) return;
 
@@ -162,16 +220,47 @@ export const MarketKiller: React.FC = () => {
         };
         if (barrier) params.barrier = barrier;
 
-        wsRef.current.send({ buy: 1, price: tradeStake, parameters: params });
-
         const label = contract_type === 'CALL' ? 'RISE'
             : contract_type === 'PUT' ? 'FALL'
             : `${contract_type}${barrier ? ' ' + barrier : ''}`;
 
-        sd.lastSignal = label;
-        addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
-        contractMapRef.current.set(sym + Date.now(), { symbol: sym, stake: tradeStake });
-        flushDisplay(sym);
+        // Try new system (OTP) WS first — handles both new-auth and legacy users
+        if (window._newSystemWS?.readyState === WebSocket.OPEN) {
+            try {
+                const response = await sendViaNewSystemWithPromise({ buy: 1, price: tradeStake, parameters: params });
+                const contractId = response?.buy?.contract_id ?? response?.contract_id;
+                if (contractId) {
+                    contractMapRef.current.set(String(contractId), { symbol: sym, stake: tradeStake });
+                    sd.lastSignal = label;
+                    addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
+                    addLog(`Contract ${contractId} open on ${SYMBOL_LABELS[sym]}`, 'info');
+                    flushDisplay(sym);
+                } else {
+                    addLog(`Buy ok but no contract_id: ${JSON.stringify(response).slice(0, 100)}`, 'info');
+                    globalLock.current = false;
+                    activeContractsRef.current = 0;
+                    setActiveContracts(0);
+                }
+            } catch (err: any) {
+                addLog(`Buy error: ${err?.error?.message || err?.message || 'Unknown'}`, 'info');
+                globalLock.current = false;
+                activeContractsRef.current = 0;
+                setActiveContracts(0);
+            }
+        } else if (wsRef.current?.isOpen()) {
+            // Legacy WS fallback
+            wsRef.current.send({ buy: 1, price: tradeStake, parameters: params });
+
+            sd.lastSignal = label;
+            addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
+            contractMapRef.current.set(sym + Date.now(), { symbol: sym, stake: tradeStake });
+            flushDisplay(sym);
+        } else {
+            // Neither WS available — release lock
+            globalLock.current = false;
+            activeContractsRef.current = 0;
+            setActiveContracts(0);
+        }
     }, [addLog, flushDisplay]);
 
     /* ── Handle every incoming tick: scan all symbols, pick best signal ─── */
@@ -192,7 +281,7 @@ export const MarketKiller: React.FC = () => {
             }
         });
 
-        if (bestSym) executeTrade(bestSym);
+        if (bestSym) executeTrade(bestSym).catch(() => {});
     }, [executeTrade]);
 
     /* ── Start ───────────────────────────────────────────────────────────── */
@@ -344,7 +433,10 @@ export const MarketKiller: React.FC = () => {
             handleMsg,
             () => {
                 addLog('Connected ✓  Subscribing to all 10 volatilities…', 'info');
-                mws.send({ proposal_open_contract: 1, subscribe: 1 });
+                // Skip POC subscription on legacy WS when the new OTP system handles it
+                if (!window._newSystemWS) {
+                    mws.send({ proposal_open_contract: 1, subscribe: 1 });
+                }
                 ALL_SYMBOLS.forEach(sym => {
                     mws.send({ ticks_history: sym, count: 1000, end: 'latest', style: 'ticks', subscribe: 1 });
                 });

@@ -24,10 +24,24 @@ export function getToken(): string | null {
     try {
         const active_loginid = localStorage.getItem('active_loginid');
         if (!active_loginid) return null;
+
+        // Account IDs look like CR1234567 or VR1234567; real tokens are long JWTs/hex strings
+        const isRealToken = (v: string) => v && !/^[A-Z]{2,3}\d+$/.test(v);
+
         const ca = localStorage.getItem('client.accounts');
-        if (ca) { const t = JSON.parse(ca)[active_loginid]?.token; if (t) return t; }
+        if (ca) { const t = JSON.parse(ca)[active_loginid]?.token; if (t && isRealToken(t)) return t; }
+
         const al = localStorage.getItem('accountsList');
-        if (al) { const t = JSON.parse(al)[active_loginid]; if (t) return t; }
+        if (al) { const t = JSON.parse(al)[active_loginid]; if (t && isRealToken(t)) return t; }
+
+        // Try direct authToken key (legacy auth sets a real token here)
+        const authToken = localStorage.getItem('authToken');
+        if (authToken && isRealToken(authToken)) return authToken;
+
+        // Try token_<loginid> pattern used by some Deriv apps
+        const tokenKey = `token_${active_loginid}`;
+        const tokenVal = localStorage.getItem(tokenKey);
+        if (tokenVal && isRealToken(tokenVal)) return tokenVal;
     } catch (_) {}
     return null;
 }
