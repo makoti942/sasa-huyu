@@ -21,7 +21,7 @@ interface LogEntry {
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
-const CONFIDENCE_THRESHOLD   = 88;
+const CONFIDENCE_THRESHOLD   = 78;
 const LS_LOGS_KEY            = 'mw_mk_logs';
 const MAX_SAVED_LOGS         = 80;
 

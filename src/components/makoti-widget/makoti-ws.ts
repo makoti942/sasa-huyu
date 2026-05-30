@@ -186,141 +186,7 @@ function digitPcts(ticks: number[], window: number): number[] {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  V3 HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** Average Directional Index (ADX) from tick prices */
-function calcADX(prices: number[], period = 14): number {
-    if (prices.length < period * 2) return 0;
-    const plusDM: number[] = [], minusDM: number[] = [], tr: number[] = [];
-    for (let i = 1; i < prices.length; i++) {
-        const up = prices[i] - prices[i - 1], dn = prices[i - 1] - prices[i];
-        plusDM.push(Math.max(0, up > dn ? up : 0));
-        minusDM.push(Math.max(0, dn > up ? dn : 0));
-        tr.push(Math.abs(prices[i] - prices[i - 1]));
-    }
-    let aPD = plusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    let aMD = minusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    let aTR = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    const dx: number[] = [];
-    for (let i = period; i < plusDM.length; i++) {
-        aPD = (aPD * (period - 1) + plusDM[i]) / period;
-        aMD = (aMD * (period - 1) + minusDM[i]) / period;
-        aTR = (aTR * (period - 1) + tr[i]) / period;
-        if (aTR === 0) continue;
-        const pDI = 100 * aPD / aTR, mDI = 100 * aMD / aTR, s = pDI + mDI;
-        if (s === 0) continue;
-        dx.push(100 * Math.abs(pDI - mDI) / s);
-    }
-    if (dx.length < period) return 0;
-    let adx = dx.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < dx.length; i++) adx = (adx * (period - 1) + dx[i]) / period;
-    return adx;
-}
-
-/** Linear regression slope over N bars (normalized) */
-function calcLinRegSlope(prices: number[], period = 14): number {
-    if (prices.length < period) return 0;
-    const s = prices.slice(-period), n = s.length;
-    const sumX = (n - 1) * n / 2, sumY = s.reduce((a, b) => a + b, 0);
-    let xy = 0, x2 = 0;
-    for (let i = 0; i < n; i++) { xy += i * s[i]; x2 += i * i; }
-    return (n * xy - sumX * sumY) / (n * x2 - sumX * sumX);
-}
-
-/** RSI divergence between recent and prior 15-bar windows */
-function detectRSIDivergence(prices: number[]): { type: 'bull' | 'bear' | null; strength: number } {
-    if (prices.length < 40) return { type: null, strength: 0 };
-    const r = prices.slice(-15), p = prices.slice(-30, -15);
-    const rsiR = calcRSI(r, 7), rsiP = calcRSI(p, 7);
-    const rMin = Math.min(...r), rMax = Math.max(...r);
-    const pMin = Math.min(...p), pMax = Math.max(...p);
-    if (rMin < pMin && rsiR > rsiP + 5) return { type: 'bull', strength: 2 };
-    if (rMax > pMax && rsiR < rsiP - 5) return { type: 'bear', strength: 2 };
-    return { type: null, strength: 0 };
-}
-
-/** Micro pattern detection on tick prices (2-3 bar reversals / continuations) */
-function detectMicroPattern(prices: number[]): { type: 'bull' | 'bear' | null; strength: number } {
-    if (prices.length < 6) return { type: null, strength: 0 };
-    const p = prices.slice(-6), ch = p.slice(1).map((v, i) => v - p[i]);
-    const l3 = ch.slice(-3);
-    if (l3[0] < 0 && l3[1] < 0 && l3[2] > 0 && l3[2] > Math.abs(l3[0]) + Math.abs(l3[1])) return { type: 'bull', strength: 2 };
-    if (l3[0] > 0 && l3[1] > 0 && l3[2] < 0 && Math.abs(l3[2]) > l3[0] + l3[1]) return { type: 'bear', strength: 2 };
-    const r3 = ch.slice(-4, -1).reduce((a, b) => a + b, 0), lm = ch[ch.length - 1];
-    if (r3 > 0 && lm < 0 && Math.abs(lm) > Math.abs(r3) * 1.5) return { type: 'bear', strength: 2 };
-    if (r3 < 0 && lm > 0 && lm > Math.abs(r3) * 1.5) return { type: 'bull', strength: 2 };
-    const l4 = ch.slice(-4);
-    if (l4.every(c => c > 0)) return { type: 'bull', strength: 1 };
-    if (l4.every(c => c < 0)) return { type: 'bear', strength: 1 };
-    return { type: null, strength: 0 };
-}
-
-/** Momentum strategy: MACD + EMA cross + linreg slope */
-function momentumStrategy(prices: number[]): { direction: 'bull' | 'bear' | 'neutral'; score: number } {
-    if (prices.length < 28) return { direction: 'neutral', score: 0 };
-    let s = 0;
-    const { hist: mH, prevHist: mP } = calcMACDHistogram(prices);
-    if (mH > 0 && mP <= 0) s += 2; else if (mH > 0) s += 1;
-    if (mH < 0 && mP >= 0) s -= 2; else if (mH < 0) s -= 1;
-    if (prices.length >= 22) {
-        const e9 = calcEMA(prices, 9), e21 = calcEMA(prices, 21);
-        if (e9.length >= 2 && e21.length >= 2) {
-            const l = e9.length - 1;
-            if (e9[l] > e21[l] && e9[l - 1] <= e21[l - 1]) s += 2;
-            if (e9[l] < e21[l] && e9[l - 1] >= e21[l - 1]) s -= 2;
-        }
-    }
-    const slp = calcLinRegSlope(prices, 14);
-    const avg = prices.slice(-14).reduce((a, b) => a + b, 0) / 14;
-    const pct = avg > 0 ? (slp / avg) * 100 : 0;
-    if (pct > 0.01) s += 1; else if (pct < -0.01) s -= 1;
-    if (s >= 2) return { direction: 'bull', score: Math.min(3, Math.abs(s)) };
-    if (s <= -2) return { direction: 'bear', score: Math.min(3, Math.abs(s)) };
-    return { direction: 'neutral', score: 0 };
-}
-
-/** Mean reversion strategy: RSI + BB extremes, divergence, streak reversal */
-function meanReversionStrategy(ticks: number[], prices: number[]): { direction: 'bull' | 'bear' | 'neutral'; score: number } {
-    if (prices.length < 20) return { direction: 'neutral', score: 0 };
-    let s = 0;
-    const rsi = calcRSI(prices, 7), bb = calcBBPosition(prices, 14);
-    const stk = priceStreak(prices.slice(-20)), div = detectRSIDivergence(prices);
-    if (rsi < 20) s += 3; else if (rsi < 25) s += 2; else if (rsi < 30) s += 1;
-    if (rsi > 80) s -= 3; else if (rsi > 75) s -= 2; else if (rsi > 70) s -= 1;
-    if (bb < 0.08) s += 2; else if (bb < 0.15) s += 1;
-    if (bb > 0.92) s -= 2; else if (bb > 0.85) s -= 1;
-    if (div.type === 'bull') s += 2;
-    if (div.type === 'bear') s -= 2;
-    if (stk >= 6) s -= 1;  // extended up → expect reversion down
-    if (stk <= -6) s += 1; // extended down → expect reversion up
-    if (s >= 2) return { direction: 'bull', score: Math.min(3, Math.abs(s)) };
-    if (s <= -2) return { direction: 'bear', score: Math.min(3, Math.abs(s)) };
-    return { direction: 'neutral', score: 0 };
-}
-
-/** Pattern strategy: micro patterns + EMA50 trend alignment + momentum confirmation */
-function patternStrategy(ticks: number[], prices: number[]): { direction: 'bull' | 'bear' | 'neutral'; score: number } {
-    if (prices.length < 30) return { direction: 'neutral', score: 0 };
-    let s = 0;
-    const pat = detectMicroPattern(prices);
-    if (pat.type === 'bull') s += pat.strength * 2;
-    if (pat.type === 'bear') s -= pat.strength * 2;
-    if (prices.length >= 55) {
-        const e50 = calcEMA(prices, 50), lp = prices[prices.length - 1], ev = e50[e50.length - 1];
-        if (ev != null) { if (lp > ev) s += 1; else if (lp < ev) s -= 1; }
-    }
-    if (prices.length >= 10) {
-        const sma = prices.slice(-10).reduce((a, b) => a + b, 0) / 10, lp = prices[prices.length - 1];
-        if (lp > sma * 1.001) s += 1; else if (lp < sma * 0.999) s -= 1;
-    }
-    if (s >= 2) return { direction: 'bull', score: Math.min(3, Math.abs(s)) };
-    if (s <= -2) return { direction: 'bear', score: Math.min(3, Math.abs(s)) };
-    return { direction: 'neutral', score: 0 };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SIGNAL ENGINE v3  — Multi-strategy consensus voting
+//  SIGNAL ENGINE  — Only OVER/UNDER and RISE/FALL. No DIGITDIFF.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface TradeSignal {
@@ -332,63 +198,158 @@ export interface TradeSignal {
 }
 
 /**
- * Core analysis function — v3 multi-strategy consensus.
- * Runs three independent strategies (momentum, mean reversion, pattern).
- * Primary: all 3 agree (score >= 2) → strong signal.
- * Fallback: 2/3 agree with score >= 2 and outvote the third.
+ * Core analysis function. Returns the best trade signal or null if nothing
+ * is strong enough. Strategies fire in priority order; the first one that
+ * clears its confidence threshold is returned immediately.
+ *
+ * Minimum history: 30 ticks / 15 prices before any signal fires.
+ *
+ * v2 improvements:
+ *  - Tighter RSI thresholds (25/75 instead of 40/60)
+ *  - Higher entry bar: totalVotes >= 5, voteMargin >= 3
+ *  - Trend direction filter (EMA50) boosts aligned trades
+ *  - EMA21×50 crossover for medium-term momentum
+ *  - Simpler digit strategy: only fires with RSI neutral AND strong convergence
+ *  - Volatility filter skips very quiet markets
+ *  - Reduced streak sensitivity (only >= 5, weight 1 instead of 2)
  */
 export function analyzeSignal(ticks: number[], prices: number[]): TradeSignal | null {
     if (ticks.length < 30 || prices.length < 15) return null;
 
-    // Run three strategies
-    const momentum = momentumStrategy(prices);
-    const meanRev = meanReversionStrategy(ticks, prices);
-    const pattern = patternStrategy(ticks, prices);
+    // ── Volatility / range filter — skip if too quiet ─────────────────────
+    const recentPrices = prices.slice(-20);
+    const pxRange = Math.max(...recentPrices) - Math.min(...recentPrices);
+    const avgPx = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
+    if (avgPx > 0 && (pxRange / avgPx) * 100 < 0.008) return null;
 
-    const strategies = [momentum, meanRev, pattern];
-    const stratNames = ['Mom', 'MRv', 'Ptn'];
+    // ── Digit distributions ────────────────────────────────────────────────
+    const p20  = digitPcts(ticks, 20);
+    const p50  = digitPcts(ticks, 50);
 
-    let bullCount = 0, bearCount = 0;
-    let totalBullScore = 0, totalBearScore = 0;
+    // ── Price indicators ───────────────────────────────────────────────────
+    const rsi    = calcRSI(prices, 7);
+    const bbPos  = calcBBPosition(prices, 14);
+    const streak = priceStreak(prices.slice(-20));
+    const { hist: macdH, prevHist: macdPrev } = calcMACDHistogram(prices);
+    const macdBull = macdH > 0 && macdPrev <= 0;
+    const macdBear = macdH < 0 && macdPrev >= 0;
+
+    // EMA crossovers
+    let ema9Cross = '', ema50Cross = '';
+    if (prices.length >= 22) {
+        const e9 = calcEMA(prices, 9);
+        const e21 = calcEMA(prices, 21);
+        if (e9.length >= 2 && e21.length >= 2) {
+            const l = e9.length - 1;
+            if (e9[l] > e21[l] && e9[l - 1] <= e21[l - 1]) ema9Cross = 'bull';
+            if (e9[l] < e21[l] && e9[l - 1] >= e21[l - 1]) ema9Cross = 'bear';
+        }
+    }
+    if (prices.length >= 55) {
+        const e21 = calcEMA(prices, 21);
+        const e50 = calcEMA(prices, 50);
+        if (e21.length >= 2 && e50.length >= 2) {
+            const l = e21.length - 1;
+            if (e21[l] > e50[l] && e21[l - 1] <= e50[l - 1]) ema50Cross = 'bull';
+            if (e21[l] < e50[l] && e21[l - 1] >= e50[l - 1]) ema50Cross = 'bear';
+        }
+    }
+
+    // ── Trend direction (EMA50, at least 55 prices) ────────────────────────
+    let trendDir = 0; // 1 = bullish, -1 = bearish
+    if (prices.length >= 55) {
+        const e50 = calcEMA(prices, 50);
+        const lastPrice = prices[prices.length - 1];
+        const e50v = e50[e50.length - 1];
+        if (e50v != null) trendDir = lastPrice > e50v ? 1 : (lastPrice < e50v ? -1 : 0);
+    }
+
+    // ── Composite confluence scoring ───────────────────────────────────────
+    let bullVotes = 0, bearVotes = 0;
     const bullReasons: string[] = [], bearReasons: string[] = [];
 
-    strategies.forEach((s, i) => {
-        if (s.direction === 'bull' && s.score >= 2) {
-            bullCount++; totalBullScore += s.score; bullReasons.push(stratNames[i]);
-        }
-        if (s.direction === 'bear' && s.score >= 2) {
-            bearCount++; totalBearScore += s.score; bearReasons.push(stratNames[i]);
-        }
-    });
+    // RSI — tighter thresholds, only strong signals
+    if (rsi < 20)  { bullVotes += 3; bullReasons.push(`RSI ${rsi.toFixed(1)}`); }
+    else if (rsi < 25) { bullVotes += 2; bullReasons.push(`RSI ${rsi.toFixed(1)}`); }
+    if (rsi > 80)  { bearVotes += 3; bearReasons.push(`RSI ${rsi.toFixed(1)}`); }
+    else if (rsi > 75) { bearVotes += 2; bearReasons.push(`RSI ${rsi.toFixed(1)}`); }
 
-    const consensusDisplay = strategies.map((s, i) =>
-        `${stratNames[i]}:${s.direction === 'neutral' ? '—' : s.direction}(${s.score})`
-    ).join(' ');
+    // Bollinger Bands — extreme positions only
+    if (bbPos < 0.08) { bullVotes += 3; bullReasons.push('lower BB'); }
+    else if (bbPos < 0.15) { bullVotes += 2; bullReasons.push('near lower BB'); }
+    if (bbPos > 0.92) { bearVotes += 3; bearReasons.push('upper BB'); }
+    else if (bbPos > 0.85) { bearVotes += 2; bearReasons.push('near upper BB'); }
 
-    // Bull consensus: all 3 agree OR 2/3 agree and outvote the third
-    if (bullCount >= 3 || (bullCount >= 2 && bullCount > bearCount)) {
-        const isUnanimous = bullCount >= 3;
-        const base = isUnanimous ? 78 : 70;
-        const conf = Math.min(95, base + totalBullScore * 3 + (bullCount - 1) * 4);
+    // MACD
+    if (macdBull) { bullVotes += 2; bullReasons.push('MACD bull cross'); }
+    if (macdBear) { bearVotes += 2; bullReasons.push('MACD bear cross'); }
+    if (macdH > 0 && macdH > macdPrev) { bullVotes += 1; bullReasons.push('MACD rising'); }
+    if (macdH < 0 && macdH < macdPrev) { bearVotes += 1; bullReasons.push('MACD falling'); }
+
+    // EMA crossovers
+    if (ema9Cross === 'bull') { bullVotes += 2; bullReasons.push('EMA9×21 bull'); }
+    if (ema9Cross === 'bear') { bearVotes += 2; bullReasons.push('EMA9×21 bear'); }
+    if (ema50Cross === 'bull') { bullVotes += 2; bullReasons.push('EMA21×50 bull'); }
+    if (ema50Cross === 'bear') { bearVotes += 2; bullReasons.push('EMA21×50 bear'); }
+
+    // Momentum streak — only long streaks, reduced weight
+    if (streak >= 5) { bullVotes += 1; bullReasons.push(`${streak}-up streak`); }
+    if (streak <= -5) { bearVotes += 1; bullReasons.push(`${Math.abs(streak)}-dn streak`); }
+
+    // Trend alignment bonus
+    if (trendDir === 1 && bullVotes > 0) { bullVotes += 1; bullReasons.push('uptrend'); }
+    if (trendDir === -1 && bearVotes > 0) { bearVotes += 1; bearReasons.push('downtrend'); }
+
+    // ── RISE / FALL — higher bar ───────────────────────────────────────────
+    const voteMargin = Math.abs(bullVotes - bearVotes);
+    const totalVotes = bullVotes + bearVotes;
+
+    if (bullVotes > bearVotes && totalVotes >= 5 && voteMargin >= 3) {
+        const conf = Math.min(88, 72 + bullVotes * 2 + voteMargin);
         return {
             contract_type: 'CALL', barrier: '',
             confidence: conf,
-            reason: `RISE — ${bullReasons.join(', ')}${isUnanimous ? ' (unanimous)' : ''}`,
-            indicators: consensusDisplay,
+            reason: `RISE — ${bullReasons.join(', ')}`,
+            indicators: bullReasons.join(' | '),
         };
     }
 
-    // Bear consensus
-    if (bearCount >= 3 || (bearCount >= 2 && bearCount > bullCount)) {
-        const isUnanimous = bearCount >= 3;
-        const base = isUnanimous ? 78 : 70;
-        const conf = Math.min(95, base + totalBearScore * 3 + (bearCount - 1) * 4);
+    if (bearVotes > bullVotes && totalVotes >= 5 && voteMargin >= 3) {
+        const conf = Math.min(88, 72 + bearVotes * 2 + voteMargin);
         return {
             contract_type: 'PUT', barrier: '',
             confidence: conf,
-            reason: `FALL — ${bearReasons.join(', ')}${isUnanimous ? ' (unanimous)' : ''}`,
-            indicators: consensusDisplay,
+            reason: `FALL — ${bearReasons.join(', ')}`,
+            indicators: bearReasons.join(' | '),
         };
+    }
+
+    // ── OVER / UNDER — digit-based, only when RSI neutral ─────────────────
+    if (rsi >= 40 && rsi <= 60) {
+        const hi69_20 = p20[6] + p20[7] + p20[8] + p20[9];
+        const hi69_50 = p50[6] + p50[7] + p50[8] + p50[9];
+        const lo03_20 = p20[0] + p20[1] + p20[2] + p20[3];
+        const lo03_50 = p50[0] + p50[1] + p50[2] + p50[3];
+
+        if (hi69_50 > 56 && hi69_20 > 52) {
+            const conf = Math.min(84, 70 + (hi69_50 - 50));
+            return {
+                contract_type: 'DIGITOVER', barrier: '5',
+                confidence: conf,
+                reason: `Digits 6-9: ${hi69_20.toFixed(0)}%/20t · ${hi69_50.toFixed(0)}%/50t — OVER 5`,
+                indicators: 'Digit HIGH + RSI neutral',
+            };
+        }
+
+        if (lo03_50 > 56 && lo03_20 > 52) {
+            const conf = Math.min(84, 70 + (lo03_50 - 50));
+            return {
+                contract_type: 'DIGITUNDER', barrier: '4',
+                confidence: conf,
+                reason: `Digits 0-3: ${lo03_20.toFixed(0)}%/20t · ${lo03_50.toFixed(0)}%/50t — UNDER 4`,
+                indicators: 'Digit LOW + RSI neutral',
+            };
+        }
     }
 
     return null;
