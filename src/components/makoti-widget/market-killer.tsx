@@ -80,10 +80,6 @@ export const MarketKiller: React.FC = () => {
     const consecutiveLossesRef = useRef(0);
     const cooldownTicksRef     = useRef(0);
 
-    // Ref for onTickReceived to avoid stale closure in WS handler
-    const onTickRef = useRef(onTickReceived);
-    onTickRef.current = onTickReceived;
-
     /* ── Persist ──────────────────────────────────────────────────────────── */
     useEffect(() => { saveLogs(logs); }, [logs]);
 
@@ -304,6 +300,10 @@ export const MarketKiller: React.FC = () => {
 
         if (bestSym && bestSig) executeTrade(bestSym, bestSig).catch(() => {});
     }, [executeTrade]);
+
+    // Ref for onTickReceived to avoid stale closure in WS handler
+    const onTickRef = useRef(onTickReceived);
+    onTickRef.current = onTickReceived;
 
     /* ── Start ───────────────────────────────────────────────────────────── */
     const startKiller = useCallback(() => {
