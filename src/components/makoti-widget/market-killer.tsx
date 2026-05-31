@@ -22,7 +22,7 @@ interface LogEntry {
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
-const CONFIDENCE_THRESHOLD   = 78;
+const CONFIDENCE_THRESHOLD   = 72;
 const ALL_CONTRACT_TYPES: ContractType[] = ['CALL', 'PUT', 'DIGITOVER', 'DIGITUNDER', 'DIGITEVEN', 'DIGITODD'];
 
 const LS_LOGS_KEY            = 'mw_mk_logs';

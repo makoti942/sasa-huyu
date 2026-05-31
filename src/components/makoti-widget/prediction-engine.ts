@@ -1167,85 +1167,123 @@ const riseFallStrategies: StrategyModule[] = [
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    OVER/UNDER STRATEGIES
+   All strategies analyze barriers 0-4 for Over and 1-6 for Under.
 ═══════════════════════════════════════════════════════════════════════════════ */
 
-// ── 15. Digit distribution barrier ──────────────────────────────────────────
+const OVER_BARRIERS = [0, 1, 2, 3, 4] as const;
+const UNDER_BARRIERS = [1, 2, 3, 4, 5, 6] as const;
+
+// Helper: score every Over barrier and return best if above threshold
+function bestOverBarrier(pcts: number[], threshold: number, confBase: number, confScale: number): { barrier: string; score: number; conf: number } | null {
+    let best = -1, bestScore = 0;
+    for (const b of OVER_BARRIERS) {
+        const prob = pcts.slice(b + 1).reduce((a, v) => a + v, 0);
+        if (prob > bestScore) { bestScore = prob; best = b; }
+    }
+    if (best < 0 || bestScore < threshold) return null;
+    return { barrier: String(best), score: 2, conf: Math.min(90, confBase + bestScore * confScale) };
+}
+
+// Helper: score every Under barrier and return best if above threshold
+function bestUnderBarrier(pcts: number[], threshold: number, confBase: number, confScale: number): { barrier: string; score: number; conf: number } | null {
+    let best = -1, bestScore = 0;
+    for (const b of UNDER_BARRIERS) {
+        const prob = pcts.slice(0, b).reduce((a, v) => a + v, 0);
+        if (prob > bestScore) { bestScore = prob; best = b; }
+    }
+    if (best < 0 || bestScore < threshold) return null;
+    return { barrier: String(best), score: 2, conf: Math.min(90, confBase + bestScore * confScale) };
+}
+
+// ── 15. Digit distribution barrier — multi-window confirmation ─────────────
 const digitDistBarrier: StrategyModule = {
     name: 'DigitDist',
     run(_prices, ticks) {
-        if (ticks.length < 20) return null;
-        const pcts = digitPcts(ticks, 50);
-        const pctsLong = digitPcts(ticks, 100);
+        if (ticks.length < 30) return null;
+        const pcts30 = digitPcts(ticks, 30);
+        const pcts50 = digitPcts(ticks, 50);
+        const pcts100 = digitPcts(ticks, 100);
 
-        // Find digits that appear least frequently → best barrier for OVER
-        // Find digits that appear most frequently → best barrier for UNDER
-        let bestOverDigit = -1;
-        let bestOverScore = 0;
+        const over = bestOverBarrier(pcts30, 52, 60, 0.5);
+        const under = bestUnderBarrier(pcts30, 52, 60, 0.5);
+        if (!over && !under) return null;
 
-        for (let barrier = 0; barrier <= 8; barrier++) {
-            const overProb = pcts.slice(barrier + 1).reduce((a, b) => a + b, 0);
-            if (overProb > bestOverScore) {
-                bestOverScore = overProb;
-                bestOverDigit = barrier;
-            }
+        // Confirm with longer windows — prefer the one with strongest confirmation
+        let overScore = 0, underScore = 0;
+        if (over) {
+            const conf50 = pcts50.slice(Number(over.barrier) + 1).reduce((a, v) => a + v, 0);
+            const conf100 = pcts100.slice(Number(over.barrier) + 1).reduce((a, v) => a + v, 0);
+            overScore = over.conf * (1 + (conf50 > 50 ? 0.1 : 0) + (conf100 > 50 ? 0.1 : 0));
+        }
+        if (under) {
+            const conf50 = pcts50.slice(0, Number(under.barrier)).reduce((a, v) => a + v, 0);
+            const conf100 = pcts100.slice(0, Number(under.barrier)).reduce((a, v) => a + v, 0);
+            underScore = under.conf * (1 + (conf50 > 50 ? 0.1 : 0) + (conf100 > 50 ? 0.1 : 0));
         }
 
-        let bestUnderDigit = -1;
-        let bestUnderScore = 0;
-        for (let barrier = 1; barrier <= 9; barrier++) {
-            const underProb = pcts.slice(0, barrier).reduce((a, b) => a + b, 0);
-            if (underProb > bestUnderScore) {
-                bestUnderScore = underProb;
-                bestUnderDigit = barrier;
-            }
+        if (overScore >= underScore && over) {
+            return { type: 'DIGITOVER', barrier: over.barrier, score: 2, confidence: Math.round(over.conf), weight: getStrategyWeight(this.name), name: this.name };
         }
-
-        // Long-term confirmation
-        const overProbLong = bestOverDigit >= 0 ? pctsLong.slice(bestOverDigit + 1).reduce((a, b) => a + b, 0) : 0;
-        const underProbLong = bestUnderDigit >= 0 ? pctsLong.slice(0, bestUnderDigit).reduce((a, b) => a + b, 0) : 0;
-
-        // Only trade if distribution is skewed enough
-        if (bestOverScore > 55 && overProbLong > 52) {
-            const conf = Math.min(82, 55 + bestOverScore * 0.4);
-            return { type: 'DIGITOVER', barrier: String(bestOverDigit), score: 2, confidence: conf, weight: getStrategyWeight(this.name), name: this.name };
+        if (under) {
+            return { type: 'DIGITUNDER', barrier: under.barrier, score: 2, confidence: Math.round(under.conf), weight: getStrategyWeight(this.name), name: this.name };
         }
-        if (bestUnderScore > 55 && underProbLong > 52) {
-            const conf = Math.min(82, 55 + bestUnderScore * 0.4);
-            return { type: 'DIGITUNDER', barrier: String(bestUnderDigit), score: 2, confidence: conf, weight: getStrategyWeight(this.name), name: this.name };
+        if (over) {
+            return { type: 'DIGITOVER', barrier: over.barrier, score: 2, confidence: Math.round(over.conf), weight: getStrategyWeight(this.name), name: this.name };
         }
-
         return null;
     },
 };
 
-// ── 16. Standard deviation barrier ──────────────────────────────────────────
+// ── 16. Standard deviation barrier — volatility-aware ──────────────────────
 const stdDevBarrier: StrategyModule = {
     name: 'StdDev',
     run(prices, ticks) {
         if (prices.length < 20 || ticks.length < 20) return null;
-        const recent = prices.slice(-20);
-        const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
-        const variance = recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length;
-        const std = Math.sqrt(variance);
-        const pip = 0.01; // base
-        const stdDigits = Math.round(std / pip);
+
+        const digitMean = ticks.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const digitVar = ticks.slice(-20).reduce((a, b) => a + (b - digitMean) ** 2, 0) / 20;
+        const digitStd = Math.sqrt(digitVar);
 
         const lastDigit = ticks[ticks.length - 1];
-        const digitMean = ticks.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const digitStd = Math.sqrt(ticks.slice(-20).reduce((a, b) => a + (b - digitMean) ** 2, 0) / 20);
+        const recentPrices = prices.slice(-20);
+        const priceMean = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
+        const priceVar = recentPrices.reduce((a, b) => a + (b - priceMean) ** 2, 0) / recentPrices.length;
+        const priceStd = Math.sqrt(priceVar);
+        const normStd = priceStd / (priceMean || 1);
 
-        // If high volatility, use wider barrier
-        const barrierOffset = Math.max(1, Math.round(digitStd));
+        // High volatility → higher barrier offset
+        const offset = Math.min(2, Math.max(0, Math.round(digitStd - 1)));
 
-        if (lastDigit > 5) {
-            const barrier = Math.max(1, lastDigit - barrierOffset);
-            const conf = Math.min(76, 55 + digitStd * 5);
-            return { type: 'DIGITUNDER', barrier: String(barrier), score: 2, confidence: conf, weight: getStrategyWeight(this.name), name: this.name };
+        // Score each barrier in range based on current digit + volatility
+        if (lastDigit >= 5 || normStd > 0.002) {
+            let best = -1, bestScore = 0;
+            for (const b of UNDER_BARRIERS) {
+                const safety = Math.max(0, b - lastDigit) / 6;
+                const volBonus = normStd > 0.002 ? 8 : 0;
+                const score = safety * 50 + volBonus + (lastDigit > 6 && b <= 3 ? 15 : 0);
+                if (score > bestScore) { bestScore = score; best = b; }
+            }
+            if (best >= 0) {
+                const conf = Math.min(86, 65 + bestScore * 0.3);
+                return { type: 'DIGITUNDER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+            }
         } else {
-            const barrier = Math.min(8, lastDigit + barrierOffset);
-            const conf = Math.min(76, 55 + digitStd * 5);
-            return { type: 'DIGITOVER', barrier: String(barrier), score: 2, confidence: conf, weight: getStrategyWeight(this.name), name: this.name };
+            let best = -1, bestScore = 0;
+            for (const b of OVER_BARRIERS) {
+                const distance = b - lastDigit;
+                const upsidePotential = Math.max(0, distance) / 4;
+                const volBonus = normStd > 0.002 ? 8 : 0;
+                const recentHigh = Math.max(...ticks.slice(-10));
+                const highBonus = b >= recentHigh ? 10 : 0;
+                const score = upsidePotential * 40 + volBonus + highBonus;
+                if (score > bestScore) { bestScore = score; best = b; }
+            }
+            if (best >= 0) {
+                const conf = Math.min(86, 65 + bestScore * 0.3);
+                return { type: 'DIGITOVER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+            }
         }
+        return null;
     },
 };
 
@@ -1255,42 +1293,36 @@ const priceLevelDensity: StrategyModule = {
     run(_prices, ticks) {
         if (ticks.length < 30) return null;
         const recent = ticks.slice(-30);
-
-        // Cluster detection — find which digits have the most ticks
         const clusters = Array(10).fill(0);
         recent.forEach(d => { if (d >= 0 && d <= 9) clusters[d]++; });
-        const maxCluster = Math.max(...clusters);
-        const maxDigit = clusters.indexOf(maxCluster);
-        const clusterRatio = maxCluster / recent.length;
+        const expected = recent.length / 10;
 
-        if (clusterRatio > 0.25) {
-            // Strong cluster at this digit → price tends to stay near it
-            const conf = Math.min(72, 55 + clusterRatio * 50);
-            return { type: 'DIGITOVER', barrier: String(maxDigit), score: 2, confidence: conf, weight: getStrategyWeight(this.name), name: this.name };
+        // Find strongest support (most frequent) and weakest resistance (least frequent) within target ranges
+        let bestOverBar = -1, bestOverScore = 0;
+        let bestUnderBar = -1, bestUnderScore = 0;
+
+        for (const b of OVER_BARRIERS) {
+            // Weak digit below barrier means price tends to go OVER
+            const weakBelow = OVER_BARRIERS.filter(x => x <= b).reduce((a, d) => a + (clusters[d] < expected * 0.5 ? 1 : 0), 0);
+            const strongAbove = OVER_BARRIERS.filter(x => x > b).reduce((a, d) => a + (clusters[d] > expected * 1.8 ? 1 : 0), 0);
+            const score = weakBelow * 20 + strongAbove * 15;
+            if (score > bestOverScore) { bestOverScore = score; bestOverBar = b; }
         }
 
-        // S/R levels: find digits with unusually high or low frequency
-        const expected = recent.length / 10;
-        for (let d = 0; d <= 9; d++) {
-            if (clusters[d] > expected * 2.5) {
-                // Strong resistance — price rarely goes above
-                return {
-                    type: 'DIGITUNDER', barrier: String(d),
-                    score: 2, confidence: 68,
-                    weight: getStrategyWeight(this.name), name: this.name,
-                };
-            }
-            if (d > 0 && clusters[d] < expected * 0.3) {
-                // Weak digit — price rarely lands here, good barrier for DIGITOVER
-                const lastDigit = ticks[ticks.length - 1];
-                if (lastDigit > d) {
-                    return {
-                        type: 'DIGITOVER', barrier: String(d),
-                        score: 2, confidence: 66,
-                        weight: getStrategyWeight(this.name), name: this.name,
-                    };
-                }
-            }
+        for (const b of UNDER_BARRIERS) {
+            const strongBelow = UNDER_BARRIERS.filter(x => x < b).reduce((a, d) => a + (clusters[d] > expected * 1.8 ? 1 : 0), 0);
+            const weakAbove = UNDER_BARRIERS.filter(x => x >= b).reduce((a, d) => a + (clusters[d] < expected * 0.5 ? 1 : 0), 0);
+            const score = strongBelow * 20 + weakAbove * 15;
+            if (score > bestUnderScore) { bestUnderScore = score; bestUnderBar = b; }
+        }
+
+        if (bestOverScore >= bestUnderScore && bestOverBar >= 0 && bestOverScore > 15) {
+            const conf = Math.min(84, 68 + bestOverScore * 0.5);
+            return { type: 'DIGITOVER', barrier: String(bestOverBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        if (bestUnderBar >= 0 && bestUnderScore > 15) {
+            const conf = Math.min(84, 68 + bestUnderScore * 0.5);
+            return { type: 'DIGITUNDER', barrier: String(bestUnderBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
 
         return null;
@@ -1307,32 +1339,180 @@ const digitMomentum: StrategyModule = {
         const slope = values.length > 1
             ? (values[values.length - 1] - values[0]) / values.length
             : 0;
+        const last = values[values.length - 1];
 
         if (slope > 0.5) {
-            // Digits rising → value likely to go higher
-            const barrier = Math.min(8, Math.round(values[values.length - 1] + Math.abs(slope)));
-            return {
-                type: 'DIGITOVER', barrier: String(barrier),
-                score: 2, confidence: 65,
-                weight: getStrategyWeight(this.name), name: this.name,
-            };
+            // Rising momentum — prefer Over barrier that accommodates the rise
+            const targetBar = Math.min(OVER_BARRIERS[OVER_BARRIERS.length - 1], Math.round(last + Math.abs(slope)));
+            const bar = OVER_BARRIERS.reduce((best, b) => Math.abs(b - targetBar) < Math.abs(best - targetBar) ? b : best, OVER_BARRIERS[0]);
+            const strength = Math.abs(slope);
+            const streak = ticks.slice(-8).filter((d, i, a) => i === 0 || d >= a[i - 1]).length;
+            const conf = Math.min(84, 62 + strength * 8 + (streak >= 5 ? 8 : 0));
+            return { type: 'DIGITOVER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
         if (slope < -0.5) {
-            // Digits falling
-            const barrier = Math.max(1, Math.round(values[values.length - 1] - Math.abs(slope)));
-            return {
-                type: 'DIGITUNDER', barrier: String(barrier),
-                score: 2, confidence: 65,
-                weight: getStrategyWeight(this.name), name: this.name,
-            };
+            const targetBar = Math.max(UNDER_BARRIERS[0], Math.round(last - Math.abs(slope)));
+            const bar = UNDER_BARRIERS.reduce((best, b) => Math.abs(b - targetBar) < Math.abs(best - targetBar) ? b : best, UNDER_BARRIERS[0]);
+            const strength = Math.abs(slope);
+            const streak = ticks.slice(-8).filter((d, i, a) => i === 0 || d <= a[i - 1]).length;
+            const conf = Math.min(84, 62 + strength * 8 + (streak >= 5 ? 8 : 0));
+            return { type: 'DIGITUNDER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        return null;
+    },
+};
+
+// ── 19. Range frequency shift — detect distribution changes ──────────────────
+const rangeFrequencyShift: StrategyModule = {
+    name: 'RangeFreqShift',
+    run(_prices, ticks) {
+        if (ticks.length < 60) return null;
+        const short = digitPcts(ticks, 20);
+        const long = digitPcts(ticks, 60);
+
+        // Find Over barrier where short-term prob is significantly > long-term prob
+        let bestOverBar = -1, bestOverDelta = 0;
+        for (const b of OVER_BARRIERS) {
+            const shortProb = short.slice(b + 1).reduce((a, v) => a + v, 0);
+            const longProb = long.slice(b + 1).reduce((a, v) => a + v, 0);
+            const delta = shortProb - longProb;
+            if (delta > bestOverDelta) { bestOverDelta = delta; bestOverBar = b; }
         }
 
+        let bestUnderBar = -1, bestUnderDelta = 0;
+        for (const b of UNDER_BARRIERS) {
+            const shortProb = short.slice(0, b).reduce((a, v) => a + v, 0);
+            const longProb = long.slice(0, b).reduce((a, v) => a + v, 0);
+            const delta = shortProb - longProb;
+            if (delta > bestUnderDelta) { bestUnderDelta = delta; bestUnderBar = b; }
+        }
+
+        if (bestOverDelta > 3 && bestOverDelta >= bestUnderDelta && bestOverBar >= 0) {
+            const conf = Math.min(88, 68 + bestOverDelta * 3);
+            return { type: 'DIGITOVER', barrier: String(bestOverBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        if (bestUnderDelta > 3 && bestUnderBar >= 0) {
+            const conf = Math.min(88, 68 + bestUnderDelta * 3);
+            return { type: 'DIGITUNDER', barrier: String(bestUnderBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        return null;
+    },
+};
+
+// ── 20. Consecutive digit run analysis ────────────────────────────────────────
+const consecutiveRun: StrategyModule = {
+    name: 'ConsecutiveRun',
+    run(_prices, ticks) {
+        if (ticks.length < 15) return null;
+        const recent = ticks.slice(-15);
+        let runUp = 0, runDown = 0;
+        for (let i = recent.length - 1; i > 0; i--) {
+            if (recent[i] > recent[i - 1]) runUp++;
+            else if (recent[i] < recent[i - 1]) runDown++;
+            if (runUp >= 4 || runDown >= 4) break;
+        }
+
+        const last = recent[recent.length - 1];
+        if (runUp >= 4 && runUp > runDown * 2) {
+            const bar = UNDER_BARRIERS.reduce((best, b) => Math.abs(b - last) < Math.abs(best - last) ? b : best, UNDER_BARRIERS[0]);
+            const conf = Math.min(85, 68 + runUp * 4);
+            return { type: 'DIGITUNDER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        if (runDown >= 4 && runDown > runUp * 2) {
+            const bar = OVER_BARRIERS.reduce((best, b) => Math.abs(b - last) < Math.abs(best - last) ? b : best, OVER_BARRIERS[0]);
+            const conf = Math.min(85, 68 + runDown * 4);
+            return { type: 'DIGITOVER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        return null;
+    },
+};
+
+// ── 21. Price trend aligned barrier — use overall price movement direction ──
+const trendAlignedBarrier: StrategyModule = {
+    name: 'TrendBarrier',
+    run(prices, ticks) {
+        if (prices.length < 15 || ticks.length < 15) return null;
+        const priceSlice = prices.slice(-15);
+        const trend = priceSlice[priceSlice.length - 1] - priceSlice[0];
+        const absTrend = Math.abs(trend);
+        if (absTrend < 0.001) return null;
+
+        const lastDigit = ticks[ticks.length - 1];
+        const digitPct = digitPcts(ticks, 30);
+
+        if (trend > 0) {
+            // Upward trend — prefer Over
+            let best = -1, bestScore = 0;
+            for (const b of OVER_BARRIERS) {
+                const prob = digitPct.slice(b + 1).reduce((a, v) => a + v, 0);
+                const score = prob + (b <= 2 ? 5 : 0) + (absTrend > 0.005 ? 8 : 0);
+                if (score > bestScore) { bestScore = score; best = b; }
+            }
+            if (best >= 0 && bestScore > 50) {
+                const conf = Math.min(86, 65 + bestScore * 0.3 + Math.min(10, absTrend * 1000));
+                return { type: 'DIGITOVER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+            }
+        } else {
+            let best = -1, bestScore = 0;
+            for (const b of UNDER_BARRIERS) {
+                const prob = digitPct.slice(0, b).reduce((a, v) => a + v, 0);
+                const score = prob + (b >= 4 ? 5 : 0) + (absTrend > 0.005 ? 8 : 0);
+                if (score > bestScore) { bestScore = score; best = b; }
+            }
+            if (best >= 0 && bestScore > 50) {
+                const conf = Math.min(86, 65 + bestScore * 0.3 + Math.min(10, absTrend * 1000));
+                return { type: 'DIGITUNDER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+            }
+        }
+        return null;
+    },
+};
+
+// ── 22. Barrier optimizer — scores every barrier 0-4 Over, 1-6 Under ─────────
+const barrierOptimizer: StrategyModule = {
+    name: 'BarrierOpt',
+    run(_prices, ticks) {
+        if (ticks.length < 25) return null;
+        const pcts = digitPcts(ticks, 40);
+        const last10 = ticks.slice(-10);
+        const recentPcts = digitPcts(ticks, 10);
+
+        // Score each Over barrier
+        let bestOver = -1, bestOverScore2 = 0;
+        for (const b of OVER_BARRIERS) {
+            const histProb = pcts.slice(b + 1).reduce((a, v) => a + v, 0);
+            const recentProb = recentPcts.slice(b + 1).reduce((a, v) => a + v, 0);
+            const momentum = recentProb - histProb;
+            const densityAbove = last10.filter(d => d > b).length / last10.length * 100;
+            const score = histProb * 0.4 + densityAbove * 0.3 + Math.max(0, momentum) * 2;
+            if (score > bestOverScore2) { bestOverScore2 = score; bestOver = b; }
+        }
+
+        let bestUnder = -1, bestUnderScore2 = 0;
+        for (const b of UNDER_BARRIERS) {
+            const histProb = pcts.slice(0, b).reduce((a, v) => a + v, 0);
+            const recentProb = recentPcts.slice(0, b).reduce((a, v) => a + v, 0);
+            const momentum = recentProb - histProb;
+            const densityBelow = last10.filter(d => d < b).length / last10.length * 100;
+            const score = histProb * 0.4 + densityBelow * 0.3 + Math.max(0, momentum) * 2;
+            if (score > bestUnderScore2) { bestUnderScore2 = score; bestUnder = b; }
+        }
+
+        if (bestOverScore2 >= bestUnderScore2 && bestOver >= 0 && bestOverScore2 > 55) {
+            const conf = Math.min(88, 66 + (bestOverScore2 - 55) * 0.6);
+            return { type: 'DIGITOVER', barrier: String(bestOver), score: 3, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
+        if (bestUnder >= 0 && bestUnderScore2 > 55) {
+            const conf = Math.min(88, 66 + (bestUnderScore2 - 55) * 0.6);
+            return { type: 'DIGITUNDER', barrier: String(bestUnder), score: 3, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        }
         return null;
     },
 };
 
 const overUnderStrategies: StrategyModule[] = [
     digitDistBarrier, stdDevBarrier, priceLevelDensity, digitMomentum,
+    rangeFrequencyShift, consecutiveRun, trendAlignedBarrier, barrierOptimizer,
 ];
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -1629,14 +1809,15 @@ export function analyzeSignals(
         if (v.barrier) g.barriers.push(v.barrier);
     }
 
-    // Pick the best group
+    // Pick the best group — use weighted average confidence as primary metric
     let bestGroup: { key: string; data: typeof groups extends Map<string, infer V> ? V : never } | null = null;
     let bestScore = 0;
 
     for (const [key, data] of groups) {
         const avgConf = data.totalWeight > 0 ? data.weightedConf / data.totalWeight : 0;
-        const avgScore = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
-        const groupScore = data.totalWeight * avgConf * avgScore;
+        const voterCount = data.scores.length;
+        // Use avgConf as primary score, small bonus for multi-strategy consensus
+        const groupScore = avgConf + Math.min(3, voterCount * 0.5);
 
         if (groupScore > bestScore) {
             bestScore = groupScore;
