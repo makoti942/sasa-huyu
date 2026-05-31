@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ALL_SYMBOLS, SYMBOL_LABELS, PIP_SIZES, openMakotiWS, MakotiWS, analyzeSignal } from './makoti-ws';
+import { ALL_SYMBOLS, SYMBOL_LABELS, PIP_SIZES, openMakotiWS, MakotiWS } from './makoti-ws';
+import { analyzeSignals, recordOutcome, ContractType } from './prediction-engine';
 import { sendViaNewSystemWithPromise, onNewSystemMessage } from '@/auth/NewDerivAuth';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
+type ContractMode = 'RISE_FALL' | 'OVER_UNDER' | 'EVEN_ODD';
+
 interface SymbolState {
     ticks: number[];
     prices: number[];
@@ -23,7 +26,18 @@ const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
 const CONFIDENCE_THRESHOLD   = 78;
 const LS_LOGS_KEY            = 'mw_mk_logs';
+const LS_CONTRACT_MODE_KEY   = 'mw_mk_contract_mode';
 const MAX_SAVED_LOGS         = 80;
+
+const CONTRACT_OPTIONS: { id: ContractMode; label: string; types: ContractType[] }[] = [
+    { id: 'RISE_FALL',  label: 'Rise/Fall',            types: ['CALL', 'PUT'] },
+    { id: 'OVER_UNDER', label: 'Over/Under (Digits)',   types: ['DIGITOVER', 'DIGITUNDER'] },
+    { id: 'EVEN_ODD',   label: 'Even/Odd (Digits)',     types: ['DIGITEVEN', 'DIGITODD'] },
+];
+
+function getContractTypes(mode: ContractMode): ContractType[] {
+    return CONTRACT_OPTIONS.find(o => o.id === mode)?.types ?? ['CALL', 'PUT'];
+}
 
 function loadSavedLogs(): LogEntry[] {
     try {
@@ -42,9 +56,6 @@ function saveLogs(logs: LogEntry[]) {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MarketKiller
-   ONE trade active at a time globally. The martingale stake is GLOBAL:
-   after any loss the next trade (on any symbol) uses the multiplied stake;
-   after any win the stake resets to base.
 ═══════════════════════════════════════════════════════════════════════════ */
 export const MarketKiller: React.FC = () => {
     const [stake,       setStake]       = useState('0.35');
@@ -55,11 +66,14 @@ export const MarketKiller: React.FC = () => {
     const [pnl,         setPnl]         = useState(0);
     const [logs,        setLogs]        = useState<LogEntry[]>(loadSavedLogs);
     const [activeContracts, setActiveContracts] = useState(0);
+    const [contractMode, setContractMode] = useState<ContractMode>(
+        () => (localStorage.getItem(LS_CONTRACT_MODE_KEY) as ContractMode) || 'RISE_FALL'
+    );
     const [symbolDisplay, setSymbolDisplay] = useState<
         Record<string, { lastSignal: string; wins: number; losses: number; stake: number }>
     >({});
 
-    /* ── Refs (survive re-renders, no lag) ─────────────────────────────── */
+    /* ── Refs ─────────────────────────────────────────────────────────────── */
     const wsRef            = useRef<MakotiWS | null>(null);
     const symbolDataRef    = useRef<Record<string, SymbolState>>({});
     const pnlRef           = useRef(0);
@@ -68,30 +82,24 @@ export const MarketKiller: React.FC = () => {
     const martingaleParsed = useRef(2);
     const tpRef            = useRef(10);
     const slRef            = useRef(5);
+    const contractModeRef  = useRef<ContractMode>('RISE_FALL');
 
-    // Global one-at-a-time lock
     const globalLock         = useRef(false);
     const activeContractsRef = useRef(0);
-
-    // GLOBAL martingale stake — shared across ALL symbols
     const globalStakeRef     = useRef(0.35);
-    const contractMapRef     = useRef<Map<string, { symbol: string; stake: number }>>(new Map());
-
-    // Loss cooldown: after 3 consecutive losses, skip 8 ticks
+    const contractMapRef     = useRef<Map<string, { symbol: string; stake: number; strategyNames: string[] }>>(new Map());
     const consecutiveLossesRef = useRef(0);
     const cooldownTicksRef     = useRef(0);
 
-    /* ── Persist logs to localStorage whenever they change ─────────────── */
-    useEffect(() => {
-        saveLogs(logs);
-    }, [logs]);
+    /* ── Persist ──────────────────────────────────────────────────────────── */
+    useEffect(() => { saveLogs(logs); }, [logs]);
+    useEffect(() => { localStorage.setItem(LS_CONTRACT_MODE_KEY, contractMode); }, [contractMode]);
 
-    /* ── POC listener on the OTP new system WS ────────────────────────── */
+    /* ── POC listener on the OTP new system WS ────────────────────────────── */
     useEffect(() => {
         if (!running) return;
         if (!window._newSystemWS) return;
 
-        // Subscribe to proposal_open_contract on the new system WS
         window._newSystemWS.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
 
         const unsub = onNewSystemMessage((event: MessageEvent) => {
@@ -105,12 +113,16 @@ export const MarketKiller: React.FC = () => {
                 if (!entry) return;
                 contractMapRef.current.delete(cid);
 
-                const { symbol: sym, stake: tradeStake } = entry;
+                const { symbol: sym, stake: tradeStake, strategyNames } = entry;
                 const sd = symbolDataRef.current[sym];
                 if (!sd) return;
 
                 const profit = Number(c.profit);
                 const won = profit >= 0;
+
+                // Record outcome for each strategy that contributed
+                strategyNames.forEach(n => recordOutcome(n, won));
+
                 pnlRef.current += profit;
                 setPnl(pnlRef.current);
 
@@ -124,8 +136,7 @@ export const MarketKiller: React.FC = () => {
                     sd.losses++;
                     consecutiveLossesRef.current++;
                     globalStakeRef.current = Math.min(
-                        Number((tradeStake * martingaleParsed.current).toFixed(2)),
-                        100
+                        Number((tradeStake * martingaleParsed.current).toFixed(2)), 100
                     );
                     if (consecutiveLossesRef.current >= 3) {
                         cooldownTicksRef.current = 8;
@@ -135,11 +146,9 @@ export const MarketKiller: React.FC = () => {
                 }
 
                 flushDisplay(sym);
-
                 globalLock.current = false;
                 activeContractsRef.current = 0;
                 setActiveContracts(0);
-
                 checkLimits();
             } catch (_) {}
         });
@@ -151,10 +160,7 @@ export const MarketKiller: React.FC = () => {
     /* ── Log helper ──────────────────────────────────────────────────────── */
     const addLog = useCallback((msg: string, type: LogEntry['type'] = 'info') => {
         const time = new Date().toLocaleTimeString();
-        setLogs(prev => {
-            const next = [{ time, msg, type }, ...prev].slice(0, 120);
-            return next;
-        });
+        setLogs(prev => [{ time, msg, type }, ...prev].slice(0, 120));
     }, []);
 
     const clearLogs = useCallback(() => {
@@ -162,7 +168,6 @@ export const MarketKiller: React.FC = () => {
         localStorage.removeItem(LS_LOGS_KEY);
     }, []);
 
-    /* ── Flush symbol display state ──────────────────────────────────────── */
     const flushDisplay = useCallback((sym: string) => {
         const sd = symbolDataRef.current[sym];
         if (!sd) return;
@@ -177,7 +182,6 @@ export const MarketKiller: React.FC = () => {
         }));
     }, []);
 
-    /* ── Check TP / SL ───────────────────────────────────────────────────── */
     const checkLimits = useCallback(() => {
         if (pnlRef.current >= tpRef.current) {
             addLog(`✅ Take Profit +$${tpRef.current} reached! P&L: $${pnlRef.current.toFixed(2)}`, 'win');
@@ -193,7 +197,6 @@ export const MarketKiller: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [addLog]);
 
-    /* ── Stop ────────────────────────────────────────────────────────────── */
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const stopKiller = useCallback(() => {
         runningRef.current = false;
@@ -210,26 +213,33 @@ export const MarketKiller: React.FC = () => {
         const sd = symbolDataRef.current[sym];
         if (!sd || sd.ticks.length < MIN_TICKS_BEFORE_TRADE) return;
 
-        const signal = analyzeSignal(sd.ticks, sd.prices);
+        const contractTypes = getContractTypes(contractModeRef.current);
+        const signal = analyzeSignals(sd.ticks, sd.prices, contractTypes);
         if (!signal || signal.confidence < CONFIDENCE_THRESHOLD) return;
 
-        // Micro-trend entry gate: skip if last 3 ticks contradict the trade direction
-        const last3 = sd.prices.slice(-3);
-        if (last3.length === 3) {
-            const rising = last3[0] < last3[1] && last3[1] < last3[2];
-            const falling = last3[0] > last3[1] && last3[1] > last3[2];
-            if (signal.contract_type === 'CALL' && falling) return;
-            if (signal.contract_type === 'PUT' && rising) return;
+        // Micro-trend entry gate (only for Rise/Fall)
+        if (contractModeRef.current === 'RISE_FALL') {
+            const last3 = sd.prices.slice(-3);
+            if (last3.length === 3) {
+                const rising = last3[0] < last3[1] && last3[1] < last3[2];
+                const falling = last3[0] > last3[1] && last3[1] > last3[2];
+                if (signal.contract_type === 'CALL' && falling) return;
+                if (signal.contract_type === 'PUT' && rising) return;
+            }
         }
 
-        // Acquire global lock
         globalLock.current = true;
         activeContractsRef.current = 1;
         setActiveContracts(1);
 
-        const { contract_type, barrier, reason, confidence } = signal;
-        // Use the GLOBAL stake (shared across all symbols — martingale persists across symbols)
+        const { contract_type, barrier, reason, confidence, details } = signal;
         const tradeStake = Number(globalStakeRef.current.toFixed(2));
+
+        // Extract strategy names from details for outcome tracking
+        const strategyMatch = details.match(/Strategies: (.+)/);
+        const strategyNames = strategyMatch
+            ? strategyMatch[1].split(',').map(s => s.trim().split('(')[0])
+            : ['ensemble'];
 
         const params: any = {
             amount: tradeStake, basis: 'stake', currency: 'USD',
@@ -240,15 +250,15 @@ export const MarketKiller: React.FC = () => {
 
         const label = contract_type === 'CALL' ? 'RISE'
             : contract_type === 'PUT' ? 'FALL'
+            : contract_type.startsWith('DIGIT') ? `${contract_type.replace('DIGIT', '')}${barrier ? ' ' + barrier : ''}`
             : `${contract_type}${barrier ? ' ' + barrier : ''}`;
 
-        // Try new system (OTP) WS first — handles both new-auth and legacy users
         if (window._newSystemWS?.readyState === WebSocket.OPEN) {
             try {
                 const response = await sendViaNewSystemWithPromise({ buy: 1, price: tradeStake, parameters: params });
                 const contractId = response?.buy?.contract_id ?? response?.contract_id;
                 if (contractId) {
-                    contractMapRef.current.set(String(contractId), { symbol: sym, stake: tradeStake });
+                    contractMapRef.current.set(String(contractId), { symbol: sym, stake: tradeStake, strategyNames });
                     sd.lastSignal = label;
                     addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
                     addLog(`Contract ${contractId} open on ${SYMBOL_LABELS[sym]}`, 'info');
@@ -266,34 +276,32 @@ export const MarketKiller: React.FC = () => {
                 setActiveContracts(0);
             }
         } else if (wsRef.current?.isOpen()) {
-            // Legacy WS fallback
             wsRef.current.send({ buy: 1, price: tradeStake, parameters: params });
-
             sd.lastSignal = label;
             addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
-            contractMapRef.current.set(sym + Date.now(), { symbol: sym, stake: tradeStake });
+            contractMapRef.current.set(sym + Date.now(), { symbol: sym, stake: tradeStake, strategyNames });
             flushDisplay(sym);
         } else {
-            // Neither WS available — release lock
             globalLock.current = false;
             activeContractsRef.current = 0;
             setActiveContracts(0);
         }
     }, [addLog, flushDisplay]);
 
-    /* ── Handle every incoming tick: scan all symbols, pick best signal ─── */
+    /* ── Handle every incoming tick ──────────────────────────────────────── */
     const onTickReceived = useCallback(() => {
         if (!runningRef.current) return;
         if (globalLock.current)  return;
         if (cooldownTicksRef.current > 0) { cooldownTicksRef.current--; return; }
 
+        const contractTypes = getContractTypes(contractModeRef.current);
         let bestSym  = '';
         let bestConf = CONFIDENCE_THRESHOLD - 1;
 
         ALL_SYMBOLS.forEach(s => {
             const sd = symbolDataRef.current[s];
             if (!sd || sd.ticks.length < MIN_TICKS_BEFORE_TRADE) return;
-            const sig = analyzeSignal(sd.ticks, sd.prices);
+            const sig = analyzeSignals(sd.ticks, sd.prices, contractTypes);
             if (sig && sig.confidence > bestConf) {
                 bestConf = sig.confidence;
                 bestSym  = s;
@@ -317,16 +325,16 @@ export const MarketKiller: React.FC = () => {
         pnlRef.current           = 0;
         globalLock.current       = false;
         activeContractsRef.current = 0;
-        globalStakeRef.current   = stakeVal;   // reset global stake to base
+        globalStakeRef.current   = stakeVal;
         consecutiveLossesRef.current = 0;
         cooldownTicksRef.current     = 0;
+        contractModeRef.current  = contractMode;
 
         setPnl(0);
         setActiveContracts(0);
         setSymbolDisplay({});
         contractMapRef.current = new Map();
 
-        // Initialize per-symbol state (preserve wins/losses if already ran)
         symbolDataRef.current = {};
         ALL_SYMBOLS.forEach(sym => {
             symbolDataRef.current[sym] = {
@@ -338,12 +346,12 @@ export const MarketKiller: React.FC = () => {
         runningRef.current = true;
         setRunning(true);
 
-        addLog(`⚔ Kill Market — stake $${stakeVal}  MG ×${mgVal}  TP $${tpVal}  SL $${slVal}`, 'info');
+        const modeLabel = CONTRACT_OPTIONS.find(o => o.id === contractMode)?.label ?? 'Rise/Fall';
+        addLog(`⚔ Kill Market — ${modeLabel} | stake $${stakeVal}  MG ×${mgVal}  TP $${tpVal}  SL $${slVal}`, 'info');
         addLog('Connecting to Deriv API…', 'info');
 
         if (wsRef.current) { try { wsRef.current.close(); } catch (_) {} wsRef.current = null; }
 
-        /* ── Message handler ────────────────────────────────────────────── */
         const handleMsg = (data: any) => {
             if (!runningRef.current) return;
 
@@ -400,7 +408,7 @@ export const MarketKiller: React.FC = () => {
                         return;
                     }
                     const cid = String(data.buy.contract_id);
-                    contractMapRef.current.set(cid, { symbol: sym, stake: globalStakeRef.current });
+                    contractMapRef.current.set(cid, { symbol: sym, stake: globalStakeRef.current, strategyNames: ['ensemble'] });
                     addLog(`Contract ${cid} open on ${SYMBOL_LABELS[sym]}`, 'info');
                     break;
                 }
@@ -413,12 +421,15 @@ export const MarketKiller: React.FC = () => {
                     if (!entry) return;
                     contractMapRef.current.delete(cid);
 
-                    const { symbol: sym, stake: tradeStake } = entry;
+                    const { symbol: sym, stake: tradeStake, strategyNames } = entry;
                     const sd = symbolDataRef.current[sym];
                     if (!sd) return;
 
                     const profit = Number(c.profit);
                     const won    = profit >= 0;
+
+                    strategyNames.forEach(n => recordOutcome(n, won));
+
                     pnlRef.current += profit;
                     setPnl(pnlRef.current);
 
@@ -432,8 +443,7 @@ export const MarketKiller: React.FC = () => {
                         sd.losses++;
                         consecutiveLossesRef.current++;
                         globalStakeRef.current = Math.min(
-                            Number((tradeStake * martingaleParsed.current).toFixed(2)),
-                            100
+                            Number((tradeStake * martingaleParsed.current).toFixed(2)), 100
                         );
                         if (consecutiveLossesRef.current >= 3) {
                             cooldownTicksRef.current = 8;
@@ -443,23 +453,19 @@ export const MarketKiller: React.FC = () => {
                     }
 
                     flushDisplay(sym);
-
                     globalLock.current = false;
                     activeContractsRef.current = 0;
                     setActiveContracts(0);
-
                     checkLimits();
                     break;
                 }
             }
         };
 
-        /* ── Open WS ─────────────────────────────────────────────────────── */
         const mws = openMakotiWS(
             handleMsg,
             () => {
                 addLog('Connected ✓  Subscribing to all 10 volatilities…', 'info');
-                // Skip POC subscription on legacy WS when the new OTP system handles it
                 if (!window._newSystemWS) {
                     mws.send({ proposal_open_contract: 1, subscribe: 1 });
                 }
@@ -475,7 +481,7 @@ export const MarketKiller: React.FC = () => {
             }
         );
         wsRef.current = mws;
-    }, [stake, martingale, takeProfit, stopLoss, addLog, flushDisplay, checkLimits, stopKiller, onTickReceived]);
+    }, [stake, martingale, takeProfit, stopLoss, contractMode, addLog, flushDisplay, checkLimits, stopKiller, onTickReceived]);
 
     /* ── Derived display values ──────────────────────────────────────────── */
     const totalWins   = Object.values(symbolDisplay).reduce((a, b) => a + b.wins,  0);
@@ -509,6 +515,20 @@ export const MarketKiller: React.FC = () => {
                 </div>
             </div>
 
+            {/* ── Contract type selector ── */}
+            <div className='mw-field'>
+                <label className='mw-label'>Contract Type</label>
+                <select className='mw-select'
+                    value={contractMode}
+                    onChange={e => setContractMode(e.target.value as ContractMode)}
+                    disabled={running}
+                >
+                    {CONTRACT_OPTIONS.map(o => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                </select>
+            </div>
+
             {/* ── Kill Market button ── */}
             <button
                 className={`mw-btn${running ? ' mw-btn--stop' : ' mw-btn--kill'}`}
@@ -519,10 +539,11 @@ export const MarketKiller: React.FC = () => {
                     : '⚔ KILL MARKET'}
             </button>
 
-            {/* ── One-at-a-time notice ── */}
+            {/* ── Running notice ── */}
             {running && (
                 <div className='mw-killer__mode-note'>
-                    Global martingale — next stake applies to any symbol after a loss
+                    {CONTRACT_OPTIONS.find(o => o.id === contractMode)?.label ?? 'Rise/Fall'}
+                    {' — '}24-strategy ensemble engine
                     {activeContracts > 0 && <span className='mw-killer__active-dot'> ● TRADE LIVE</span>}
                 </div>
             )}
