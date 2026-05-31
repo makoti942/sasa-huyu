@@ -22,7 +22,7 @@ interface LogEntry {
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
-const CONFIDENCE_THRESHOLD   = 70;
+const CONFIDENCE_THRESHOLD   = 74;
 const CONTRACT_FAMILIES: { label: string; types: ContractType[] }[] = [
     { label: 'Rise/Fall', types: ['CALL', 'PUT'] },
     { label: 'Over/Under', types: ['DIGITOVER', 'DIGITUNDER'] },

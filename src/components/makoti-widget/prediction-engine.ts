@@ -1496,7 +1496,7 @@ const riseFallStrategies: StrategyModule[] = [
    Confidences reflect true expected value (prob × payout), not raw probability.
 ═══════════════════════════════════════════════════════════════════════════════ */
 
-const OVER_BARRIERS = [0, 2, 3, 4] as const;
+const OVER_BARRIERS = [2, 3, 4] as const;
 const UNDER_BARRIERS = [1, 2, 3, 4, 5, 6] as const;
 
 // Value-based barrier scoring: picks barrier with best prob × payout tradeoff
@@ -1567,7 +1567,7 @@ function findBestValueBarrier(
         }
     }
 
-    if (!bestType || bestScore < 60) return null;
+    if (!bestType || bestScore < 68) return null;
     return { type: bestType, barrier: bestBarrier, confidence: bestConf, score: 2 };
 }
 
@@ -1583,13 +1583,19 @@ const longTermDistribution: StrategyModule = {
         const result = findBestValueBarrier(pctsShort, pctsMed, pctsLong);
         if (!result) return null;
 
-        // Additional filter: recent tick direction must align with barrier direction
+        // Entry timing: recent tick direction must not oppose the trade
         const last5 = ticks.slice(-5);
         const upCount = last5.filter((d, i, a) => i > 0 && d > a[i - 1]).length;
         const downCount = last5.filter((d, i, a) => i > 0 && d < a[i - 1]).length;
 
-        if (result.type === 'DIGITOVER' && downCount > upCount * 2) return null;
-        if (result.type === 'DIGITUNDER' && upCount > downCount * 2) return null;
+        if (result.type === 'DIGITOVER' && downCount >= upCount) return null;
+        if (result.type === 'DIGITUNDER' && upCount >= downCount) return null;
+
+        // Current digit should be near the barrier for best entry
+        const curr = ticks[ticks.length - 1];
+        const barNum = Number(result.barrier);
+        if (result.type === 'DIGITOVER' && curr > barNum + 1) return null;
+        if (result.type === 'DIGITUNDER' && curr < barNum - 1) return null;
 
         return {
             type: result.type,
@@ -1685,33 +1691,26 @@ const timedEntry: StrategyModule = {
         if (!valueResult) return null;
 
         // Timing filter: check recent digit movement
-        const last8 = ticks.slice(-8);
-        const recentDir = last8[last8.length - 1] - last8[0];
-        const last3 = ticks.slice(-3);
-        const immediateDir = last3[last3.length - 1] - last3[0];
-
-        // For Over: want recent trend to be flat-to-rising (not falling hard)
-        // For Under: want recent trend to be flat-to-falling
+        const last5 = ticks.slice(-5);
+        const upCount = last5.filter((d, i, a) => i > 0 && d > a[i - 1]).length;
+        const downCount = last5.filter((d, i, a) => i > 0 && d < a[i - 1]).length;
         const currentDigit = ticks[ticks.length - 1];
         const barrierNum = Number(valueResult.barrier);
 
         let timingOk = false;
         if (valueResult.type === 'DIGITOVER') {
-            // Good entry when digit is near or below barrier and recent direction isn't strongly down
-            timingOk = currentDigit <= barrierNum + 1 && recentDir >= -2;
-            // Or if momentum just turned upward
-            if (!timingOk) timingOk = immediateDir > 1 && currentDigit <= barrierNum + 2;
+            // Need more up ticks than down, and digit should be at or below barrier
+            timingOk = upCount > downCount && currentDigit <= barrierNum + 1;
         } else {
-            timingOk = currentDigit >= barrierNum - 1 && recentDir <= 2;
-            if (!timingOk) timingOk = immediateDir < -1 && currentDigit >= barrierNum - 2;
+            timingOk = downCount > upCount && currentDigit >= barrierNum - 1;
         }
 
         if (!timingOk) return null;
 
-        // Adjust confidence based on timing quality
+        // Bonus for strong alignment
         let timingBonus = 0;
-        if (valueResult.type === 'DIGITOVER' && immediateDir > 1) timingBonus = 4;
-        if (valueResult.type === 'DIGITUNDER' && immediateDir < -1) timingBonus = 4;
+        if (valueResult.type === 'DIGITOVER' && upCount >= 4) timingBonus = 4;
+        if (valueResult.type === 'DIGITUNDER' && downCount >= 4) timingBonus = 4;
 
         const conf = Math.min(86, valueResult.confidence + timingBonus);
         return {
