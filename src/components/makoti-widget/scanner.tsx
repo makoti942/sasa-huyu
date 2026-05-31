@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { ALL_SYMBOLS, SYMBOL_LABELS, PIP_SIZES, openMakotiWS, MakotiWS } from './makoti-ws';
+import { onNewSystemMessage } from '@/auth/NewDerivAuth';
 
 type BotId = 'pvty_kill' | 'rf_v4';
 
@@ -95,16 +96,16 @@ function calcChoppiness(candles: any[]): SymbolDirectionResult {
     };
 }
 
-// ─── Global POC listener ─────────────────────────────────────────────────
+// ─── Global POC listener (survives WS reconnect via onNewSystemMessage) ──
 (window as any).__makoti_lastTradeWon = true;
 
+let _pocUnsub: (() => void) | null = null;
+
 function startPocListener() {
-    const ws = (window as any)._newSystemWS as WebSocket;
-    if (!ws || (ws as any).__makoti_pocAttached) return;
-    (ws as any).__makoti_pocAttached = true;
-    ws.addEventListener('message', (evt: MessageEvent) => {
+    if (_pocUnsub) return;
+    _pocUnsub = onNewSystemMessage((event: MessageEvent) => {
         try {
-            const d = JSON.parse(evt.data);
+            const d = JSON.parse(event.data);
             if (d.msg_type === 'proposal_open_contract' && d.proposal_open_contract?.is_sold) {
                 (window as any).__makoti_lastTradeWon = Number(d.proposal_open_contract.profit) >= 0;
             }
@@ -113,8 +114,10 @@ function startPocListener() {
 }
 
 function stopPocListener() {
-    const ws = (window as any)._newSystemWS as WebSocket;
-    if (ws) (ws as any).__makoti_pocAttached = false;
+    if (_pocUnsub) {
+        _pocUnsub();
+        _pocUnsub = null;
+    }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
