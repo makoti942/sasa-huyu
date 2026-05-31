@@ -286,6 +286,11 @@ export default class TransactionsStore {
             return false;
         });
 
+        // Preserve fields from existing contract entry that POC update may lack
+        const existingContract = same_contract_index !== -1
+            ? this.elements[current_account]?.[same_contract_index]?.data as TContractInfo | undefined
+            : undefined;
+
         let displayCurrency = data.currency;
         let displayTransactionIds = data.transaction_ids;
 
@@ -339,6 +344,7 @@ export default class TransactionsStore {
         }
 
         const contract = {
+            ...existingContract,
             ...data,
             currency: displayCurrency,
             transaction_ids: displayTransactionIds,
@@ -348,7 +354,7 @@ export default class TransactionsStore {
             },
             is_completed,
             run_id,
-            display_name: data.display_name || getMarketName(data.underlying) || data.underlying || '',
+            display_name: data.display_name || existingContract?.display_name || getMarketName(data.underlying || existingContract?.underlying) || data.underlying || existingContract?.underlying || '',
             date_start: data.date_start ? formatDate(data.date_start, 'YYYY-M-D HH:mm:ss [GMT]') : undefined,
             entry_tick: data.entry_tick_display_value || data.entry_tick || data.entry_spot_display_value || data.entry_spot || '',
             entry_tick_time: data.entry_tick_time ? formatDate(data.entry_tick_time, 'YYYY-M-D HH:mm:ss [GMT]') : undefined,
