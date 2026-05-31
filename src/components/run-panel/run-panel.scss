@@ -65,6 +65,8 @@
         flex-direction: column;
         width: 35rem;
         background-color: var(--general-section-2);
+        padding-bottom: 1.6rem;
+        margin-bottom: 0.4rem;
 
         @include mobile-or-tablet-screen {
             margin: 0;
@@ -172,6 +174,7 @@
         justify-content: space-between;
         flex-direction: column;
         overflow: hidden !important;
+        padding-bottom: 0.8rem;
 
         .dc-tabs {
             &__list {
