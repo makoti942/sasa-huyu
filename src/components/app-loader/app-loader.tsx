@@ -1,8 +1,7 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './app-loader.scss';
 
-// Module-level flag: stays true once user clicks play, survives component remount
 let _audioUnlocked = false;
 export function isAudioUnlocked() { return _audioUnlocked; }
 
@@ -13,8 +12,8 @@ interface AppLoaderProps {
 function speak(text: string) {
     return new Promise<void>((resolve) => {
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9;
-        utterance.pitch = 1.1;
+        utterance.rate = 0.8;
+        utterance.pitch = 1.0;
         utterance.volume = 1;
         utterance.onend = () => resolve();
         utterance.onerror = () => resolve();
@@ -22,10 +21,19 @@ function speak(text: string) {
     });
 }
 
+const SUBTITLES = [
+    '> LOADING TRADING MODULES...',
+    '> CALIBRATING STRATEGIES...',
+    '> WARMING UP ENGINES...',
+    '> ALMOST READY...',
+];
+
+const DURATION = 4000;
+
 const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
     const [show, setShow] = useState(true);
     const [soundStarted, setSoundStarted] = useState(_audioUnlocked);
-    const logoText = "MAKOTI TRADERS";
+    const [subIndex, setSubIndex] = useState(-1);
 
     const doSpeak = useCallback(async () => {
         if (_audioUnlocked) return;
@@ -35,13 +43,18 @@ const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
     }, []);
 
     useEffect(() => {
-        const sequenceTimer = setTimeout(() => {
+        const subInterval = setInterval(() => {
+            setSubIndex(prev => Math.min(prev + 1, SUBTITLES.length - 1));
+        }, 900);
+
+        const timer = setTimeout(() => {
             setShow(false);
             onLoadingComplete();
-        }, 4000);
+        }, DURATION);
 
         return () => {
-            clearTimeout(sequenceTimer);
+            clearTimeout(timer);
+            clearInterval(subInterval);
         };
     }, [onLoadingComplete]);
 
@@ -49,31 +62,49 @@ const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
 
     return (
         <div className='gta-loader'>
-            <div className='scene'>
-                <div className='siren-light red'></div>
-                <div className='siren-light blue'></div>
-                <div className='wet-ground'></div>
+            <div className='retro-bg'>
+                <div className='cityscape'></div>
+                <div className='stars'></div>
             </div>
 
             <div className='logo-container'>
-                <h1 className='logo-text'>{logoText}</h1>
+                <h1 className='logo-text'>MAKOTI TRADERS</h1>
+                <div className='logo-sub'>EST. 2024</div>
             </div>
 
-            <p className='subtitle subtitle-1'>&gt; Initializing Trading Matrix...</p>
-            <p className='subtitle subtitle-2'>&gt; Loading Strategies: Martingale, D'Alembert, Oscar's Grind...</p>
-            <p className='subtitle subtitle-3'>&gt; Activating AI Core: Version 2.0</p>
-            <p className='subtitle subtitle-4'>&gt; Real-time Analytics & Reporting</p>
-            <p className='subtitle subtitle-5'>&gt; Welcome, Trader.</p>
+            <div className='track-container'>
+                <div className='track-road'>
+                    <div className='track-lanes'></div>
+                    <div className='track-fill'></div>
+                </div>
+                <div className='checkered-flag'>
+                    <div className='flag-pole'></div>
+                    <div className='flag-banner'></div>
+                </div>
+                <div className='runner'>
+                    <div className='runner__head'></div>
+                    <div className='runner__body'>
+                        <span className='runner__face'>😎</span>
+                    </div>
+                    <div className='runner__leg runner__leg--left'></div>
+                    <div className='runner__leg runner__leg--right'></div>
+                    <div className='runner__arm'></div>
+                </div>
+            </div>
+
+            <div className='subtitle-box'>
+                {subIndex >= 0 && (
+                    <p key={subIndex} className='subtitle'>{SUBTITLES[subIndex]}</p>
+                )}
+            </div>
 
             {!soundStarted && (
-                <button className='sound-unlock-btn' onClick={doSpeak}>
-                    🔊 PLAY SOUND
+                <button className='sound-btn' onClick={doSpeak}>
+                    🔊 PRESS START
                 </button>
             )}
 
-            <div className='film-grain'></div>
-            <div className='vignette'></div>
-            <div className='scanlines'></div>
+            <div className='pixel-overlay'></div>
         </div>
     );
 };
