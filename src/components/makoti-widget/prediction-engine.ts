@@ -2272,6 +2272,37 @@ const ALL_STRATEGIES: StrategyModule[] = [
     ...riseFallStrategies, ...overUnderStrategies, ...evenOddStrategies,
 ];
 
+// ── Auto-flip when a strategy family is consistently losing ──────────────
+function shouldFlipFamily(types: ContractType[]): boolean {
+    const isRF = types.some(t => t === 'CALL' || t === 'PUT');
+    const isOU = types.some(t => t === 'DIGITOVER' || t === 'DIGITUNDER');
+    const isEO = types.some(t => t === 'DIGITEVEN' || t === 'DIGITODD');
+    let totalWins = 0, totalLosses = 0;
+    for (const s of ALL_STRATEGIES) {
+        const matches = (riseFallStrategies.includes(s) && isRF) ||
+                        (overUnderStrategies.includes(s) && isOU) ||
+                        (evenOddStrategies.includes(s) && isEO);
+        if (!matches) continue;
+        const p = strategyPerf[s.name];
+        if (p) { totalWins += p.wins; totalLosses += p.losses; }
+    }
+    const total = totalWins + totalLosses;
+    if (total < 10) return false; // not enough data
+    const rate = totalWins / total;
+    return rate < 0.38; // flip if win rate below 38%
+}
+
+function flipType(t: ContractType): ContractType {
+    switch (t) {
+        case 'CALL':       return 'PUT';
+        case 'PUT':        return 'CALL';
+        case 'DIGITOVER':  return 'DIGITUNDER';
+        case 'DIGITUNDER': return 'DIGITOVER';
+        case 'DIGITEVEN':  return 'DIGITODD';
+        case 'DIGITODD':   return 'DIGITEVEN';
+    }
+}
+
 export function analyzeSignals(
     ticks: number[],
     prices: number[],
@@ -2344,7 +2375,7 @@ export function analyzeSignals(
 
     const { key, data } = bestGroup;
     const avgConf = data.totalWeight > 0 ? data.weightedConf / data.totalWeight : 0;
-    const barrier = data.barriers.length > 0
+    let barrier = data.barriers.length > 0
         ? data.barriers.sort((a, b) => {
             const freqA = data.barriers.filter(x => x === a).length;
             const freqB = data.barriers.filter(x => x === b).length;
@@ -2352,16 +2383,21 @@ export function analyzeSignals(
         })[0]
         : undefined;
 
+    // Auto-flip if this family is consistently losing
+    let contractType = key as ContractType;
+    if (shouldFlipFamily(contractTypes)) {
+        contractType = flipType(contractType);
+        barrier = undefined;
+    }
+
     // Adjust confidence based on regime
     let regimeBonus = 0;
-    if (regime === 'STRONG_BULL' && (key === 'CALL' || key === 'DIGITOVER')) regimeBonus = 5;
-    if (regime === 'STRONG_BEAR' && (key === 'PUT' || key === 'DIGITUNDER')) regimeBonus = 5;
-    if (regime === 'CHOPPY' && (key === 'CALL' || key === 'PUT')) regimeBonus = -3;
-    if (regime === 'CHOPPY' && (key === 'DIGITEVEN' || key === 'DIGITODD')) regimeBonus = 0;
+    if (regime === 'STRONG_BULL' && (contractType === 'CALL' || contractType === 'DIGITOVER')) regimeBonus = 5;
+    if (regime === 'STRONG_BEAR' && (contractType === 'PUT' || contractType === 'DIGITUNDER')) regimeBonus = 5;
+    if (regime === 'CHOPPY' && (contractType === 'CALL' || contractType === 'PUT')) regimeBonus = -3;
+    if (regime === 'CHOPPY' && (contractType === 'DIGITEVEN' || contractType === 'DIGITODD')) regimeBonus = 0;
 
     const finalConfidence = Math.max(CONFIDENCE_FLOOR, Math.min(CONFIDENCE_CEILING, Math.round(avgConf + regimeBonus)));
-
-    const contractType = key as ContractType;
 
     const details = `Regime: ${regime} | Strategies: ${votes.filter(v => v.type === key).map(v => `${v.name}(${v.confidence.toFixed(0)})`).join(', ')}`;
 

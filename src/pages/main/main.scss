@@ -1,13 +1,15 @@
 @use 'components/shared/styles/constants' as *;
 @use 'components/shared/styles/mixins' as *;
 
-// Cool glow pulse animation for active tab
+// Dramatic glow pulse + subtle lift for active tab
 @keyframes tabGlow {
     0%, 100% {
-        box-shadow: 0 0 8px rgba(0, 124, 240, 0.7), 0 0 16px rgba(0, 223, 216, 0.7);
+        box-shadow: 0 0 8px rgba(0, 124, 240, 0.6), 0 0 16px rgba(0, 223, 216, 0.5);
+        transform: scale(1);
     }
     50% {
-        box-shadow: 0 0 14px rgba(0, 124, 240, 0.9), 0 0 28px rgba(0, 223, 216, 0.9), 0 0 40px rgba(0, 124, 240, 0.3);
+        box-shadow: 0 0 20px rgba(0, 124, 240, 0.9), 0 0 40px rgba(0, 223, 216, 0.7), 0 0 60px rgba(0, 124, 240, 0.4);
+        transform: scale(1.04);
     }
 }
 
@@ -96,6 +98,7 @@
                 border-bottom: none !important;
                 overflow: hidden;
                 animation: tabGlow 3s ease-in-out infinite;
+                will-change: transform, box-shadow;
 
                 // active text/icon color - white
                 * {
@@ -1028,6 +1031,7 @@
         border-bottom: none !important;
         overflow: hidden;
         animation: tabGlow 3s ease-in-out infinite;
+        will-change: transform, box-shadow;
         font-family:
             Arial,
             Helvetica,
@@ -1172,6 +1176,7 @@
         border-bottom: none !important;
         overflow: hidden;
         animation: tabGlow 3s ease-in-out infinite;
+        will-change: transform, box-shadow;
 
         span,
         div,
@@ -1236,6 +1241,7 @@ body.theme--dark .dc-tabs__item {
         border-bottom: none !important;
         overflow: hidden;
         animation: tabGlow 3s ease-in-out infinite;
+        will-change: transform, box-shadow;
 
         span,
         div,
