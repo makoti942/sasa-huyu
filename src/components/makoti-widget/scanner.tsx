@@ -39,60 +39,134 @@ function calcDigitPcts(digits: number[]): number[] {
 }
 
 /* ── Deep choppiness analysis ────────────────────────────────────────────── */
+// Analyzes both the line chart (close prices) and candlestick patterns to
+// detect markets that are struggling to find direction — choppy, indecisive,
+// no sustained momentum. Returns a 0–100 choppiness score (higher = more
+// directionless / random).
 function calcChoppiness(candles: any[]): SymbolDirectionResult {
     const lookback = Math.min(50, candles.length);
     const recent = candles.slice(-lookback);
-    const bodyRatios = recent.map(c => {
-        const range = Number(c.high) - Number(c.low);
-        if (range <= 0) return 1;
-        return Math.abs(Number(c.close) - Number(c.open)) / range;
-    });
-    const avgBodyRatio = bodyRatios.reduce((a, b) => a + b, 0) / bodyRatios.length;
-
-    let directionChanges = 0;
-    for (let i = 1; i < recent.length; i++) {
-        const pd = Number(recent[i - 1].close) - Number(recent[i - 1].open);
-        const cd = Number(recent[i].close) - Number(recent[i].open);
-        if ((pd > 0 && cd < 0) || (pd < 0 && cd > 0)) directionChanges++;
-    }
-    const dirChangeRatio = directionChanges / (recent.length - 1);
 
     const closes = recent.map(c => Number(c.close));
-    const indices = closes.map((_, i) => i);
-    const n = indices.length;
-    const sumI = indices.reduce((a, b) => a + b, 0);
-    const sumC = closes.reduce((a, b) => a + b, 0);
-    const sumIC = indices.reduce((a, b, i) => a + b * closes[i], 0);
-    const sumI2 = indices.reduce((a, b) => a + b * b, 0);
-    const sumC2 = closes.reduce((a, b) => a + b * b, 0);
-    const denom = Math.sqrt((n * sumI2 - sumI * sumI) * (n * sumC2 - sumC * sumC));
-    const corr = denom === 0 ? 0 : (n * sumIC - sumI * sumC) / denom;
-    const trendStrength = Math.abs(corr);
+    const opens  = recent.map(c => Number(c.open));
+    const highs  = recent.map(c => Number(c.high));
+    const lows   = recent.map(c => Number(c.low));
 
-    const last3 = candles.slice(-3);
-    const l3br = last3.map(c => {
-        const r = Number(c.high) - Number(c.low);
-        return r <= 0 ? 1 : Math.abs(Number(c.close) - Number(c.open)) / r;
-    });
-    const avgRecentBodyRatio = l3br.reduce((a, b) => a + b, 0) / l3br.length;
+    // ──────────── LINE-CHART (close-price) analysis ─────────────────
 
-    const ranges = recent.map(c => Number(c.high) - Number(c.low));
-    const half = Math.floor(ranges.length / 2);
-    const fha = ranges.slice(0, half).reduce((a, b) => a + b, 0) / half;
-    const sha = ranges.slice(-half).reduce((a, b) => a + b, 0) / half;
-    const rn = fha > 0 ? Math.min(1, sha / fha) : 1;
+    // 1. Direction change frequency — how often does close-to-close flip?
+    let dirChanges = 0;
+    for (let i = 2; i < closes.length; i++) {
+        const d1 = closes[i - 1] - closes[i - 2];
+        const d2 = closes[i]     - closes[i - 1];
+        if (d1 > 0 && d2 < 0) dirChanges++;
+        else if (d1 < 0 && d2 > 0) dirChanges++;
+    }
+    const dirChangeRate = dirChanges / Math.max(1, closes.length - 2);
 
-    const score = Math.min(100,
-        (1 - avgBodyRatio) * 30 + dirChangeRatio * 25 +
-        (1 - trendStrength) * 20 + (1 - avgRecentBodyRatio) * 15 + (1 - rn) * 10);
+    // 2. Average consecutive same-direction run length
+    let runSum = 0, runCount = 0, curRun = 0, curDir = 0;
+    for (let i = 1; i < closes.length; i++) {
+        const diff = closes[i] - closes[i - 1];
+        const d = diff > 0 ? 1 : diff < 0 ? -1 : curDir;
+        if (d === curDir && d !== 0) { curRun++; }
+        else if (d !== 0) {
+            if (curRun > 0) { runSum += curRun; runCount++; }
+            curRun = 1; curDir = d;
+        }
+    }
+    if (curRun > 0) { runSum += curRun; runCount++; }
+    const avgRun = runCount > 0 ? runSum / runCount : 1;
+    const runScore = Math.max(0, 1 - avgRun / 4); // runs of 1–2 = very choppy
+
+    // 3. Mean-reversion crossovers — how often price crosses its 5-period SMA
+    const sma5: number[] = [];
+    for (let i = 0; i < closes.length; i++) {
+        if (i < 4) { sma5.push(closes[i]); continue; }
+        let s = 0; for (let j = i - 4; j <= i; j++) s += closes[j];
+        sma5.push(s / 5);
+    }
+    let crossovers = 0;
+    for (let i = 1; i < closes.length; i++) {
+        if ((closes[i - 1] > sma5[i - 1]) !== (closes[i] > sma5[i])) crossovers++;
+    }
+    const crossoverRate = Math.min(1, crossovers / Math.max(1, closes.length - 1));
+
+    // 4. Lag-1 autocorrelation of returns (low = random walk = choppy)
+    const rets: number[] = [];
+    for (let i = 1; i < closes.length; i++) rets.push(closes[i] - closes[i - 1]);
+    let autoCorr = 0;
+    if (rets.length > 2) {
+        const r1 = rets.slice(0, -1), r2 = rets.slice(1);
+        const m1 = r1.reduce((a, b) => a + b, 0) / r1.length;
+        const m2 = r2.reduce((a, b) => a + b, 0) / r2.length;
+        let num = 0, d1 = 0, d2 = 0;
+        for (let i = 0; i < r1.length; i++) {
+            num += (r1[i] - m1) * (r2[i] - m2);
+            d1  += (r1[i] - m1) ** 2;
+            d2  += (r2[i] - m2) ** 2;
+        }
+        autoCorr = d1 * d2 > 0 ? num / Math.sqrt(d1 * d2) : 0;
+    }
+    const acScore = Math.max(0, 1 - Math.abs(autoCorr));
+
+    // 5. Sideways ratio — % of closes inside the middle 30 % of the range
+    const maxC = Math.max(...closes), minC = Math.min(...closes);
+    const rangeC = maxC - minC || 1;
+    const mid = (maxC + minC) / 2;
+    const band = rangeC * 0.15;
+    const sidewaysPct = closes.filter(c => Math.abs(c - mid) <= band).length / closes.length;
+
+    // ──────────── CANDLESTICK analysis ────────────────────────────
+
+    // 6. Body-to-range ratio (small = indecision)
+    let bodySum = 0, rangeSum = 0, dojiCount = 0;
+    for (let i = 0; i < recent.length; i++) {
+        const body = Math.abs(closes[i] - opens[i]);
+        const r = highs[i] - lows[i] || 1;
+        bodySum += body / r;
+        rangeSum += r;
+        if (body / r < 0.08) dojiCount++;
+    }
+    const avgBodyRatio = bodySum / recent.length;
+    const dojiRatio = dojiCount / recent.length;
+
+    // 7. Wick symmetry — balanced upper/lower = indecision
+    let wickScoreSum = 0;
+    for (let i = 0; i < recent.length; i++) {
+        const upper = highs[i] - Math.max(opens[i], closes[i]);
+        const lower = Math.min(opens[i], closes[i]) - lows[i];
+        const total = upper + lower;
+        if (total > 0) wickScoreSum += 1 - Math.abs(upper - lower) / total;
+        else wickScoreSum += 0.5;
+    }
+    const avgWickSym = wickScoreSum / recent.length; // 1 = perfectly balanced
+
+    // ──────────── Composite score ────────────────────────────────
+    const score = Math.min(100, Math.round(
+        dirChangeRate          * 22 +      // frequent direction flips
+        runScore               * 18 +      // short runs (1–2 candles)
+        crossoverRate          * 15 +      // many SMA crossovers
+        acScore                * 12 +      // low autocorrelation (random)
+        sidewaysPct            * 10 +      // price stuck in middle band
+        (1 - avgBodyRatio)     * 10 +      // small bodies = indecision
+        dojiRatio              *  8 +      // many dojis
+        avgWickSym             *  5        // balanced wicks = stalemate
+    ));
+
+    // enrich the result object
+    const directionChanges = dirChanges;
+    const bodyRatio = Math.round(avgBodyRatio * 100);
+    const trendStrength = Math.round(Math.abs(autoCorr) * 100);
 
     return {
-        symbol: '', label: '', choppinessScore: Math.round(score),
-        bodyRatio: Math.round(avgBodyRatio * 100), directionChanges,
-        trendStrength: Math.round(trendStrength * 100),
-        recentBodyRatio: Math.round(avgRecentBodyRatio * 100),
-        qualifies: true,
-        detail: `Choppy: ${Math.round(score)}% | Body ${Math.round(avgBodyRatio * 100)}% | Δ ${directionChanges}/${lookback - 1} | Trend ${Math.round(trendStrength * 100)}%`,
+        symbol: '', label: '', choppinessScore: score,
+        bodyRatio,
+        directionChanges,
+        trendStrength,
+        recentBodyRatio: Math.round(dojiRatio * 100),
+        qualifies: score >= 55,
+        detail: `Choppy: ${score}% | Runs: ${avgRun.toFixed(1)} | Xovers: ${crossovers} | Dojis: ${dojiCount}/${lookback} | DirΔ: ${dirChanges}`,
     };
 }
 
