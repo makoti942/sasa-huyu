@@ -92,6 +92,11 @@ $mw-radius:   10px;
     &--hidden {
         display: none !important;
     }
+
+    @media (max-width: 600px) {
+        width: 250px;
+        max-height: min(340px, calc(100vh - 80px));
+    }
 }
 
 // ─── MINIMIZED CIRCLE ──────────────────────────────────────────────────────
