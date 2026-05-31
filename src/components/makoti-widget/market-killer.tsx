@@ -22,7 +22,7 @@ interface LogEntry {
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
-const CONFIDENCE_THRESHOLD   = 72;
+const CONFIDENCE_THRESHOLD   = 70;
 const CONTRACT_FAMILIES: { label: string; types: ContractType[] }[] = [
     { label: 'Rise/Fall', types: ['CALL', 'PUT'] },
     { label: 'Over/Under', types: ['DIGITOVER', 'DIGITUNDER'] },
@@ -516,7 +516,7 @@ export const MarketKiller: React.FC = () => {
             {/* ── Running notice ── */}
             {running && (
                 <div className='mw-killer__mode-note'>
-                    Auto (RF + OU + EO) — 45-strategy ensemble engine
+                    Auto (RF + OU + EO) — 40-strategy ensemble engine
                     {activeContracts > 0 && <span className='mw-killer__active-dot'> ● TRADE LIVE</span>}
                 </div>
             )}

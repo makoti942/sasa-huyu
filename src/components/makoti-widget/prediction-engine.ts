@@ -1491,456 +1491,326 @@ const riseFallStrategies: StrategyModule[] = [
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    OVER/UNDER STRATEGIES
-   All strategies analyze barriers 0-4 for Over and 1-6 for Under.
+   Uses 100/200-tick digit percentages (like Deriv's Over/Under tab).
+   Barriers 0-4 for Over, 1-6 for Under.
+   Confidences reflect true expected value (prob × payout), not raw probability.
 ═══════════════════════════════════════════════════════════════════════════════ */
 
 const OVER_BARRIERS = [0, 2, 3, 4] as const;
 const UNDER_BARRIERS = [1, 2, 3, 4, 5, 6] as const;
 
-// Helper: score every Over barrier and return best if above threshold
-function bestOverBarrier(pcts: number[], threshold: number, confBase: number, confScale: number): { barrier: string; score: number; conf: number } | null {
-    let best = -1, bestScore = 0;
+// Value-based barrier scoring: picks barrier with best prob × payout tradeoff
+// Sweet spot: 55-68% probability (decent payout with good win rate)
+function findBestValueBarrier(
+    pctsShort: number[],   // typically 20-30 ticks
+    pctsMedium: number[],  // typically 100 ticks
+    pctsLong: number[],    // typically 200 ticks
+): { type: 'DIGITOVER' | 'DIGITUNDER'; barrier: string; confidence: number; score: number } | null {
+    type Candidate = { barrier: string; probShort: number; probMed: number; probLong: number };
+
+    const overCands: Candidate[] = [];
     for (const b of OVER_BARRIERS) {
-        const prob = pcts.slice(b + 1).reduce((a, v) => a + v, 0);
-        if (prob > bestScore) { bestScore = prob; best = b; }
+        const ps = pctsShort.slice(b + 1).reduce((a, v) => a + v, 0);
+        const pm = pctsMedium.slice(b + 1).reduce((a, v) => a + v, 0);
+        const pl = pctsLong.slice(b + 1).reduce((a, v) => a + v, 0);
+        overCands.push({ barrier: String(b), probShort: ps, probMed: pm, probLong: pl });
     }
-    if (best < 0 || bestScore < threshold) return null;
-    return { barrier: String(best), score: 2, conf: Math.min(90, confBase + bestScore * confScale) };
-}
 
-// Helper: score every Under barrier and return best if above threshold
-function bestUnderBarrier(pcts: number[], threshold: number, confBase: number, confScale: number): { barrier: string; score: number; conf: number } | null {
-    let best = -1, bestScore = 0;
+    const underCands: Candidate[] = [];
     for (const b of UNDER_BARRIERS) {
-        const prob = pcts.slice(0, b).reduce((a, v) => a + v, 0);
-        if (prob > bestScore) { bestScore = prob; best = b; }
+        const ps = pctsShort.slice(0, b).reduce((a, v) => a + v, 0);
+        const pm = pctsMedium.slice(0, b).reduce((a, v) => a + v, 0);
+        const pl = pctsLong.slice(0, b).reduce((a, v) => a + v, 0);
+        underCands.push({ barrier: String(b), probShort: ps, probMed: pm, probLong: pl });
     }
-    if (best < 0 || bestScore < threshold) return null;
-    return { barrier: String(best), score: 2, conf: Math.min(90, confBase + bestScore * confScale) };
+
+    // Score each candidate: penalize high prob (low payout), reward stability across windows
+    function scoreCandidate(c: Candidate): number {
+        // Sweet spot: 55-68% probability gives best value
+        const prob = c.probShort;
+        let valueScore: number;
+        if (prob >= 55 && prob <= 68) valueScore = 100;           // ideal
+        else if (prob >= 50 && prob <= 72) valueScore = 80;       // good
+        else if (prob >= 45 && prob <= 78) valueScore = 60;       // acceptable
+        else if (prob >= 40 && prob <= 82) valueScore = 40;       // marginal
+        else valueScore = 10;                                      // poor value (too risky or too low payout)
+
+        // Stability bonus: all windows agree within 5%
+        const stabilityPenalty = Math.abs(c.probShort - c.probMed) + Math.abs(c.probShort - c.probLong) + Math.abs(c.probMed - c.probLong);
+        const stabilityBonus = Math.max(0, 20 - stabilityPenalty);
+
+        return valueScore + stabilityBonus;
+    }
+
+    let bestType: 'DIGITOVER' | 'DIGITUNDER' | null = null;
+    let bestBarrier = '';
+    let bestScore = 0;
+    let bestConf = 0;
+
+    for (const c of overCands) {
+        const s = scoreCandidate(c);
+        if (s > bestScore) {
+            bestScore = s;
+            bestType = 'DIGITOVER';
+            bestBarrier = c.barrier;
+            // Confidence: base 68 + value score contribution
+            bestConf = Math.min(84, 68 + Math.round((s - 50) * 0.3));
+        }
+    }
+    for (const c of underCands) {
+        const s = scoreCandidate(c);
+        if (s > bestScore) {
+            bestScore = s;
+            bestType = 'DIGITUNDER';
+            bestBarrier = c.barrier;
+            bestConf = Math.min(84, 68 + Math.round((s - 50) * 0.3));
+        }
+    }
+
+    if (!bestType || bestScore < 60) return null;
+    return { type: bestType, barrier: bestBarrier, confidence: bestConf, score: 2 };
 }
 
-// ── 15. Digit distribution barrier — multi-window confirmation ─────────────
-const digitDistBarrier: StrategyModule = {
-    name: 'DigitDist',
+// ── 1. Long-term Digit Distribution (like Deriv's Over/Under tab) ──────────
+const longTermDistribution: StrategyModule = {
+    name: 'LongTermDist',
     run(_prices, ticks) {
-        if (ticks.length < 30) return null;
-        const pcts30 = digitPcts(ticks, 30);
+        if (ticks.length < 120) return null;
+        const pctsShort = digitPcts(ticks, 30);
+        const pctsMed = digitPcts(ticks, 100);
+        const pctsLong = digitPcts(ticks, 200);
+
+        const result = findBestValueBarrier(pctsShort, pctsMed, pctsLong);
+        if (!result) return null;
+
+        // Additional filter: recent tick direction must align with barrier direction
+        const last5 = ticks.slice(-5);
+        const upCount = last5.filter((d, i, a) => i > 0 && d > a[i - 1]).length;
+        const downCount = last5.filter((d, i, a) => i > 0 && d < a[i - 1]).length;
+
+        if (result.type === 'DIGITOVER' && downCount > upCount * 2) return null;
+        if (result.type === 'DIGITUNDER' && upCount > downCount * 2) return null;
+
+        return {
+            type: result.type,
+            barrier: result.barrier,
+            score: result.score,
+            confidence: result.confidence,
+            weight: getStrategyWeight(this.name),
+            name: this.name,
+        };
+    },
+};
+
+// ── 2. Window comparison — short vs medium vs long term alignment ───────────
+const windowAlignment: StrategyModule = {
+    name: 'WinAlign',
+    run(_prices, ticks) {
+        if (ticks.length < 120) return null;
         const pcts50 = digitPcts(ticks, 50);
         const pcts100 = digitPcts(ticks, 100);
+        const pcts200 = digitPcts(ticks, 200);
 
-        const over = bestOverBarrier(pcts30, 52, 60, 0.5);
-        const under = bestUnderBarrier(pcts30, 52, 60, 0.5);
-        if (!over && !under) return null;
+        // Check if all windows agree on Over/Under for a given barrier
+        type Candidate = { barrier: string; probs: number[] };
+        const overCands: Candidate[] = [];
+        for (const b of OVER_BARRIERS) {
+            const p50 = pcts50.slice(b + 1).reduce((a, v) => a + v, 0);
+            const p100 = pcts100.slice(b + 1).reduce((a, v) => a + v, 0);
+            const p200 = pcts200.slice(b + 1).reduce((a, v) => a + v, 0);
+            overCands.push({ barrier: String(b), probs: [p50, p100, p200] });
+        }
+        const underCands: Candidate[] = [];
+        for (const b of UNDER_BARRIERS) {
+            const p50 = pcts50.slice(0, b).reduce((a, v) => a + v, 0);
+            const p100 = pcts100.slice(0, b).reduce((a, v) => a + v, 0);
+            const p200 = pcts200.slice(0, b).reduce((a, v) => a + v, 0);
+            underCands.push({ barrier: String(b), probs: [p50, p100, p200] });
+        }
 
-        // Confirm with longer windows — prefer the one with strongest confirmation
-        let overScore = 0, underScore = 0;
-        if (over) {
-            const conf50 = pcts50.slice(Number(over.barrier) + 1).reduce((a, v) => a + v, 0);
-            const conf100 = pcts100.slice(Number(over.barrier) + 1).reduce((a, v) => a + v, 0);
-            overScore = over.conf * (1 + (conf50 > 50 ? 0.1 : 0) + (conf100 > 50 ? 0.1 : 0));
+        let bestType: 'DIGITOVER' | 'DIGITUNDER' | null = null;
+        let bestBarrier = '';
+        let bestConsensus = 0;
+
+        for (const c of overCands) {
+            const [p50, p100, p200] = c.probs;
+            // All three must be in value range 45-78%
+            if (p50 >= 45 && p50 <= 78 && p100 >= 45 && p100 <= 78 && p200 >= 45 && p200 <= 78) {
+                const spread = Math.max(p50, p100, p200) - Math.min(p50, p100, p200);
+                const consensus = 100 - spread * 2; // lower spread = higher consensus
+                if (consensus > bestConsensus) {
+                    bestConsensus = consensus;
+                    bestType = 'DIGITOVER';
+                    bestBarrier = c.barrier;
+                }
+            }
         }
-        if (under) {
-            const conf50 = pcts50.slice(0, Number(under.barrier)).reduce((a, v) => a + v, 0);
-            const conf100 = pcts100.slice(0, Number(under.barrier)).reduce((a, v) => a + v, 0);
-            underScore = under.conf * (1 + (conf50 > 50 ? 0.1 : 0) + (conf100 > 50 ? 0.1 : 0));
+        for (const c of underCands) {
+            const [p50, p100, p200] = c.probs;
+            if (p50 >= 45 && p50 <= 78 && p100 >= 45 && p100 <= 78 && p200 >= 45 && p200 <= 78) {
+                const spread = Math.max(p50, p100, p200) - Math.min(p50, p100, p200);
+                const consensus = 100 - spread * 2;
+                if (consensus > bestConsensus) {
+                    bestConsensus = consensus;
+                    bestType = 'DIGITUNDER';
+                    bestBarrier = c.barrier;
+                }
+            }
         }
 
-        if (overScore >= underScore && over) {
-            return { type: 'DIGITOVER', barrier: over.barrier, score: 2, confidence: Math.round(over.conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (under) {
-            return { type: 'DIGITUNDER', barrier: under.barrier, score: 2, confidence: Math.round(under.conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (over) {
-            return { type: 'DIGITOVER', barrier: over.barrier, score: 2, confidence: Math.round(over.conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        return null;
+        if (!bestType || bestConsensus < 70) return null;
+        const conf = Math.min(82, 64 + Math.round(bestConsensus * 0.15));
+        return {
+            type: bestType,
+            barrier: bestBarrier,
+            score: 2,
+            confidence: Math.round(conf),
+            weight: getStrategyWeight(this.name),
+            name: this.name,
+        };
     },
 };
 
-// ── 16. Standard deviation barrier — volatility-aware ──────────────────────
-const stdDevBarrier: StrategyModule = {
-    name: 'StdDev',
-    run(prices, ticks) {
-        if (prices.length < 20 || ticks.length < 20) return null;
-
-        const digitMean = ticks.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const digitVar = ticks.slice(-20).reduce((a, b) => a + (b - digitMean) ** 2, 0) / 20;
-        const digitStd = Math.sqrt(digitVar);
-
-        const lastDigit = ticks[ticks.length - 1];
-        const recentPrices = prices.slice(-20);
-        const priceMean = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
-        const priceVar = recentPrices.reduce((a, b) => a + (b - priceMean) ** 2, 0) / recentPrices.length;
-        const priceStd = Math.sqrt(priceVar);
-        const normStd = priceStd / (priceMean || 1);
-
-        // High volatility → higher barrier offset
-        const offset = Math.min(2, Math.max(0, Math.round(digitStd - 1)));
-
-        // Score each barrier in range based on current digit + volatility
-        if (lastDigit >= 5 || normStd > 0.002) {
-            let best = -1, bestScore = 0;
-            for (const b of UNDER_BARRIERS) {
-                const safety = Math.max(0, b - lastDigit) / 6;
-                const volBonus = normStd > 0.002 ? 8 : 0;
-                const score = safety * 50 + volBonus + (lastDigit > 6 && b <= 3 ? 15 : 0);
-                if (score > bestScore) { bestScore = score; best = b; }
-            }
-            if (best >= 0) {
-                const conf = Math.min(86, 65 + bestScore * 0.3);
-                return { type: 'DIGITUNDER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-            }
-        } else {
-            let best = -1, bestScore = 0;
-            for (const b of OVER_BARRIERS) {
-                const distance = b - lastDigit;
-                const upsidePotential = Math.max(0, distance) / 4;
-                const volBonus = normStd > 0.002 ? 8 : 0;
-                const recentHigh = Math.max(...ticks.slice(-10));
-                const highBonus = b >= recentHigh ? 10 : 0;
-                const score = upsidePotential * 40 + volBonus + highBonus;
-                if (score > bestScore) { bestScore = score; best = b; }
-            }
-            if (best >= 0) {
-                const conf = Math.min(86, 65 + bestScore * 0.3);
-                return { type: 'DIGITOVER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-            }
-        }
-        return null;
-    },
-};
-
-// ── 17. Price level density (support/resistance on digit level) ─────────────
-const priceLevelDensity: StrategyModule = {
-    name: 'PriceDensity',
+// ── 3. Timed Entry — combines distribution with recent tick momentum ────────
+const timedEntry: StrategyModule = {
+    name: 'TimedEntry',
     run(_prices, ticks) {
         if (ticks.length < 30) return null;
-        const recent = ticks.slice(-30);
-        const clusters = Array(10).fill(0);
-        recent.forEach(d => { if (d >= 0 && d <= 9) clusters[d]++; });
-        const expected = recent.length / 10;
+        const pcts100 = digitPcts(ticks, 100);
 
-        // Find strongest support (most frequent) and weakest resistance (least frequent) within target ranges
-        let bestOverBar = -1, bestOverScore = 0;
-        let bestUnderBar = -1, bestUnderScore = 0;
+        // Find the best value barrier from long-term distribution
+        const pctsShort = digitPcts(ticks, 15);
+        const pcts200 = ticks.length >= 200 ? digitPcts(ticks, 200) : pcts100;
+        const valueResult = findBestValueBarrier(pctsShort, pcts100, pcts200);
+        if (!valueResult) return null;
 
-        for (const b of OVER_BARRIERS) {
-            // Weak digit below barrier means price tends to go OVER
-            const weakBelow = OVER_BARRIERS.filter(x => x <= b).reduce((a, d) => a + (clusters[d] < expected * 0.5 ? 1 : 0), 0);
-            const strongAbove = OVER_BARRIERS.filter(x => x > b).reduce((a, d) => a + (clusters[d] > expected * 1.8 ? 1 : 0), 0);
-            const score = weakBelow * 20 + strongAbove * 15;
-            if (score > bestOverScore) { bestOverScore = score; bestOverBar = b; }
+        // Timing filter: check recent digit movement
+        const last8 = ticks.slice(-8);
+        const recentDir = last8[last8.length - 1] - last8[0];
+        const last3 = ticks.slice(-3);
+        const immediateDir = last3[last3.length - 1] - last3[0];
+
+        // For Over: want recent trend to be flat-to-rising (not falling hard)
+        // For Under: want recent trend to be flat-to-falling
+        const currentDigit = ticks[ticks.length - 1];
+        const barrierNum = Number(valueResult.barrier);
+
+        let timingOk = false;
+        if (valueResult.type === 'DIGITOVER') {
+            // Good entry when digit is near or below barrier and recent direction isn't strongly down
+            timingOk = currentDigit <= barrierNum + 1 && recentDir >= -2;
+            // Or if momentum just turned upward
+            if (!timingOk) timingOk = immediateDir > 1 && currentDigit <= barrierNum + 2;
+        } else {
+            timingOk = currentDigit >= barrierNum - 1 && recentDir <= 2;
+            if (!timingOk) timingOk = immediateDir < -1 && currentDigit >= barrierNum - 2;
         }
 
-        for (const b of UNDER_BARRIERS) {
-            const strongBelow = UNDER_BARRIERS.filter(x => x < b).reduce((a, d) => a + (clusters[d] > expected * 1.8 ? 1 : 0), 0);
-            const weakAbove = UNDER_BARRIERS.filter(x => x >= b).reduce((a, d) => a + (clusters[d] < expected * 0.5 ? 1 : 0), 0);
-            const score = strongBelow * 20 + weakAbove * 15;
-            if (score > bestUnderScore) { bestUnderScore = score; bestUnderBar = b; }
-        }
+        if (!timingOk) return null;
 
-        if (bestOverScore >= bestUnderScore && bestOverBar >= 0 && bestOverScore > 15) {
-            const conf = Math.min(84, 68 + bestOverScore * 0.5);
-            return { type: 'DIGITOVER', barrier: String(bestOverBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (bestUnderBar >= 0 && bestUnderScore > 15) {
-            const conf = Math.min(84, 68 + bestUnderScore * 0.5);
-            return { type: 'DIGITUNDER', barrier: String(bestUnderBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
+        // Adjust confidence based on timing quality
+        let timingBonus = 0;
+        if (valueResult.type === 'DIGITOVER' && immediateDir > 1) timingBonus = 4;
+        if (valueResult.type === 'DIGITUNDER' && immediateDir < -1) timingBonus = 4;
 
-        return null;
+        const conf = Math.min(86, valueResult.confidence + timingBonus);
+        return {
+            type: valueResult.type,
+            barrier: valueResult.barrier,
+            score: 2,
+            confidence: Math.round(conf),
+            weight: getStrategyWeight(this.name),
+            name: this.name,
+        };
     },
 };
 
-// ── 18. Sequential digit momentum ───────────────────────────────────────────
-const digitMomentum: StrategyModule = {
-    name: 'DigitMomentum',
-    run(_prices, ticks) {
-        if (ticks.length < 10) return null;
-        const last5 = ticks.slice(-5);
-        const values = last5.map(d => d);
-        const slope = values.length > 1
-            ? (values[values.length - 1] - values[0]) / values.length
-            : 0;
-        const last = values[values.length - 1];
-
-        if (slope > 0.5) {
-            // Rising momentum — prefer Over barrier that accommodates the rise
-            const targetBar = Math.min(OVER_BARRIERS[OVER_BARRIERS.length - 1], Math.round(last + Math.abs(slope)));
-            const bar = OVER_BARRIERS.reduce((best, b) => Math.abs(b - targetBar) < Math.abs(best - targetBar) ? b : best, OVER_BARRIERS[0]);
-            const strength = Math.abs(slope);
-            const streak = ticks.slice(-8).filter((d, i, a) => i === 0 || d >= a[i - 1]).length;
-            const conf = Math.min(84, 62 + strength * 8 + (streak >= 5 ? 8 : 0));
-            return { type: 'DIGITOVER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (slope < -0.5) {
-            const targetBar = Math.max(UNDER_BARRIERS[0], Math.round(last - Math.abs(slope)));
-            const bar = UNDER_BARRIERS.reduce((best, b) => Math.abs(b - targetBar) < Math.abs(best - targetBar) ? b : best, UNDER_BARRIERS[0]);
-            const strength = Math.abs(slope);
-            const streak = ticks.slice(-8).filter((d, i, a) => i === 0 || d <= a[i - 1]).length;
-            const conf = Math.min(84, 62 + strength * 8 + (streak >= 5 ? 8 : 0));
-            return { type: 'DIGITUNDER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        return null;
-    },
-};
-
-// ── 19. Range frequency shift — detect distribution changes ──────────────────
-const rangeFrequencyShift: StrategyModule = {
-    name: 'RangeFreqShift',
-    run(_prices, ticks) {
-        if (ticks.length < 60) return null;
-        const short = digitPcts(ticks, 20);
-        const long = digitPcts(ticks, 60);
-
-        // Find Over barrier where short-term prob is significantly > long-term prob
-        let bestOverBar = -1, bestOverDelta = 0;
-        for (const b of OVER_BARRIERS) {
-            const shortProb = short.slice(b + 1).reduce((a, v) => a + v, 0);
-            const longProb = long.slice(b + 1).reduce((a, v) => a + v, 0);
-            const delta = shortProb - longProb;
-            if (delta > bestOverDelta) { bestOverDelta = delta; bestOverBar = b; }
-        }
-
-        let bestUnderBar = -1, bestUnderDelta = 0;
-        for (const b of UNDER_BARRIERS) {
-            const shortProb = short.slice(0, b).reduce((a, v) => a + v, 0);
-            const longProb = long.slice(0, b).reduce((a, v) => a + v, 0);
-            const delta = shortProb - longProb;
-            if (delta > bestUnderDelta) { bestUnderDelta = delta; bestUnderBar = b; }
-        }
-
-        if (bestOverDelta > 3 && bestOverDelta >= bestUnderDelta && bestOverBar >= 0) {
-            const conf = Math.min(88, 68 + bestOverDelta * 3);
-            return { type: 'DIGITOVER', barrier: String(bestOverBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (bestUnderDelta > 3 && bestUnderBar >= 0) {
-            const conf = Math.min(88, 68 + bestUnderDelta * 3);
-            return { type: 'DIGITUNDER', barrier: String(bestUnderBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        return null;
-    },
-};
-
-// ── 20. Consecutive digit run analysis ────────────────────────────────────────
-const consecutiveRun: StrategyModule = {
-    name: 'ConsecutiveRun',
+// ── 4. Digit gap analysis — sudden digit gaps signal direction ─────────────
+const digitGapAnalysis: StrategyModule = {
+    name: 'DigitGap',
     run(_prices, ticks) {
         if (ticks.length < 15) return null;
-        const recent = ticks.slice(-15);
-        let runUp = 0, runDown = 0;
-        for (let i = recent.length - 1; i > 0; i--) {
-            if (recent[i] > recent[i - 1]) runUp++;
-            else if (recent[i] < recent[i - 1]) runDown++;
-            if (runUp >= 4 || runDown >= 4) break;
-        }
-
-        const last = recent[recent.length - 1];
-        if (runUp >= 4 && runUp > runDown * 2) {
-            const bar = UNDER_BARRIERS.reduce((best, b) => Math.abs(b - last) < Math.abs(best - last) ? b : best, UNDER_BARRIERS[0]);
-            const conf = Math.min(85, 68 + runUp * 4);
-            return { type: 'DIGITUNDER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (runDown >= 4 && runDown > runUp * 2) {
-            const bar = OVER_BARRIERS.reduce((best, b) => Math.abs(b - last) < Math.abs(best - last) ? b : best, OVER_BARRIERS[0]);
-            const conf = Math.min(85, 68 + runDown * 4);
-            return { type: 'DIGITOVER', barrier: String(bar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        return null;
-    },
-};
-
-// ── 21. Price trend aligned barrier — use overall price movement direction ──
-const trendAlignedBarrier: StrategyModule = {
-    name: 'TrendBarrier',
-    run(prices, ticks) {
-        if (prices.length < 15 || ticks.length < 15) return null;
-        const priceSlice = prices.slice(-15);
-        const trend = priceSlice[priceSlice.length - 1] - priceSlice[0];
-        const absTrend = Math.abs(trend);
-        if (absTrend < 0.001) return null;
-
-        const lastDigit = ticks[ticks.length - 1];
-        const digitPct = digitPcts(ticks, 30);
-
-        if (trend > 0) {
-            // Upward trend — prefer Over
-            let best = -1, bestScore = 0;
-            for (const b of OVER_BARRIERS) {
-                const prob = digitPct.slice(b + 1).reduce((a, v) => a + v, 0);
-                const score = prob + (b <= 2 ? 5 : 0) + (absTrend > 0.005 ? 8 : 0);
-                if (score > bestScore) { bestScore = score; best = b; }
-            }
-            if (best >= 0 && bestScore > 50) {
-                const conf = Math.min(86, 65 + bestScore * 0.3 + Math.min(10, absTrend * 1000));
-                return { type: 'DIGITOVER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-            }
-        } else {
-            let best = -1, bestScore = 0;
-            for (const b of UNDER_BARRIERS) {
-                const prob = digitPct.slice(0, b).reduce((a, v) => a + v, 0);
-                const score = prob + (b >= 4 ? 5 : 0) + (absTrend > 0.005 ? 8 : 0);
-                if (score > bestScore) { bestScore = score; best = b; }
-            }
-            if (best >= 0 && bestScore > 50) {
-                const conf = Math.min(86, 65 + bestScore * 0.3 + Math.min(10, absTrend * 1000));
-                return { type: 'DIGITUNDER', barrier: String(best), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-            }
-        }
-        return null;
-    },
-};
-
-// ── 22. Barrier optimizer — scores every barrier 0-4 Over, 1-6 Under ─────────
-const barrierOptimizer: StrategyModule = {
-    name: 'BarrierOpt',
-    run(_prices, ticks) {
-        if (ticks.length < 25) return null;
-        const pcts = digitPcts(ticks, 40);
         const last10 = ticks.slice(-10);
-        const recentPcts = digitPcts(ticks, 10);
 
-        // Score each Over barrier
-        let bestOver = -1, bestOverScore2 = 0;
-        for (const b of OVER_BARRIERS) {
-            const histProb = pcts.slice(b + 1).reduce((a, v) => a + v, 0);
-            const recentProb = recentPcts.slice(b + 1).reduce((a, v) => a + v, 0);
-            const momentum = recentProb - histProb;
-            const densityAbove = last10.filter(d => d > b).length / last10.length * 100;
-            const score = histProb * 0.4 + densityAbove * 0.3 + Math.max(0, momentum) * 2;
-            if (score > bestOverScore2) { bestOverScore2 = score; bestOver = b; }
-        }
-
-        let bestUnder = -1, bestUnderScore2 = 0;
-        for (const b of UNDER_BARRIERS) {
-            const histProb = pcts.slice(0, b).reduce((a, v) => a + v, 0);
-            const recentProb = recentPcts.slice(0, b).reduce((a, v) => a + v, 0);
-            const momentum = recentProb - histProb;
-            const densityBelow = last10.filter(d => d < b).length / last10.length * 100;
-            const score = histProb * 0.4 + densityBelow * 0.3 + Math.max(0, momentum) * 2;
-            if (score > bestUnderScore2) { bestUnderScore2 = score; bestUnder = b; }
+        // Detect large single-tick digit jumps (gap of 4+)
+        let maxJump = 0;
+        let jumpDir = 0;
+        for (let i = 1; i < last10.length; i++) {
+            const gap = last10[i] - last10[i - 1];
+            if (Math.abs(gap) > Math.abs(maxJump)) {
+                maxJump = gap;
+                jumpDir = gap > 0 ? 1 : -1;
+            }
         }
 
-        if (bestOverScore2 >= bestUnderScore2 && bestOver >= 0 && bestOverScore2 > 55) {
-            const conf = Math.min(88, 66 + (bestOverScore2 - 55) * 0.6);
-            return { type: 'DIGITOVER', barrier: String(bestOver), score: 3, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        if (Math.abs(maxJump) < 4) return null;
+
+        // A large jump in one direction often means the digit will pull back
+        // (mean reversion on digit level)
+        const lastDigit = last10[last10.length - 1];
+
+        if (jumpDir > 0 && lastDigit <= 5) {
+            // Jumped up but still mid-range → likely to fall back
+            const bar = UNDER_BARRIERS.reduce((best, b) => Math.abs(b - lastDigit) < Math.abs(best - lastDigit) ? b : best, UNDER_BARRIERS[0]);
+            const conf = Math.min(76, 64 + Math.abs(maxJump) * 2);
+            return { type: 'DIGITUNDER', barrier: String(bar), score: 1, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
-        if (bestUnder >= 0 && bestUnderScore2 > 55) {
-            const conf = Math.min(88, 66 + (bestUnderScore2 - 55) * 0.6);
-            return { type: 'DIGITUNDER', barrier: String(bestUnder), score: 3, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
+        if (jumpDir < 0 && lastDigit >= 4) {
+            const bar = OVER_BARRIERS.reduce((best, b) => Math.abs(b - lastDigit) < Math.abs(best - lastDigit) ? b : best, OVER_BARRIERS[0]);
+            const conf = Math.min(76, 64 + Math.abs(maxJump) * 2);
+            return { type: 'DIGITOVER', barrier: String(bar), score: 1, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
+
         return null;
     },
 };
 
-// ── 9. Digit Transition Matrix — Markov chain on digit movements ────────────
-const digitTransition: StrategyModule = {
-    name: 'DigitTransition',
+// ── 5. Digit streak with distribution confirmation ─────────────────────────
+const streakWithDist: StrategyModule = {
+    name: 'StreakDist',
     run(_prices, ticks) {
         if (ticks.length < 40) return null;
-        // Build 10×10 transition matrix: P(digit_i → digit_j)
-        const trans: number[][] = Array.from({ length: 10 }, () => Array(10).fill(0));
-        const counts = Array(10).fill(0);
+        const pcts100 = digitPcts(ticks, 100);
+        const pcts200 = ticks.length >= 200 ? digitPcts(ticks, 200) : pcts100;
 
-        for (let i = 1; i < ticks.length; i++) {
-            const from = ticks[i - 1];
-            const to = ticks[i];
-            if (from >= 0 && from <= 9 && to >= 0 && to <= 9) {
-                trans[from][to]++;
-                counts[from]++;
+        // Find recent streak direction
+        const last10 = ticks.slice(-10);
+        let streakUp = 0, streakDown = 0;
+        for (let i = last10.length - 1; i > 0; i--) {
+            if (last10[i] > last10[i - 1]) streakUp++;
+            else if (last10[i] < last10[i - 1]) streakDown++;
+            else break;
+        }
+
+        if (streakUp < 3 && streakDown < 3) return null;
+
+        const isUpStreak = streakUp > streakDown;
+        const currentDigit = last10[last10.length - 1];
+
+        // Check if the long-term distribution supports a reversal from this streak
+        if (isUpStreak && currentDigit >= 5) {
+            // After rising streak at high digits, check Under probability
+            // Find best Under barrier from distribution
+            let bestBar = -1, bestScore = 0;
+            for (const b of UNDER_BARRIERS) {
+                const prob = pcts100.slice(0, b).reduce((a, v) => a + v, 0);
+                if (prob > bestScore) { bestScore = prob; bestBar = b; }
+            }
+            if (bestBar >= 0 && bestScore >= 45 && bestScore <= 78) {
+                const conf = Math.min(80, 66 + streakUp * 2);
+                return { type: 'DIGITUNDER', barrier: String(bestBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
             }
         }
-
-        const lastDigit = ticks[ticks.length - 1];
-        if (counts[lastDigit] < 3) return null;
-
-        // Compute transition probabilities from current digit
-        const probs = trans[lastDigit].map(c => c / counts[lastDigit]);
-
-        // Score Over barriers based on probability of landing above barrier
-        let bestOver = -1, bestOverScore = 0;
-        for (const b of OVER_BARRIERS) {
-            const above = probs.slice(b + 1).reduce((a, v) => a + v, 0);
-            if (above > bestOverScore) { bestOverScore = above; bestOver = b; }
-        }
-
-        let bestUnder = -1, bestUnderScore = 0;
-        for (const b of UNDER_BARRIERS) {
-            const below = probs.slice(0, b).reduce((a, v) => a + v, 0);
-            if (below > bestUnderScore) { bestUnderScore = below; bestUnder = b; }
-        }
-
-        // Transition matrix confidence: higher when distribution is skewed
-        const entropy = -probs.reduce((a, v) => a + (v > 0 ? v * Math.log2(v) : 0), 0);
-        const maxEntropy = Math.log2(10);
-        const predictability = 1 - entropy / maxEntropy; // 0=random, 1=perfectly predictable
-
-        if (bestOverScore >= bestUnderScore && bestOver >= 0 && bestOverScore > 0.35) {
-            const conf = Math.min(86, 65 + Math.round(bestOverScore * 40 + predictability * 15));
-            return { type: 'DIGITOVER', barrier: String(bestOver), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (bestUnder >= 0 && bestUnderScore > 0.35) {
-            const conf = Math.min(86, 65 + Math.round(bestUnderScore * 40 + predictability * 15));
-            return { type: 'DIGITUNDER', barrier: String(bestUnder), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-
-        return null;
-    },
-};
-
-// ── 10. Digit Entropy Analysis — predictability-based barrier selection ─────
-const digitEntropy: StrategyModule = {
-    name: 'DigitEntropy',
-    run(_prices, ticks) {
-        if (ticks.length < 30) return null;
-        const short = digitPcts(ticks, 20);
-        const long = digitPcts(ticks, 60);
-
-        // Entropy of distributions
-        function calcEntropy(pcts: number[]): number {
-            const total = pcts.reduce((a, v) => a + v, 0) || 1;
-            return -pcts.reduce((a, v) => a + (v / total > 0 ? (v / total) * Math.log2(v / total) : 0), 0);
-        }
-
-        const eShort = calcEntropy(short);
-        const eLong = calcEntropy(long);
-        const maxE = Math.log2(10);
-
-        // Low entropy = concentrated distribution = more predictable
-        // High entropy = uniform distribution = random
-        const predictability = (1 - eShort / maxE) * 100;
-
-        if (predictability < 25) return null; // too random
-
-        // Find barrier with highest probability in short-term that's also above random
-        let bestOver = -1, bestOverScore = 0;
-        for (const b of OVER_BARRIERS) {
-            const prob = short.slice(b + 1).reduce((a, v) => a + v, 0);
-            const longProb = long.slice(b + 1).reduce((a, v) => a + v, 0);
-            if (prob > longProb * 0.9 && prob > bestOverScore) {
-                bestOverScore = prob;
-                bestOver = b;
+        if (!isUpStreak && currentDigit <= 5) {
+            let bestBar = -1, bestScore = 0;
+            for (const b of OVER_BARRIERS) {
+                const prob = pcts100.slice(b + 1).reduce((a, v) => a + v, 0);
+                if (prob > bestScore) { bestScore = prob; bestBar = b; }
             }
-        }
-
-        let bestUnder = -1, bestUnderScore = 0;
-        for (const b of UNDER_BARRIERS) {
-            const prob = short.slice(0, b).reduce((a, v) => a + v, 0);
-            const longProb = long.slice(0, b).reduce((a, v) => a + v, 0);
-            if (prob > longProb * 0.9 && prob > bestUnderScore) {
-                bestUnderScore = prob;
-                bestUnder = b;
+            if (bestBar >= 0 && bestScore >= 45 && bestScore <= 78) {
+                const conf = Math.min(80, 66 + streakDown * 2);
+                return { type: 'DIGITOVER', barrier: String(bestBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
             }
-        }
-
-        if (bestOverScore >= bestUnderScore && bestOver >= 0 && bestOverScore > 50) {
-            const conf = Math.min(84, 60 + Math.round(bestOverScore * 0.3 + predictability * 0.3));
-            return { type: 'DIGITOVER', barrier: String(bestOver), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
-        }
-        if (bestUnder >= 0 && bestUnderScore > 50) {
-            const conf = Math.min(84, 60 + Math.round(bestUnderScore * 0.3 + predictability * 0.3));
-            return { type: 'DIGITUNDER', barrier: String(bestUnder), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
 
         return null;
@@ -1948,9 +1818,7 @@ const digitEntropy: StrategyModule = {
 };
 
 const overUnderStrategies: StrategyModule[] = [
-    digitDistBarrier, stdDevBarrier, priceLevelDensity, digitMomentum,
-    rangeFrequencyShift, consecutiveRun, trendAlignedBarrier, barrierOptimizer,
-    digitTransition, digitEntropy,
+    longTermDistribution, windowAlignment, timedEntry, digitGapAnalysis, streakWithDist,
 ];
 
 /* ═══════════════════════════════════════════════════════════════════════════════
