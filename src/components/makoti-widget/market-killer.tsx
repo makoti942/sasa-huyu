@@ -74,10 +74,12 @@ export const MarketKiller: React.FC = () => {
     const globalLock         = useRef(false);
     const activeContractsRef = useRef(0);
     const globalStakeRef     = useRef(0.35);
-    const contractMapRef     = useRef<Map<string, { symbol: string; stake: number; strategyNames: string[] }>>(new Map());
+    const contractMapRef     = useRef<Map<string, { symbol: string; stake: number; strategyNames: string[]; duration: number }>>(new Map());
     const consecutiveLossesRef = useRef(0);
     const cooldownTicksRef     = useRef(0);
     const signalHistoryRef     = useRef<{ sym: string; type: string; conf: number }[]>([]);
+    const durationStatsRef   = useRef<Record<number, { wins: number; losses: number }>>({ 1: {w:0,l:0}, 2: {w:0,l:0}, 3: {w:0,l:0}, 4: {w:0,l:0}, 5: {w:0,l:0} });
+    const bestDurationRef    = useRef(1);
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
     useEffect(() => { saveLogs(logs); }, [logs]);
@@ -100,7 +102,7 @@ export const MarketKiller: React.FC = () => {
                 if (!entry) return;
                 contractMapRef.current.delete(cid);
 
-                const { symbol: sym, stake: tradeStake, strategyNames } = entry;
+                const { symbol: sym, stake: tradeStake, strategyNames, duration } = entry;
                 const sd = symbolDataRef.current[sym];
                 if (!sd) return;
 
@@ -109,6 +111,12 @@ export const MarketKiller: React.FC = () => {
 
                 // Record outcome for each strategy that contributed
                 strategyNames.forEach(n => recordOutcome(n, won));
+
+                // Track duration performance
+                if (duration >= 1 && duration <= 5) {
+                    const ds = durationStatsRef.current[duration];
+                    if (won) ds.w++; else ds.l++;
+                }
 
                 pnlRef.current += profit;
                 setPnl(pnlRef.current);
@@ -192,6 +200,21 @@ export const MarketKiller: React.FC = () => {
         addLog('Market Killer stopped.', 'info');
     }, [addLog]);
 
+    /* ── Auto-detect best tick duration (1-5) based on recent win rates ──── */
+    const pickBestDuration = useCallback((): number => {
+        const stats = durationStatsRef.current;
+        let bestD = 1, bestRate = 0;
+        for (let d = 1; d <= 5; d++) {
+            const s = stats[d];
+            const total = s.w + s.l;
+            if (total >= 3) {
+                const rate = s.w / total;
+                if (rate > bestRate) { bestRate = rate; bestD = d; }
+            }
+        }
+        return bestD;
+    }, []);
+
     /* ── Execute ONE trade using the global stake ────────────────────────── */
     const executeTrade = useCallback(async (sym: string, signal: TradeSignal) => {
         if (!runningRef.current) return;
@@ -217,6 +240,7 @@ export const MarketKiller: React.FC = () => {
 
         const { contract_type, barrier, reason, confidence, details } = signal;
         const tradeStake = Number(globalStakeRef.current.toFixed(2));
+        const duration   = pickBestDuration();
         addLog(`Trade stake: $${tradeStake.toFixed(2)} (base: $${stakeParsed.current.toFixed(2)}, mg: ${martingaleParsed.current}x)`, 'trade');
 
         // Extract strategy names from details for outcome tracking
@@ -227,7 +251,7 @@ export const MarketKiller: React.FC = () => {
 
         const params: any = {
             amount: tradeStake, basis: 'stake', currency: 'USD',
-            duration: 1, duration_unit: 't',
+            duration, duration_unit: 't',
             symbol: sym, contract_type,
         };
         if (barrier) params.barrier = barrier;
@@ -239,9 +263,9 @@ export const MarketKiller: React.FC = () => {
                 const response = await sendViaNewSystemWithPromise({ buy: 1, price: tradeStake, parameters: params });
                 const contractId = response?.buy?.contract_id ?? response?.contract_id;
                 if (contractId) {
-                    contractMapRef.current.set(String(contractId), { symbol: sym, stake: tradeStake, strategyNames });
+                    contractMapRef.current.set(String(contractId), { symbol: sym, stake: tradeStake, strategyNames, duration });
                     sd.lastSignal = label;
-                    addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
+                    addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} D${duration} @ $${tradeStake} — ${reason}`, 'trade');
                     addLog(`Contract ${contractId} open on ${SYMBOL_LABELS[sym]}`, 'info');
                     flushDisplay(sym);
                 } else {
@@ -259,8 +283,8 @@ export const MarketKiller: React.FC = () => {
         } else if (wsRef.current?.isOpen()) {
             wsRef.current.send({ buy: 1, price: tradeStake, parameters: params });
             sd.lastSignal = label;
-            addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} @ $${tradeStake} — ${reason}`, 'trade');
-            contractMapRef.current.set(sym + Date.now(), { symbol: sym, stake: tradeStake, strategyNames });
+            addLog(`🎯 [${confidence.toFixed(0)}%] ${SYMBOL_LABELS[sym]}: ${label} D${duration} @ $${tradeStake} — ${reason}`, 'trade');
+            contractMapRef.current.set(sym + Date.now(), { symbol: sym, stake: tradeStake, strategyNames, duration });
             flushDisplay(sym);
         } else {
             globalLock.current = false;
@@ -428,7 +452,7 @@ export const MarketKiller: React.FC = () => {
                     if (!entry) return;
                     contractMapRef.current.delete(cid);
 
-                    const { symbol: sym, stake: tradeStake, strategyNames } = entry;
+                    const { symbol: sym, stake: tradeStake, strategyNames, duration } = entry;
                     const sd = symbolDataRef.current[sym];
                     if (!sd) return;
 
@@ -436,6 +460,12 @@ export const MarketKiller: React.FC = () => {
                     const won    = profit >= 0;
 
                     strategyNames.forEach(n => recordOutcome(n, won));
+
+                    // Track duration performance
+                    if (duration >= 1 && duration <= 5) {
+                        const ds = durationStatsRef.current[duration];
+                        if (won) ds.w++; else ds.l++;
+                    }
 
                     pnlRef.current += profit;
                     setPnl(pnlRef.current);
