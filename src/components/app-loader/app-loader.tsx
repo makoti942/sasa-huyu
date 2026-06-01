@@ -1,110 +1,124 @@
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import './app-loader.scss';
-
-let _audioUnlocked = false;
-export function isAudioUnlocked() { return _audioUnlocked; }
 
 interface AppLoaderProps {
     onLoadingComplete: () => void;
-}
-
-function speak(text: string) {
-    return new Promise<void>((resolve) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.8;
-        utterance.pitch = 1.0;
-        utterance.volume = 1;
-        utterance.onend = () => resolve();
-        utterance.onerror = () => resolve();
-        speechSynthesis.speak(utterance);
-    });
+    duration?: number;
 }
 
 const SUBTITLES = [
-    '> LOADING TRADING MODULES...',
-    '> CALIBRATING STRATEGIES...',
-    '> WARMING UP ENGINES...',
-    '> ALMOST READY...',
+    'INITIALIZING PLATFORM',
+    'LOADING MARKET DATA',
+    'CONFIGURING MODULES',
+    'ALMOST READY',
 ];
 
-const DURATION = 6000;
-
-const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete }) => {
+const AppLoader: React.FC<AppLoaderProps> = ({ onLoadingComplete, duration = 5000 }) => {
     const [show, setShow] = useState(true);
-    const [soundStarted, setSoundStarted] = useState(_audioUnlocked);
-    const [subIndex, setSubIndex] = useState(-1);
-
-    const doSpeak = useCallback(async () => {
-        if (_audioUnlocked) return;
-        _audioUnlocked = true;
-        setSoundStarted(true);
-        await speak('WELCOME TO MAKOTI TRADERS');
-    }, []);
+    const [subIndex, setSubIndex] = useState(0);
 
     useEffect(() => {
         const subInterval = setInterval(() => {
             setSubIndex(prev => Math.min(prev + 1, SUBTITLES.length - 1));
-        }, 1200);
+        }, duration / SUBTITLES.length);
 
         const timer = setTimeout(() => {
             setShow(false);
             onLoadingComplete();
-        }, DURATION);
+        }, duration);
 
         return () => {
             clearTimeout(timer);
             clearInterval(subInterval);
         };
-    }, [onLoadingComplete]);
+    }, [onLoadingComplete, duration]);
 
     if (!show) return null;
 
     return (
-        <div className='gta-loader'>
-            <div className='retro-bg'>
-                <div className='cityscape'></div>
-                <div className='stars'></div>
+        <div className='app-loader'>
+            <div className='loader-bg'>
+                <div className='orb orb--1' />
+                <div className='orb orb--2' />
+                <div className='orb orb--3' />
             </div>
 
-            <div className='logo-container'>
-                <h1 className='logo-text'>MAKOTI TRADERS</h1>
-                <div className='logo-sub'>EST. 2024</div>
-            </div>
+            <div className='loader-content'>
+                <motion.div
+                    className='logo-mark'
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+                >
+                    <svg width='48' height='48' viewBox='0 0 48 48' fill='none'>
+                        <defs>
+                            <linearGradient id='logoGrad' x1='0' y1='0' x2='1' y2='1'>
+                                <stop offset='0%' stopColor='#85acb0' />
+                                <stop offset='100%' stopColor='#ffa500' />
+                            </linearGradient>
+                        </defs>
+                        <path
+                            d='M24 2L46 24L24 46L2 24L24 2Z'
+                            stroke='url(#logoGrad)'
+                            strokeWidth='2'
+                            fill='none'
+                        />
+                        <path
+                            d='M24 10L38 24L24 38L10 24L24 10Z'
+                            stroke='url(#logoGrad)'
+                            strokeWidth='1.5'
+                            fill='none'
+                            opacity='0.5'
+                        />
+                        <circle cx='24' cy='24' r='4' fill='#85acb0' />
+                    </svg>
+                </motion.div>
 
-            <div className='track-container'>
-                <div className='track-road'>
-                    <div className='track-lanes'></div>
-                    <div className='track-fill'></div>
-                </div>
-                <div className='checkered-flag'>
-                    <div className='flag-pole'></div>
-                    <div className='flag-banner'></div>
-                </div>
-                <div className='runner'>
-                    <div className='runner__head'></div>
-                    <div className='runner__body'>
-                        <span className='runner__face'>😎</span>
+                <motion.h1
+                    className='loader-title'
+                    initial={{ y: 30, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.6, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                >
+                    MAKOTI TRADERS
+                </motion.h1>
+
+                <motion.p
+                    className='loader-subtitle'
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.6, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                >
+                    TRADING PLATFORM
+                </motion.p>
+
+                <motion.div
+                    className='loader-bar-container'
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.6, delay: 0.55 }}
+                >
+                    <div className='loader-bar'>
+                        <div className='loader-bar-fill' style={{ animationDuration: `${duration}ms` }} />
                     </div>
-                    <div className='runner__leg runner__leg--left'></div>
-                    <div className='runner__leg runner__leg--right'></div>
-                    <div className='runner__arm'></div>
+                </motion.div>
+
+                <div className='loader-status-container'>
+                    <AnimatePresence mode='wait'>
+                        <motion.p
+                            key={subIndex}
+                            className='loader-status'
+                            initial={{ y: 12, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: -12, opacity: 0 }}
+                            transition={{ duration: 0.25 }}
+                        >
+                            {SUBTITLES[subIndex]}
+                        </motion.p>
+                    </AnimatePresence>
                 </div>
             </div>
-
-            <div className='subtitle-box'>
-                {subIndex >= 0 && (
-                    <p key={subIndex} className='subtitle'>{SUBTITLES[subIndex]}</p>
-                )}
-            </div>
-
-            {!soundStarted && (
-                <button className='sound-btn' onClick={doSpeak}>
-                    🔊 PRESS START
-                </button>
-            )}
-
-            <div className='pixel-overlay'></div>
         </div>
     );
 };
