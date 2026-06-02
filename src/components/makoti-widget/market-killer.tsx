@@ -261,15 +261,18 @@ export const MarketKiller: React.FC = () => {
             };
             const label = signal.contract_type === 'CALL' ? 'RISE' : 'FALL';
             addLog(`🤖 [VIRTUAL HOOK] 🔍 Virtual ${label} D${duration} on ${SYMBOL_LABELS[sym]} @ $${entryPrice.toFixed(4)} — tracking ${duration} ticks`, 'info');
+            const vhId = `vh_${sym}_${Date.now()}`;
             try {
                 transactions.onBotContractEvent({
-                    contract_id: `vh_${sym}_${Date.now()}`,
+                    transaction_ids: { buy: vhId },
+                    contract_id: vhId,
                     buy_price: vhStake,
                     currency: 'USD',
                     contract_type: signal.contract_type,
                     underlying: sym,
                     display_name: SYMBOL_LABELS[sym],
                     date_start: Math.floor(Date.now() / 1000),
+                    entry_tick_time: Math.floor(Date.now() / 1000),
                     status: 'open',
                     is_virtual: true,
                 } as any);
@@ -358,6 +361,7 @@ export const MarketKiller: React.FC = () => {
             flushDisplay(sym);
             try {
                 transactions.onBotContractEvent({
+                    transaction_ids: { buy: sym + Date.now() },
                     contract_id: sym + Date.now(),
                     buy_price: tradeStake,
                     currency: 'USD',
@@ -365,6 +369,7 @@ export const MarketKiller: React.FC = () => {
                     underlying: sym,
                     display_name: SYMBOL_LABELS[sym],
                     date_start: Math.floor(Date.now() / 1000),
+                    entry_tick_time: Math.floor(Date.now() / 1000),
                     status: 'open',
                 } as any);
                 run_panel.setHasOpenContract(true);
@@ -395,9 +400,13 @@ export const MarketKiller: React.FC = () => {
                     const label = vt.direction === 'CALL' ? 'RISE' : 'FALL';
                     const vhProfit = won ? vt.stake * 0.95 : -vt.stake;
                     const sellPrice = won ? vt.stake * 1.95 : 0;
+                    const vhResolveId = `vh_${vt.symbol}_${Date.now()}`;
                     try {
+                        const entrySpotStr = vt.entryPrice.toFixed(sd.prices.length > 0 ? (PIP_SIZES[vt.symbol] || 2) : 2);
+                        const exitSpotStr = currentPrice.toFixed(sd.prices.length > 0 ? (PIP_SIZES[vt.symbol] || 2) : 2);
                         transactions.onBotContractEvent({
-                            contract_id: `vh_${vt.symbol}_${Date.now()}`,
+                            transaction_ids: { buy: vhResolveId },
+                            contract_id: vhResolveId,
                             buy_price: vt.stake,
                             sell_price: sellPrice,
                             currency: 'USD',
@@ -406,8 +415,13 @@ export const MarketKiller: React.FC = () => {
                             display_name: SYMBOL_LABELS[vt.symbol],
                             date_start: vt.startTime,
                             date_expiry: Math.floor(Date.now() / 1000),
+                            entry_tick: entrySpotStr,
+                            entry_tick_time: vt.startTime,
+                            exit_tick: exitSpotStr,
+                            exit_tick_time: Math.floor(Date.now() / 1000),
                             profit: vhProfit,
                             is_sold: true,
+                            is_completed: true,
                             status: 'sold',
                             is_virtual: true,
                         } as any);
