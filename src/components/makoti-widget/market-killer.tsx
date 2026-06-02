@@ -94,6 +94,8 @@ export const MarketKiller: React.FC = () => {
         direction: 'CALL' | 'PUT';
         duration: number;
         ticksElapsed: number;
+        stake: number;
+        startTime: number;
     } | null>(null);
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
@@ -247,15 +249,32 @@ export const MarketKiller: React.FC = () => {
             setActiveContracts(1);
             const duration = getBestDuration(sd.prices, signal.contract_type);
             const entryPrice = sd.prices[sd.prices.length - 1];
+            const vhStake = globalStakeRef.current;
             virtualTradeRef.current = {
                 symbol: sym,
                 entryPrice,
                 direction: signal.contract_type,
                 duration,
                 ticksElapsed: 0,
+                stake: vhStake,
+                startTime: Math.floor(Date.now() / 1000),
             };
             const label = signal.contract_type === 'CALL' ? 'RISE' : 'FALL';
             addLog(`🤖 [VIRTUAL HOOK] 🔍 Virtual ${label} D${duration} on ${SYMBOL_LABELS[sym]} @ $${entryPrice.toFixed(4)} — tracking ${duration} ticks`, 'info');
+            try {
+                transactions.onBotContractEvent({
+                    contract_id: `vh_${sym}_${Date.now()}`,
+                    buy_price: vhStake,
+                    currency: 'USD',
+                    contract_type: signal.contract_type,
+                    underlying: sym,
+                    display_name: SYMBOL_LABELS[sym],
+                    date_start: Math.floor(Date.now() / 1000),
+                    status: 'open',
+                    is_virtual: true,
+                } as any);
+                run_panel.setHasOpenContract(true);
+            } catch (_) {}
             signalHistoryRef.current = [];
             return;
         }
@@ -374,6 +393,26 @@ export const MarketKiller: React.FC = () => {
                         ? currentPrice > vt.entryPrice
                         : currentPrice < vt.entryPrice;
                     const label = vt.direction === 'CALL' ? 'RISE' : 'FALL';
+                    const vhProfit = won ? vt.stake * 0.95 : -vt.stake;
+                    const sellPrice = won ? vt.stake * 1.95 : 0;
+                    try {
+                        transactions.onBotContractEvent({
+                            contract_id: `vh_${vt.symbol}_${Date.now()}`,
+                            buy_price: vt.stake,
+                            sell_price: sellPrice,
+                            currency: 'USD',
+                            contract_type: vt.direction,
+                            underlying: vt.symbol,
+                            display_name: SYMBOL_LABELS[vt.symbol],
+                            date_start: vt.startTime,
+                            date_expiry: Math.floor(Date.now() / 1000),
+                            profit: vhProfit,
+                            is_sold: true,
+                            status: 'sold',
+                            is_virtual: true,
+                        } as any);
+                        run_panel.setHasOpenContract(false);
+                    } catch (_) {}
                     if (won) {
                         vhStateRef.current.loss_count = 0;
                         addLog(`🤖 [VIRTUAL HOOK] ✅ Virtual WIN ${label} D${vt.duration} on ${SYMBOL_LABELS[vt.symbol]} — Entry $${vt.entryPrice.toFixed(4)} → Exit $${currentPrice.toFixed(4)}`, 'win');
