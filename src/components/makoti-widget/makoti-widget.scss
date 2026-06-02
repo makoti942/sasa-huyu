@@ -600,6 +600,37 @@ $mw-radius:   10px;
     font-family: monospace;
 }
 
+/* ── Virtual Hook (Market Killer) ── */
+.mw-killer__vh {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.mw-killer__vh-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    color: $mw-text;
+    user-select: none;
+
+    input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        accent-color: $mw-accent;
+        cursor: pointer;
+    }
+}
+
+.mw-killer__vh-threshold {
+    margin-left: 24px;
+}
+
 .mw-killer__mode-note {
     font-size: 10px;
     color: $mw-muted;

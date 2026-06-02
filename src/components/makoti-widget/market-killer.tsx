@@ -56,6 +56,8 @@ export const MarketKiller: React.FC = () => {
     const [martingale,  setMartingale]  = useState('2');
     const [takeProfit,  setTakeProfit]  = useState('10');
     const [stopLoss,    setStopLoss]    = useState('5');
+    const [vhEnabled,   setVhEnabled]   = useState(false);
+    const [vhThreshold, setVhThreshold] = useState('1');
     const [running,     setRunning]     = useState(false);
     const [pnl,         setPnl]         = useState(0);
     const [logs,        setLogs]        = useState<LogEntry[]>(loadSavedLogs);
@@ -81,6 +83,10 @@ export const MarketKiller: React.FC = () => {
     const consecutiveLossesRef = useRef(0);
     const cooldownTicksRef     = useRef(0);
     const signalHistoryRef     = useRef<{ sym: string; type: string; conf: number }[]>([]);
+
+    const vhStateRef = useRef({ enabled: false, threshold: 1, is_virtual: false, loss_count: 0 });
+    const vhEnabledRef = useRef(false);
+    const vhThresholdRef = useRef(1);
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
     useEffect(() => { saveLogs(logs); }, [logs]);
@@ -127,6 +133,11 @@ export const MarketKiller: React.FC = () => {
                     cooldownTicksRef.current = 0;
                     globalStakeRef.current = stakeParsed.current;
                     addLog(`✅ WON +$${profit.toFixed(2)} on ${SYMBOL_LABELS[sym]} | Next stake reset to $${stakeParsed.current.toFixed(2)} | P&L $${pnlRef.current.toFixed(2)}`, 'win');
+                    if (vhStateRef.current.enabled && !vhStateRef.current.is_virtual) {
+                        vhStateRef.current.is_virtual = true;
+                        vhStateRef.current.loss_count = 0;
+                        addLog(`🤖 [VIRTUAL HOOK] 🔄 Real WIN — switching back to VIRTUAL mode`, 'info');
+                    }
                 } else {
                     sd.losses++;
                     consecutiveLossesRef.current++;
@@ -218,6 +229,24 @@ export const MarketKiller: React.FC = () => {
 
         const sd = symbolDataRef.current[sym];
         if (!sd) return;
+
+        // ── Virtual Hook: if in virtual mode, simulate trade instead of buying ──
+        if (vhStateRef.current.enabled && vhStateRef.current.is_virtual) {
+            const vhConfWin = signal.confidence >= 75;
+            if (vhConfWin) {
+                vhStateRef.current.loss_count = 0;
+                addLog(`🤖 [VIRTUAL HOOK] ✅ Simulated WIN on ${SYMBOL_LABELS[sym]} (${signal.contract_type} @ ${signal.confidence.toFixed(0)}%)`, 'win');
+            } else {
+                vhStateRef.current.loss_count++;
+                addLog(`🤖 [VIRTUAL HOOK] ❌ Simulated LOSS #${vhStateRef.current.loss_count}/${vhStateRef.current.threshold} on ${SYMBOL_LABELS[sym]} (${signal.contract_type} @ ${signal.confidence.toFixed(0)}%)`, 'loss');
+                if (vhStateRef.current.loss_count >= vhStateRef.current.threshold) {
+                    vhStateRef.current.is_virtual = false;
+                    addLog(`🤖 [VIRTUAL HOOK] 🔄 THRESHOLD REACHED — Switching to REAL trades`, 'info');
+                }
+            }
+            signalHistoryRef.current = [];
+            return;
+        }
 
         // Micro-trend entry gate: don't trade against the trend
         if (signal.contract_type === 'CALL' || signal.contract_type === 'PUT') {
@@ -396,6 +425,18 @@ export const MarketKiller: React.FC = () => {
         consecutiveLossesRef.current = 0;
         cooldownTicksRef.current     = 0;
 
+        vhEnabledRef.current = vhEnabled;
+        vhThresholdRef.current = Math.max(1, parseInt(vhThreshold) || 1);
+        vhStateRef.current = {
+            enabled: vhEnabled,
+            threshold: vhThresholdRef.current,
+            is_virtual: vhEnabled,
+            loss_count: 0,
+        };
+        if (vhEnabled) {
+            addLog(`🤖 [VIRTUAL HOOK] Enabled — ${vhThresholdRef.current} virtual losses before real trades`, 'info');
+        }
+
         setPnl(0);
         setActiveContracts(0);
         setSymbolDisplay({});
@@ -510,6 +551,11 @@ export const MarketKiller: React.FC = () => {
                         cooldownTicksRef.current = 0;
                         globalStakeRef.current = stakeParsed.current;
                         addLog(`✅ WON +$${profit.toFixed(2)} on ${SYMBOL_LABELS[sym]} | Next stake reset to $${stakeParsed.current.toFixed(2)} | P&L $${pnlRef.current.toFixed(2)}`, 'win');
+                        if (vhStateRef.current.enabled && !vhStateRef.current.is_virtual) {
+                            vhStateRef.current.is_virtual = true;
+                            vhStateRef.current.loss_count = 0;
+                            addLog(`🤖 [VIRTUAL HOOK] 🔄 Real WIN — switching back to VIRTUAL mode`, 'info');
+                        }
                     } else {
                         sd.losses++;
                         consecutiveLossesRef.current++;
@@ -582,6 +628,22 @@ export const MarketKiller: React.FC = () => {
                     <input className='mw-input' type='number' min='0.5' step='0.5'
                         value={stopLoss} onChange={e => setStopLoss(e.target.value)} disabled={running} />
                 </div>
+            </div>
+
+            {/* ── Virtual Hook toggle ── */}
+            <div className='mw-killer__vh'>
+                <label className='mw-killer__vh-toggle'>
+                    <input type='checkbox' checked={vhEnabled}
+                        onChange={e => setVhEnabled(e.target.checked)} disabled={running} />
+                    <span>Virtual Hook</span>
+                </label>
+                {vhEnabled && (
+                    <div className='mw-field mw-killer__vh-threshold'>
+                        <label className='mw-label'>Loss Threshold:</label>
+                        <input className='mw-input' type='number' min='1' step='1'
+                            value={vhThreshold} onChange={e => setVhThreshold(e.target.value)} disabled={running} />
+                    </div>
+                )}
             </div>
 
             {/* ── Kill Market button ── */}
