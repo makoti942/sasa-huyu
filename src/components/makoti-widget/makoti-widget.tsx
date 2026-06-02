@@ -33,7 +33,7 @@ export const MakotiWidget: React.FC = () => {
     const winRef  = useRef<HTMLDivElement>(null);
     const miniRef = useRef<HTMLButtonElement>(null);
 
-    /* ── Shared global pointer handlers (RAF-based for smooth drag) ── */
+    /* ── Shared global pointer handlers (transform-based for GPU-composited drag) ── */
     useEffect(() => {
         let pendingDx = 0, pendingDy = 0;
         let hasPending = false;
@@ -42,29 +42,34 @@ export const MakotiWidget: React.FC = () => {
         const h = window.innerHeight;
         const isMobile = w <= 600;
         const winW = Math.min(isMobile ? 250 : 300, w - PAD * 2);
-        const winH = Math.min(isMobile ? 340 : 420, h - 80);
+
+        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
         const applyDrag = () => {
             rafId.current = null;
+
             if (btnDragging.current && btnRef.current) {
-                const nx = Math.max(PAD, Math.min(w - 72 - PAD, startElem.current.x + pendingDx));
-                const ny = Math.max(PAD, Math.min(h - 72 - PAD, startElem.current.y + pendingDy));
-                btnRef.current.style.left = nx + 'px';
-                btnRef.current.style.top  = ny + 'px';
+                const baseX = startElem.current.x;
+                const baseY = startElem.current.y;
+                const nx = clamp(baseX + pendingDx, PAD, w - 72 - PAD);
+                const ny = clamp(baseY + pendingDy, PAD, h - 72 - PAD);
+                btnRef.current.style.transform = `translate(${nx - baseX}px, ${ny - baseY}px)`;
                 btnPosRef.current = { x: nx, y: ny };
             }
             if (winDragging.current && winRef.current) {
-                const nx = Math.max(PAD, Math.min(w - winW - PAD, startElem.current.x + pendingDx));
-                const ny = Math.max(PAD, Math.min(h - 60,        startElem.current.y + pendingDy));
-                winRef.current.style.left = nx + 'px';
-                winRef.current.style.top  = ny + 'px';
+                const baseX = startElem.current.x;
+                const baseY = startElem.current.y;
+                const nx = clamp(baseX + pendingDx, PAD, w - winW - PAD);
+                const ny = clamp(baseY + pendingDy, PAD, h - 60);
+                winRef.current.style.transform = `translate(${nx - baseX}px, ${ny - baseY}px)`;
                 winPosRef.current = { x: nx, y: ny };
             }
             if (miniDragging.current && miniRef.current) {
-                const nx = Math.max(PAD, Math.min(w - 44 - PAD, startElem.current.x + pendingDx));
-                const ny = Math.max(PAD, Math.min(h - 44 - PAD, startElem.current.y + pendingDy));
-                miniRef.current.style.left = nx + 'px';
-                miniRef.current.style.top  = ny + 'px';
+                const baseX = startElem.current.x;
+                const baseY = startElem.current.y;
+                const nx = clamp(baseX + pendingDx, PAD, w - 44 - PAD);
+                const ny = clamp(baseY + pendingDy, PAD, h - 44 - PAD);
+                miniRef.current.style.transform = `translate(${nx - baseX}px, ${ny - baseY}px)`;
                 winPosRef.current = { x: nx, y: ny };
             }
             hasPending = false;
@@ -87,12 +92,33 @@ export const MakotiWidget: React.FC = () => {
         };
 
         const onUp = () => {
+            const wasBtn  = btnDragging.current;
+            const wasWin  = winDragging.current;
+            const wasMini = miniDragging.current;
+
             btnDragging.current  = false;
             winDragging.current  = false;
             miniDragging.current = false;
+
             if (rafId.current !== null) {
                 cancelAnimationFrame(rafId.current);
                 rafId.current = null;
+            }
+
+            if (wasBtn && btnRef.current) {
+                btnRef.current.style.transform = 'none';
+                btnRef.current.style.left = btnPosRef.current.x + 'px';
+                btnRef.current.style.top  = btnPosRef.current.y + 'px';
+            }
+            if (wasWin && winRef.current) {
+                winRef.current.style.transform = 'none';
+                winRef.current.style.left = winPosRef.current.x + 'px';
+                winRef.current.style.top  = winPosRef.current.y + 'px';
+            }
+            if (wasMini && miniRef.current) {
+                miniRef.current.style.transform = 'none';
+                miniRef.current.style.left = winPosRef.current.x + 'px';
+                miniRef.current.style.top  = winPosRef.current.y + 'px';
             }
         };
 
@@ -132,7 +158,6 @@ export const MakotiWidget: React.FC = () => {
         btnMoved.current    = false;
         startClient.current = { x: e.clientX, y: e.clientY };
         startElem.current   = { ...btnPosRef.current };
-        btnRef.current?.setPointerCapture(e.pointerId);
     };
 
     /* ── FAB click — only toggle if not a drag ────────────── */
@@ -157,7 +182,6 @@ export const MakotiWidget: React.FC = () => {
         winMoved.current    = false;
         startClient.current = { x: e.clientX, y: e.clientY };
         startElem.current   = { ...winPosRef.current };
-        winRef.current?.setPointerCapture(e.pointerId);
     };
 
     /* ── Window initial position (computed inline, no flash) ── */
@@ -254,7 +278,6 @@ export const MakotiWidget: React.FC = () => {
                                 winMoved.current = false;
                                 startClient.current = { x: e.clientX, y: e.clientY };
                                 startElem.current = { ...winPosRef.current };
-                                (e.target as HTMLElement).setPointerCapture(e.pointerId);
                                 e.preventDefault();
                             }}
                             onClick={() => {
