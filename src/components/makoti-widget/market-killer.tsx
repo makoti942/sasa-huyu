@@ -87,6 +87,14 @@ export const MarketKiller: React.FC = () => {
     const vhStateRef = useRef({ enabled: false, threshold: 1, is_virtual: false, loss_count: 0 });
     const vhEnabledRef = useRef(false);
     const vhThresholdRef = useRef(1);
+    const lastTickSymRef = useRef('');
+    const virtualTradeRef = useRef<{
+        symbol: string;
+        entryPrice: number;
+        direction: 'CALL' | 'PUT';
+        duration: number;
+        ticksElapsed: number;
+    } | null>(null);
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
     useEffect(() => { saveLogs(logs); }, [logs]);
@@ -206,6 +214,8 @@ export const MarketKiller: React.FC = () => {
     const stopKiller = useCallback(() => {
         runningRef.current = false;
         globalLock.current = false;
+        virtualTradeRef.current = null;
+        lastTickSymRef.current = '';
         setRunning(false);
         try { wsRef.current?.close(); } catch (_) {}
         wsRef.current = null;
@@ -230,20 +240,22 @@ export const MarketKiller: React.FC = () => {
         const sd = symbolDataRef.current[sym];
         if (!sd) return;
 
-        // ── Virtual Hook: if in virtual mode, simulate trade instead of buying ──
+        // ── Virtual Hook: track the EXACT same trade over its duration ──
         if (vhStateRef.current.enabled && vhStateRef.current.is_virtual) {
-            const vhConfWin = signal.confidence >= 75;
-            if (vhConfWin) {
-                vhStateRef.current.loss_count = 0;
-                addLog(`🤖 [VIRTUAL HOOK] ✅ Simulated WIN on ${SYMBOL_LABELS[sym]} (${signal.contract_type} @ ${signal.confidence.toFixed(0)}%)`, 'win');
-            } else {
-                vhStateRef.current.loss_count++;
-                addLog(`🤖 [VIRTUAL HOOK] ❌ Simulated LOSS #${vhStateRef.current.loss_count}/${vhStateRef.current.threshold} on ${SYMBOL_LABELS[sym]} (${signal.contract_type} @ ${signal.confidence.toFixed(0)}%)`, 'loss');
-                if (vhStateRef.current.loss_count >= vhStateRef.current.threshold) {
-                    vhStateRef.current.is_virtual = false;
-                    addLog(`🤖 [VIRTUAL HOOK] 🔄 THRESHOLD REACHED — Switching to REAL trades`, 'info');
-                }
-            }
+            globalLock.current = true;
+            activeContractsRef.current = 1;
+            setActiveContracts(1);
+            const duration = getBestDuration(sd.prices, signal.contract_type);
+            const entryPrice = sd.prices[sd.prices.length - 1];
+            virtualTradeRef.current = {
+                symbol: sym,
+                entryPrice,
+                direction: signal.contract_type,
+                duration,
+                ticksElapsed: 0,
+            };
+            const label = signal.contract_type === 'CALL' ? 'RISE' : 'FALL';
+            addLog(`🤖 [VIRTUAL HOOK] 🔍 Virtual ${label} D${duration} on ${SYMBOL_LABELS[sym]} @ $${entryPrice.toFixed(4)} — tracking ${duration} ticks`, 'info');
             signalHistoryRef.current = [];
             return;
         }
@@ -348,6 +360,41 @@ export const MarketKiller: React.FC = () => {
     /* ── Handle every incoming tick ──────────────────────────────────────── */
     const onTickReceived = useCallback(() => {
         if (!runningRef.current) return;
+
+        // ── Virtual trade resolution (process before globalLock check) ──
+        if (virtualTradeRef.current) {
+            const vt = virtualTradeRef.current;
+            if (lastTickSymRef.current !== vt.symbol) return; // only advance on matching symbol
+            const sd = symbolDataRef.current[vt.symbol];
+            if (sd) {
+                vt.ticksElapsed++;
+                if (vt.ticksElapsed >= vt.duration) {
+                    const currentPrice = sd.prices[sd.prices.length - 1];
+                    const won = vt.direction === 'CALL'
+                        ? currentPrice > vt.entryPrice
+                        : currentPrice < vt.entryPrice;
+                    const label = vt.direction === 'CALL' ? 'RISE' : 'FALL';
+                    if (won) {
+                        vhStateRef.current.loss_count = 0;
+                        addLog(`🤖 [VIRTUAL HOOK] ✅ Virtual WIN ${label} D${vt.duration} on ${SYMBOL_LABELS[vt.symbol]} — Entry $${vt.entryPrice.toFixed(4)} → Exit $${currentPrice.toFixed(4)}`, 'win');
+                    } else {
+                        vhStateRef.current.loss_count++;
+                        addLog(`🤖 [VIRTUAL HOOK] ❌ Virtual LOSS ${label} D${vt.duration} on ${SYMBOL_LABELS[vt.symbol]} #${vhStateRef.current.loss_count}/${vhStateRef.current.threshold} — Entry $${vt.entryPrice.toFixed(4)} → Exit $${currentPrice.toFixed(4)}`, 'loss');
+                        if (vhStateRef.current.loss_count >= vhStateRef.current.threshold) {
+                            vhStateRef.current.is_virtual = false;
+                            addLog(`🤖 [VIRTUAL HOOK] 🔄 THRESHOLD REACHED — Switching to REAL trades`, 'info');
+                        }
+                    }
+                    virtualTradeRef.current = null;
+                    globalLock.current = false;
+                    activeContractsRef.current = 0;
+                    setActiveContracts(0);
+                    checkLimits();
+                }
+            }
+            return; // wait for duration to elapse
+        }
+
         if (globalLock.current)  return;
         if (cooldownTicksRef.current > 0) { cooldownTicksRef.current--; return; }
 
@@ -420,6 +467,8 @@ export const MarketKiller: React.FC = () => {
         slRef.current            = slVal;
         pnlRef.current           = 0;
         globalLock.current       = false;
+        virtualTradeRef.current  = null;
+        lastTickSymRef.current   = '';
         activeContractsRef.current = 0;
         globalStakeRef.current   = stakeVal;
         consecutiveLossesRef.current = 0;
@@ -500,6 +549,7 @@ export const MarketKiller: React.FC = () => {
                     sd.prices = [...sd.prices.slice(-(MAX_TICKS - 1)), price];
                     sd.ready  = sd.ticks.length >= MIN_TICKS_BEFORE_TRADE;
 
+                    lastTickSymRef.current = sym;
                     onTickRef.current();
                     break;
                 }
@@ -596,7 +646,7 @@ export const MarketKiller: React.FC = () => {
             }
         );
         wsRef.current = mws;
-    }, [stake, martingale, takeProfit, stopLoss, addLog, flushDisplay, checkLimits, stopKiller, onTickReceived]);
+    }, [stake, martingale, takeProfit, stopLoss, vhEnabled, vhThreshold, addLog, flushDisplay, checkLimits, stopKiller, onTickReceived]);
 
     /* ── Derived display values ──────────────────────────────────────────── */
     const totalWins   = Object.values(symbolDisplay).reduce((a, b) => a + b.wins,  0);

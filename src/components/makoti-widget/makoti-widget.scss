@@ -620,10 +620,31 @@ $mw-radius:   10px;
     user-select: none;
 
     input[type='checkbox'] {
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         accent-color: $mw-accent;
         cursor: pointer;
+        background: $mw-bg3;
+        border: 1.5px solid $mw-accent;
+        border-radius: 3px;
+        appearance: none;
+        -webkit-appearance: none;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s;
+
+        &:checked {
+            background: $mw-accent;
+            &::after {
+                content: '✓';
+                color: #fff;
+                font-size: 13px;
+                font-weight: 700;
+                line-height: 1;
+            }
+        }
     }
 }
 
