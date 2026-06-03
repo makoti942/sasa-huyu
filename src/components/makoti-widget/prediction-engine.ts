@@ -223,6 +223,323 @@ function digitPcts(ticks: number[], window: number): number[] {
     return c.map(v => (v / total) * 100);
 }
 
+// ── WMA returning array (for crossover) ──────────────────────────────────
+function wmaArr(values: number[], period: number): number[] {
+    if (values.length < period) return [];
+    const out: number[] = [];
+    const weight = period * (period + 1) / 2;
+    for (let i = period - 1; i < values.length; i++) {
+        const slice = values.slice(i - period + 1, i + 1);
+        out.push(slice.reduce((s, v, j) => s + v * (j + 1), 0) / weight);
+    }
+    return out;
+}
+
+// ── HMA returning array (for slope) ──────────────────────────────────────
+function hmaArr(values: number[], period: number): number[] {
+    const half = Math.floor(period / 2);
+    const sqrtP = Math.floor(Math.sqrt(period));
+    if (values.length < period + half + sqrtP) return [];
+    const wmaH = wmaArr(values, half);
+    const wmaF = wmaArr(values, period);
+    if (wmaH.length < sqrtP || wmaF.length < sqrtP) return [];
+    const raw: number[] = [];
+    const offset = wmaF.length - wmaH.length;
+    for (let i = 0; i < wmaF.length; i++) {
+        raw.push(2 * wmaH[i + offset] - wmaF[i]);
+    }
+    return raw.length >= sqrtP ? wmaArr(raw, sqrtP) : [];
+}
+
+// ── Donchian Channel ─────────────────────────────────────────────────────
+function donchian(prices: number[], period = 20): { upper: number; lower: number; mid: number } {
+    if (prices.length < period) return { upper: 0, lower: 0, mid: 0 };
+    const slice = prices.slice(-period);
+    return { upper: Math.max(...slice), lower: Math.min(...slice), mid: (Math.max(...slice) + Math.min(...slice)) / 2 };
+}
+
+// ── Linear Regression Slope ──────────────────────────────────────────────
+function linregSlope(values: number[], period = 14): number {
+    if (values.length < period) return 0;
+    const slice = values.slice(-period);
+    const n = slice.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (let i = 0; i < n; i++) {
+        sumX += i; sumY += slice[i]; sumXY += i * slice[i]; sumX2 += i * i;
+    }
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    return slope;
+}
+
+// ── ALMA ─────────────────────────────────────────────────────────────────
+function alma(values: number[], period = 9, offset = 0.85, sigma = 6): number {
+    if (values.length < period) return values[values.length - 1] || 0;
+    const slice = values.slice(-period);
+    const m = Math.floor(offset * (period - 1));
+    const s = period / sigma;
+    let sum = 0, weightSum = 0;
+    for (let i = 0; i < period; i++) {
+        const w = Math.exp(-((i - m) ** 2) / (2 * s * s));
+        sum += slice[i] * w;
+        weightSum += w;
+    }
+    return weightSum > 0 ? sum / weightSum : slice[period - 1];
+}
+
+// ── Williams %R ──────────────────────────────────────────────────────────
+function williamsR(prices: number[], period = 14): number {
+    if (prices.length < period) return -50;
+    const slice = prices.slice(-period);
+    const high = Math.max(...slice), low = Math.min(...slice);
+    if (high === low) return -50;
+    return ((high - prices[prices.length - 1]) / (high - low)) * -100;
+}
+
+// ── Awesome Oscillator ───────────────────────────────────────────────────
+function awesomeOsc(prices: number[]): { ao: number; prevAo: number } {
+    if (prices.length < 35) return { ao: 0, prevAo: 0 };
+    const mid5 = prices.slice(-5).reduce((a, b) => a + b, 0) / 5;
+    const mid34 = prices.slice(-34).reduce((a, b) => a + b, 0) / 34;
+    const prevMid5 = prices.slice(-6, -1).reduce((a, b) => a + b, 0) / 5;
+    const prevMid34 = prices.slice(-35, -1).reduce((a, b) => a + b, 0) / 34;
+    return { ao: mid5 - mid34, prevAo: prevMid5 - prevMid34 };
+}
+
+// ── Chande Momentum Oscillator ───────────────────────────────────────────
+function cmo(values: number[], period = 9): number {
+    if (values.length < period + 1) return 0;
+    const slice = values.slice(-(period + 1));
+    let sumUp = 0, sumDown = 0;
+    for (let i = 1; i < slice.length; i++) {
+        const diff = slice[i] - slice[i - 1];
+        if (diff > 0) sumUp += diff; else sumDown += Math.abs(diff);
+    }
+    const total = sumUp + sumDown;
+    return total === 0 ? 0 : ((sumUp - sumDown) / total) * 100;
+}
+
+// ── Ultimate Oscillator ──────────────────────────────────────────────────
+function ultimateOsc(prices: number[]): number {
+    if (prices.length < 29) return 50;
+    const bp = (i: number) => prices[i] - Math.min(prices[i], prices[Math.max(0, i - 1)]);
+    const tr = (i: number) => Math.max(prices[i], prices[Math.max(0, i - 1)]) - Math.min(prices[i], prices[Math.max(0, i - 1)]);
+    const sum = (n: number, len: number) => { let s = 0, t = 0; for (let j = 0; j < len; j++) { s += bp(n - j); t += tr(n - j); } return t === 0 ? 0 : s / t; };
+    const i = prices.length - 1;
+    const a = sum(i, 7), b = sum(i, 14), c = sum(i, 28);
+    return 100 * (4 * a + 2 * b + c) / 7;
+}
+
+// ── Detrended Price Oscillator ───────────────────────────────────────────
+function dpo(prices: number[], period = 14): number {
+    if (prices.length < period * 2) return 0;
+    const shift = Math.floor(period / 2) + 1;
+    const idx = prices.length - 1 - shift;
+    const smaSlice = prices.slice(idx - period + 1, idx + 1);
+    if (smaSlice.length < period) return 0;
+    const sma = smaSlice.reduce((a, b) => a + b, 0) / period;
+    return prices[idx] - sma;
+}
+
+// ── Fisher Transform ─────────────────────────────────────────────────────
+function fisherTransform(prices: number[], period = 9): { fisher: number; signal: number } {
+    if (prices.length < period * 2) return { fisher: 0, signal: 0 };
+    const slice = prices.slice(-period);
+    const high = Math.max(...slice), low = Math.min(...slice);
+    if (high === low) return { fisher: 0, signal: 0 };
+    const mid = (prices[prices.length - 1] - low) / (high - low);
+    const clamped = Math.max(-0.999, Math.min(0.999, 2 * mid - 1));
+    const fisher = 0.5 * Math.log((1 + clamped) / (1 - clamped));
+    // Return both fisher and a smoothed signal using EMA(1)
+    const prevMid = (prices[prices.length - 2] - low) / (high - low);
+    const prevClamped = Math.max(-0.999, Math.min(0.999, 2 * prevMid - 1));
+    const prevFisher = 0.5 * Math.log((1 + prevClamped) / (1 - prevClamped));
+    const signal = prevFisher;
+    return { fisher, signal };
+}
+
+// ── True Strength Index ──────────────────────────────────────────────────
+function tsi(values: number[], long = 25, short = 13, signal = 7): { tsi: number; signal: number } {
+    if (values.length < long + short + 5) return { tsi: 0, signal: 0 };
+    const diffs: number[] = [];
+    for (let i = 1; i < values.length; i++) diffs.push(values[i] - values[i - 1]);
+    const absDiffs = diffs.map(Math.abs);
+    const e1 = ema(diffs, long); if (e1.length === 0) return { tsi: 0, signal: 0 };
+    const ae1 = ema(absDiffs, long); if (ae1.length === 0) return { tsi: 0, signal: 0 };
+    const e2 = ema(e1, short); if (e2.length === 0) return { tsi: 0, signal: 0 };
+    const ae2 = ema(ae1, short); if (ae2.length === 0) return { tsi: 0, signal: 0 };
+    const tsiVal = ae2[ae2.length - 1] !== 0 ? (e2[e2.length - 1] / ae2[ae2.length - 1]) * 100 : 0;
+    const tsiArr: number[] = [tsiVal];
+    const sigEma = ema(tsiArr, signal);
+    return { tsi: tsiVal, signal: sigEma.length > 0 ? sigEma[0] : 0 };
+}
+
+// ── Percentage Price Oscillator ──────────────────────────────────────────
+function ppo(prices: number[], fast = 12, slow = 26, sig = 9): { ppo: number; signal: number; hist: number } {
+    const eFast = ema(prices, fast), eSlow = ema(prices, slow);
+    if (eFast.length === 0 || eSlow.length === 0) return { ppo: 0, signal: 0, hist: 0 };
+    const offset = eFast.length - eSlow.length;
+    const ppoLine: number[] = eSlow.map((v, i) => eSlow[i] !== 0 ? ((eFast[i + offset] - v) / v) * 100 : 0);
+    if (ppoLine.length < sig) return { ppo: ppoLine[ppoLine.length - 1] || 0, signal: 0, hist: 0 };
+    const sigLine = ema(ppoLine, sig);
+    return { ppo: ppoLine[ppoLine.length - 1] || 0, signal: sigLine[sigLine.length - 1] || 0, hist: (ppoLine[ppoLine.length - 1] || 0) - (sigLine[sigLine.length - 1] || 0) };
+}
+
+// ── Heikin-Ashi ──────────────────────────────────────────────────────────
+function heikinAshi(prices: number[]): { haOpen: number; haClose: number; haHigh: number; haLow: number; color: 'GREEN' | 'RED'; prevColor: 'GREEN' | 'RED' } {
+    if (prices.length < 2) return { haOpen: 0, haClose: 0, haHigh: 0, haLow: 0, color: 'GREEN', prevColor: 'GREEN' };
+    const haClose = (prices[prices.length - 1] + prices[prices.length - 2]) / 2;
+    const haOpen = prices.length > 2 ? (prices[prices.length - 3] + prices[prices.length - 3]) / 2 : prices[prices.length - 2];
+    const haHigh = Math.max(prices[prices.length - 1], haOpen, haClose);
+    const haLow = Math.min(prices[prices.length - 1], haOpen, haClose);
+    const prevClose = prices.length > 2 ? (prices[prices.length - 2] + prices[prices.length - 3]) / 2 : prices[prices.length - 2];
+    const prevOpen = prices.length > 3 ? (prices[prices.length - 4] + prices[prices.length - 4]) / 2 : prices[prices.length - 3] || prices[prices.length - 2];
+    return { haOpen, haClose, haHigh, haLow, color: haClose >= haOpen ? 'GREEN' : 'RED', prevColor: prevClose >= prevOpen ? 'GREEN' : 'RED' };
+}
+
+// ── Elder Ray Index ─────────────────────────────────────────────────────
+function elderRay(prices: number[], period = 13): { ema: number; bullPower: number; bearPower: number; emaSlope: number } {
+    const e = ema(prices, period);
+    if (e.length < 2) return { ema: 0, bullPower: 0, bearPower: 0, emaSlope: 0 };
+    const emaVal = e[e.length - 1];
+    const price = prices[prices.length - 1];
+    return { ema: emaVal, bullPower: price - emaVal, bearPower: prices[prices.length - 1] - emaVal, emaSlope: e[e.length - 1] - e[e.length - 2] };
+}
+
+// ── Choppiness Index ─────────────────────────────────────────────────────
+function chopIndex(prices: number[], period = 14): number {
+    if (prices.length < period + 1) return 50;
+    const slice = prices.slice(-(period + 1));
+    let sumRange = 0;
+    const high = Math.max(...slice), low = Math.min(...slice);
+    for (let i = 1; i < slice.length; i++) sumRange += Math.abs(slice[i] - slice[i - 1]);
+    const range = high - low;
+    if (sumRange === 0 || range === 0) return 50;
+    return 100 * Math.log10(sumRange / range) / Math.log10(period);
+}
+
+// ── Coppock Curve ───────────────────────────────────────────────────────
+function coppock(prices: number[]): number {
+    if (prices.length < 30) return 0;
+    const roc14 = roc(prices, 14);
+    const roc11 = roc(prices, 11);
+    const sum = roc14 + roc11;
+    // WMA(10) of the sum — simplified using single value
+    const recent10 = prices.slice(-20);
+    if (recent10.length < 10) return sum;
+    const wmas = wmaArr(recent10, 10);
+    return wmas.length > 0 ? wmas[wmas.length - 1] : sum;
+}
+
+// ── Vortex Indicator ────────────────────────────────────────────────────
+function vortex(prices: number[], period = 14): { plusVI: number; minusVI: number } {
+    if (prices.length < period + 1) return { plusVI: 0, minusVI: 0 };
+    let vmPlus = 0, vmMinus = 0, tr = 0;
+    for (let i = prices.length - period; i < prices.length; i++) {
+        const high = Math.max(prices[i], prices[i - 1]);
+        const low = Math.min(prices[i], prices[i - 1]);
+        vmPlus += Math.abs(high - prices[i - 1]);
+        vmMinus += Math.abs(low - prices[i - 1]);
+        tr += Math.abs(prices[i] - prices[i - 1]);
+    }
+    return { plusVI: tr !== 0 ? vmPlus / tr : 0, minusVI: tr !== 0 ? vmMinus / tr : 0 };
+}
+
+// ── Center of Gravity ────────────────────────────────────────────────────
+function cog(prices: number[], period = 10): number {
+    if (prices.length < period) return 0;
+    const slice = prices.slice(-period);
+    let num = 0, den = 0;
+    for (let i = 0; i < period; i++) { num += (i + 1) * slice[i]; den += slice[i]; }
+    const cogVal = den !== 0 ? -num / den + (period + 1) / 2 : 0;
+    // Return negative for cross-detection convention
+    return -cogVal;
+}
+
+function cogSignal(prices: number[], period = 10): number {
+    return cog(prices, period);
+}
+
+// ── Schaff Trend Cycle ──────────────────────────────────────────────────
+function stc(prices: number[], fast = 23, slow = 50, cycle = 10): number {
+    const eFast = ema(prices, fast), eSlow = ema(prices, slow);
+    if (eFast.length === 0 || eSlow.length === 0) return 50;
+    const offset = eFast.length - eSlow.length;
+    const macdArr: number[] = eSlow.map((v, i) => eFast[i + offset] - v);
+    if (macdArr.length < 2) return 50;
+    const mn = Math.min(...macdArr), mx = Math.max(...macdArr);
+    if (mx === mn) return 50;
+    let k = ((macdArr[macdArr.length - 1] - mn) / (mx - mn)) * 100;
+    k = Math.max(0, Math.min(100, k));
+    // Simplified: single stochastic of MACD
+    return k;
+}
+
+// ── Connors RSI ─────────────────────────────────────────────────────────
+function connorsRSI(prices: number[], period = 3): number {
+    const rsiVal = rsi(prices, 3);
+    const streak = priceStreak(prices);
+    const streakRSI = 100 - (50 / (1 + Math.abs(streak)));
+    const rocVal = roc(prices, 2);
+    const rocNorm = Math.max(0, Math.min(100, (rocVal + 100) / 2));
+    return (rsiVal + streakRSI + rocNorm) / 3;
+}
+
+// ── Klinger Oscillator (simplified — uses price magnitude as volume proxy) ─
+function klingerOsc(prices: number[], fast = 34, slow = 55): { klinger: number; signal: number } {
+    if (prices.length < slow + 2) return { klinger: 0, signal: 0 };
+    let vf = 0;
+    for (let i = prices.length - slow; i < prices.length; i++) {
+        const trend = prices[i] > prices[i - 1] ? 1 : -1;
+        const vol = Math.abs(prices[i] - prices[i - 1]) * 1000; // price magnitude as volume proxy
+        vf += trend * vol;
+    }
+    const klinger = vf;
+    // Simplified signal from Klinger
+    return { klinger, signal: 0 };
+}
+
+// ── Supertrend ──────────────────────────────────────────────────────────
+function supertrendCalc(prices: number[], period = 10, mult = 3): { trend: 'UP' | 'DOWN'; value: number; flipped: boolean; prevTrend: 'UP' | 'DOWN' } {
+    if (prices.length < period + 1) return { trend: 'UP', value: 0, flipped: false, prevTrend: 'UP' };
+    const atrVal = atr(prices, period);
+    const hl2 = (prices[prices.length - 1] + prices[prices.length - 2]) / 2;
+    const upper = hl2 + mult * atrVal;
+    const lower = hl2 - mult * atrVal;
+    const prevUpper = (prices[prices.length - 2] + prices[prices.length - 3]) / 2 + mult * atr(prices.slice(0, -1), period);
+    const prevLower = (prices[prices.length - 2] + prices[prices.length - 3]) / 2 - mult * atr(prices.slice(0, -1), period);
+    const prevTrend = prices[prices.length - 2] > prevUpper ? 'DOWN' : prices[prices.length - 2] < prevLower ? 'UP' : 'UP';
+    const trend = prices[prices.length - 1] > upper ? 'DOWN' : prices[prices.length - 1] < lower ? 'UP' : prevTrend;
+    return { trend, value: trend === 'UP' ? lower : upper, flipped: trend !== prevTrend, prevTrend };
+}
+
+// ── Parabolic SAR ───────────────────────────────────────────────────────
+function parabolicSar(prices: number[], step = 0.02, maxStep = 0.2): { sar: number; above: boolean; flipped: boolean } {
+    if (prices.length < 3) return { sar: 0, above: false, flipped: false };
+    const trend = prices[prices.length - 1] > prices[prices.length - 2] ? 'UP' : 'DOWN';
+    const prevTrend = prices[prices.length - 2] > prices[prices.length - 3] ? 'UP' : 'DOWN';
+    let sar = trend === 'UP' ? Math.min(...prices.slice(-5)) : Math.max(...prices.slice(-5));
+    const above = trend === 'DOWN';
+    const flipped = trend !== prevTrend;
+    return { sar, above, flipped };
+}
+
+// ── Ichimoku Kijun-sen ─────────────────────────────────────────────────
+function kijunSen(prices: number[], period = 26): number {
+    if (prices.length < period) return prices[prices.length - 1] || 0;
+    const slice = prices.slice(-period);
+    return (Math.max(...slice) + Math.min(...slice)) / 2;
+}
+
+// ── Standard Deviation Channel ──────────────────────────────────────────
+function stdChannel(prices: number[], period = 20, mult = 2): { upper: number; lower: number; mean: number } {
+    if (prices.length < period) return { upper: 0, lower: 0, mean: 0 };
+    const slice = prices.slice(-period);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+    const std = Math.sqrt(variance);
+    return { upper: mean + mult * std, lower: mean - mult * std, mean };
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    MARKET STATE DETECTION
 ═══════════════════════════════════════════════════════════════════════════════ */
@@ -1836,6 +2153,721 @@ const emaCross5_10: StrategyModule = {
     },
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  EXPANDED STRATEGIES (60 new — MA-based, oscillators, candle patterns,
+//  Deriv-specific, volume-proxy, and structural)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── 1. SMA 20 CROSS ──────────────────────────────────────────────────────────
+const sma20Cross: StrategyModule = { name: 'sma20Cross', run(prices) {
+    if (prices.length < 21) return null;
+    const sma20 = sma(prices, 20); if (sma20.length < 2) return null;
+    const cur = sma20[sma20.length - 1], prev = sma20[sma20.length - 2];
+    const lastP = prices[prices.length - 1], prevP = prices[prices.length - 2];
+    if (lastP > cur && prevP <= prev) return { type: 'CALL', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    if (lastP < cur && prevP >= prev) return { type: 'PUT', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 2. EMA 50 STRUCTURAL FILTER ─────────────────────────────────────────────
+const ema50Filter: StrategyModule = { name: 'ema50Filter', run(prices) {
+    if (prices.length < 51) return null;
+    const e50 = ema(prices, 50); if (e50.length < 1) return null;
+    const emaVal = e50[e50.length - 1], price = prices[prices.length - 1];
+    const prevGreen = prices.length > 1 && prices[prices.length - 1] > prices[prices.length - 2];
+    if (price > emaVal && prevGreen) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (price < emaVal && !prevGreen) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 3. HMA 9 SLOPE ──────────────────────────────────────────────────────────
+const hma9Slope: StrategyModule = { name: 'hma9Slope', run(prices) {
+    if (prices.length < 20) return null;
+    const h = hmaArr(prices, 9); if (h.length < 2) return null;
+    if (h[h.length - 1] > h[h.length - 2]) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (h[h.length - 1] < h[h.length - 2]) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 4. SUPERTREND (10, 3) ────────────────────────────────────────────────────
+const supertrendStrat: StrategyModule = { name: 'supertrend', run(prices) {
+    if (prices.length < 12) return null;
+    const st = supertrendCalc(prices, 10, 3);
+    if (st.flipped && st.trend === 'UP') return { type: 'CALL', score: 3, confidence: 72, weight: getStrategyWeight(this.name), name: this.name };
+    if (st.flipped && st.trend === 'DOWN') return { type: 'PUT', score: 3, confidence: 72, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 5. PARABOLIC SAR ────────────────────────────────────────────────────────
+const parabolicSarStrat: StrategyModule = { name: 'parabolicSar', run(prices) {
+    if (prices.length < 5) return null;
+    const ps = parabolicSar(prices, 0.02, 0.2);
+    if (ps.flipped && !ps.above) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (ps.flipped && ps.above) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 6. ICHIMOKU KIJUN-SEN BREAK ─────────────────────────────────────────────
+const ichimokuKijun: StrategyModule = { name: 'ichimokuKijun', run(prices) {
+    if (prices.length < 27) return null;
+    const kijun = kijunSen(prices, 26);
+    const prevKijun = kijunSen(prices.slice(0, -1), 26);
+    const price = prices[prices.length - 1], prevPrice = prices[prices.length - 2];
+    if (price > kijun && prevPrice <= prevKijun) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (price < kijun && prevPrice >= prevKijun) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 7. VWAP BREAK (price-magnitude proxy) ──────────────────────────────────
+const vwapBreak: StrategyModule = { name: 'vwapBreak', run(prices) {
+    if (prices.length < 30) return null;
+    const slice = prices.slice(-20);
+    const vwap = slice.reduce((s, v, i) => s + v * (i + 1), 0) / slice.reduce((s, v, i) => s + (i + 1), 0);
+    const price = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const volSurge = Math.abs(prices[prices.length - 1] - prices[prices.length - 2]) > atr(prices, 7) * 1.5;
+    if (price > vwap && prev <= vwap && volSurge) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (price < vwap && prev >= vwap && volSurge) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 8. BB (20, 2) STRUCTURAL ESCAPE ─────────────────────────────────────────
+const bbStructuralEscape: StrategyModule = { name: 'bbEscape', run(prices) {
+    if (prices.length < 21) return null;
+    const slice = prices.slice(-20);
+    const mean = slice.reduce((a, b) => a + b, 0) / 20;
+    const std = Math.sqrt(slice.reduce((a, b) => a + (b - mean) ** 2, 0) / 20);
+    const upper = mean + 2 * std, lower = mean - 2 * std;
+    const price = prices[prices.length - 1], prev = prices[prices.length - 2];
+    if (price < lower && prev >= lower) return { type: 'CALL', score: 3, confidence: 74, weight: getStrategyWeight(this.name), name: this.name };
+    if (price > upper && prev <= upper) return { type: 'PUT', score: 3, confidence: 74, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 9. KELTNER (20, 2, ATR 10) ──────────────────────────────────────────────
+const keltner20: StrategyModule = { name: 'keltner20', run(prices) {
+    if (prices.length < 21) return null;
+    const kc = keltner(prices, 20, 2);
+    if (kc.upper === 0) return null;
+    const price = prices[prices.length - 1], prev = prices[prices.length - 2];
+    if (price > kc.upper && prev <= kc.upper) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (price < kc.lower && prev >= kc.lower) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 10. DONCHIAN (20) ───────────────────────────────────────────────────────
+const donchian20: StrategyModule = { name: 'donchian20', run(prices) {
+    if (prices.length < 21) return null;
+    const dc = donchian(prices, 20);
+    if (dc.upper === 0) return null;
+    const price = prices[prices.length - 1];
+    if (price >= dc.upper) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (price <= dc.lower) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 11. ADX (14) + DI CROSS ────────────────────────────────────────────────
+const adxDI: StrategyModule = { name: 'adxDI', run(prices) {
+    if (prices.length < 16) return null;
+    const period = 14;
+    const slice = prices.slice(-(period + 2));
+    if (slice.length < period + 1) return null;
+    let plusDM = 0, minusDM = 0, tr = 0;
+    for (let i = 1; i < slice.length; i++) {
+        const up = slice[i] - slice[i - 1];
+        const down = 0;
+        if (up > 0 && up > Math.abs(down)) plusDM += up;
+        if (down < 0 && Math.abs(down) > up) minusDM += Math.abs(down);
+        tr += Math.abs(slice[i] - slice[i - 1]);
+    }
+    if (tr === 0) return null;
+    const pDI = (plusDM / tr) * 100, mDI = (minusDM / tr) * 100;
+    const dx = Math.abs(pDI - mDI) / (pDI + mDI) * 100;
+    if (dx > 25 && pDI > mDI) return { type: 'CALL', score: 2, confidence: 70, weight: getStrategyWeight(this.name), name: this.name };
+    if (dx > 25 && mDI > pDI) return { type: 'PUT', score: 2, confidence: 70, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 12. LINEAR REGRESSION SLOPE (14) ────────────────────────────────────────
+const linregSlope14: StrategyModule = { name: 'linregSlope', run(prices) {
+    if (prices.length < 15) return null;
+    const slope = linregSlope(prices, 14);
+    const prevSlope = linregSlope(prices.slice(0, -1), 14);
+    if (slope > 0 && prevSlope <= 0) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (slope < 0 && prevSlope >= 0) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 13. WMA 5/15 CROSSOVER ─────────────────────────────────────────────────
+const wmaCross5_15: StrategyModule = { name: 'wmaCross5_15', run(prices) {
+    if (prices.length < 16) return null;
+    const w5 = wmaArr(prices, 5), w15 = wmaArr(prices, 15);
+    if (w5.length < 2 || w15.length < 2) return null;
+    const off = w15.length - w5.length;
+    const w5c = w5[w5.length - 1], w5p = w5[w5.length - 2];
+    const w15c = w15[w15.length - 1], w15p = w15[w15.length - 2];
+    if (w5c > w15c && w5p <= w15p) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    if (w5c < w15c && w5p >= w15p) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 14. ALMA POSITION ────────────────────────────────────────────────────────
+const almaStrat: StrategyModule = { name: 'alma', run(prices) {
+    if (prices.length < 15) return null;
+    const almaVal = alma(prices, 9, 0.85, 6);
+    const prevAlma = alma(prices.slice(0, -1), 9, 0.85, 6);
+    const price = prices[prices.length - 1];
+    const angle = almaVal - prevAlma;
+    if (price > almaVal && angle > 0) return { type: 'CALL', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    if (price < almaVal && angle < 0) return { type: 'PUT', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 15. STD DEV CHANNEL ─────────────────────────────────────────────────────
+const stdDevChannel: StrategyModule = { name: 'stdDevChannel', run(prices) {
+    if (prices.length < 21) return null;
+    const sc = stdChannel(prices, 20, 2);
+    const price = prices[prices.length - 1];
+    if (price <= sc.lower * 1.001) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (price >= sc.upper * 0.999) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 16. RSI(14) BASELINE REVERSION ──────────────────────────────────────────
+const rsi14Baseline: StrategyModule = { name: 'rsi14Baseline', run(prices) {
+    if (prices.length < 20) return null;
+    const r = rsi(prices, 14);
+    const prevR = rsi(prices.slice(0, -1), 14);
+    if (r > 30 && prevR <= 30) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (r < 70 && prevR >= 70) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 17. RSI(9) HYPER EXHAUSTION ─────────────────────────────────────────────
+const rsi9Hyper: StrategyModule = { name: 'rsi9Hyper', run(prices) {
+    if (prices.length < 15) return null;
+    const r = rsi(prices, 9);
+    if (r < 15) return { type: 'CALL', score: 3, confidence: 76, weight: getStrategyWeight(this.name), name: this.name };
+    if (r > 85) return { type: 'PUT', score: 3, confidence: 76, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 18. STOCHASTIC (14, 3, 3) CROSS ─────────────────────────────────────────
+const stoch14: StrategyModule = { name: 'stoch14', run(prices) {
+    if (prices.length < 18) return null;
+    const s = stoch(prices, 14, 3);
+    const prevS = stoch(prices.slice(0, -1), 14, 3);
+    if (s.k > s.d && prevS.k <= prevS.d && s.k < 20) return { type: 'CALL', score: 2, confidence: 69, weight: getStrategyWeight(this.name), name: this.name };
+    if (s.k < s.d && prevS.k >= prevS.d && s.k > 80) return { type: 'PUT', score: 2, confidence: 69, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 19. MACD CENTER-LINE CROSS ──────────────────────────────────────────────
+const macdCenterLine: StrategyModule = { name: 'macdCenter', run(prices) {
+    if (prices.length < 28) return null;
+    const m = macd(prices);
+    const prevHist = m.prevHist;
+    if (m.hist > 0 && prevHist <= 0) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (m.hist < 0 && prevHist >= 0) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 20. WILLIAMS %R (14) ────────────────────────────────────────────────────
+const williamsR14: StrategyModule = { name: 'williamsR', run(prices) {
+    if (prices.length < 18) return null;
+    const wr = williamsR(prices, 14);
+    const prevWr = williamsR(prices.slice(0, -1), 14);
+    if (wr > -80 && prevWr <= -80) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (wr < -20 && prevWr >= -20) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 21. CCI(14) CROSS ──────────────────────────────────────────────────────
+const cci14Cross: StrategyModule = { name: 'cci14Cross', run(prices) {
+    if (prices.length < 18) return null;
+    const c = cci(prices, 14);
+    const prevC = cci(prices.slice(0, -1), 14);
+    if (c > -100 && prevC <= -100) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (c < 100 && prevC >= 100) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 22. ROC(9) ZERO CROSS ──────────────────────────────────────────────────
+const roc9Zero: StrategyModule = { name: 'roc9Zero', run(prices) {
+    if (prices.length < 12) return null;
+    const r = roc(prices, 9);
+    const prevR = roc(prices.slice(0, -1), 9);
+    if (r > 0 && prevR <= 0) return { type: 'CALL', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    if (r < 0 && prevR >= 0) return { type: 'PUT', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 23. AWESOME OSCILLATOR ─────────────────────────────────────────────────
+const awesomeOscillator: StrategyModule = { name: 'awesomeOsc', run(prices) {
+    if (prices.length < 36) return null;
+    const ao = awesomeOsc(prices);
+    if (ao.ao > 0 && ao.prevAo <= 0) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    if (ao.ao < 0 && ao.prevAo >= 0) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 24. MFI (14) MOMENTUM (price-based proxy) ──────────────────────────────
+const mfi14: StrategyModule = { name: 'mfi14', run(prices) {
+    if (prices.length < 18) return null;
+    const slice = prices.slice(-15);
+    let posFlow = 0, negFlow = 0;
+    for (let i = 1; i < slice.length; i++) {
+        const vol = Math.abs(slice[i]) * 10;
+        if (slice[i] > slice[i - 1]) posFlow += vol; else negFlow += vol;
+    }
+    const ratio = negFlow !== 0 ? posFlow / negFlow : 1;
+    const mfiVal = 100 - (100 / (1 + ratio));
+    const prevSlice = prices.slice(-16, -1);
+    let prevPos = 0, prevNeg = 0;
+    for (let i = 1; i < prevSlice.length; i++) {
+        const vol = Math.abs(prevSlice[i]) * 10;
+        if (prevSlice[i] > prevSlice[i - 1]) prevPos += vol; else prevNeg += vol;
+    }
+    const prevRatio = prevNeg !== 0 ? prevPos / prevNeg : 1;
+    const prevMfi = 100 - (100 / (1 + prevRatio));
+    if (mfiVal < 20 && mfiVal > prevMfi) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    if (mfiVal > 80 && mfiVal < prevMfi) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 25. CMO CROSS ──────────────────────────────────────────────────────────
+const cmoCross: StrategyModule = { name: 'cmoCross', run(prices) {
+    if (prices.length < 12) return null;
+    const cmoVal = cmo(prices, 9);
+    const prevCmo = cmo(prices.slice(0, -1), 9);
+    if (cmoVal > -50 && prevCmo <= -50) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (cmoVal < 50 && prevCmo >= 50) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 26. ULTIMATE OSCILLATOR ────────────────────────────────────────────────
+const ultimateOscStrat: StrategyModule = { name: 'ultimateOsc', run(prices) {
+    if (prices.length < 30) return null;
+    const uo = ultimateOsc(prices);
+    const prevUo = ultimateOsc(prices.slice(0, -1));
+    if (uo < 30 && uo > prevUo) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (uo > 70 && uo < prevUo) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 27. DPO ZERO CROSS ─────────────────────────────────────────────────────
+const dpoCross: StrategyModule = { name: 'dpoCross', run(prices) {
+    if (prices.length < 30) return null;
+    const dpoVal = dpo(prices, 14);
+    const prevDpo = dpo(prices.slice(0, -1), 14);
+    if (dpoVal > 0 && prevDpo <= 0) return { type: 'CALL', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    if (dpoVal < 0 && prevDpo >= 0) return { type: 'PUT', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 28. FISHER TRANSFORM ────────────────────────────────────────────────────
+const fisherTransformStrat: StrategyModule = { name: 'fisherTransform', run(prices) {
+    if (prices.length < 20) return null;
+    const ft = fisherTransform(prices, 9);
+    if (ft.fisher > ft.signal && ft.fisher < -1.5) return { type: 'CALL', score: 3, confidence: 74, weight: getStrategyWeight(this.name), name: this.name };
+    if (ft.fisher < ft.signal && ft.fisher > 1.5) return { type: 'PUT', score: 3, confidence: 74, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 29. TSI CROSS ──────────────────────────────────────────────────────────
+const tsiCross: StrategyModule = { name: 'tsiCross', run(prices) {
+    if (prices.length < 50) return null;
+    const t = tsi(prices, 25, 13, 7);
+    if (t.tsi > t.signal) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (t.tsi < t.signal) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 30. PPO SIGNAL CROSS ───────────────────────────────────────────────────
+const ppoCross: StrategyModule = { name: 'ppoCross', run(prices) {
+    if (prices.length < 30) return null;
+    const p = ppo(prices, 12, 26, 9);
+    const hist = p.ppo - p.signal;
+    const prevPpo = ppo(prices.slice(0, -1), 12, 26, 9);
+    const prevHist = prevPpo.ppo - prevPpo.signal;
+    if (hist > 0 && prevHist <= 0) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (hist < 0 && prevHist >= 0) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 31. ENGULFING CANDLE ────────────────────────────────────────────────────
+const engulfingCandle: StrategyModule = { name: 'engulfing', run(prices) {
+    if (prices.length < 3) return null;
+    const cur = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const curGreen = cur > prices[prices.length - 2];
+    const prevGreen = prev > prices[prices.length - 3];
+    const body = Math.abs(cur - prices[prices.length - 2]), prevBody = Math.abs(prev - prices[prices.length - 3]);
+    if (curGreen && !prevGreen && body > prevBody * 1.1) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (!curGreen && prevGreen && body > prevBody * 1.1) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 32. INSIDE BAR BREAKOUT ────────────────────────────────────────────────
+const insideBarBreakout: StrategyModule = { name: 'insideBarBreakout', run(prices) {
+    if (prices.length < 4) return null;
+    const range = (i: number) => Math.abs(prices[i] - prices[i - 1]);
+    const prevRange = range(prices.length - 2);
+    const curRange = range(prices.length - 1);
+    const insidePrev = range(prices.length - 3);
+    if (curRange > prevRange && curRange > insidePrev) {
+        if (prices[prices.length - 1] > prices[prices.length - 2]) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+        return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    }
+    return null;
+}};
+
+// ── 33. PIN BAR REJECTION ──────────────────────────────────────────────────
+const pinBarRejection: StrategyModule = { name: 'pinBar', run(prices) {
+    if (prices.length < 3) return null;
+    const cur = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const body = Math.abs(cur - prev);
+    if (body === 0) return null;
+    const range = Math.abs(cur - prices[Math.max(0, prices.length - 3)]);
+    const wick = range - body;
+    if (wick >= body * 2) {
+        if (cur > prev && cur >= prices[prices.length - 1] - body * 0.75) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+        if (cur < prev && cur <= prices[prices.length - 1] + body * 0.75) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    }
+    return null;
+}};
+
+// ── 34. THREE WHITE SOLDIERS / BLACK CROWS ────────────────────────────────
+const threeSoldiersCrows: StrategyModule = { name: 'threeSoldiersCrows', run(prices) {
+    if (prices.length < 4) return null;
+    const p = prices, n = p.length;
+    const g1 = p[n-1] > p[n-2], g2 = p[n-2] > p[n-3], g3 = p[n-3] > p[n-4];
+    if (g1 && g2 && g3) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (!g1 && !g2 && !g3) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 35. MARUBOZU ───────────────────────────────────────────────────────────
+const marubozu: StrategyModule = { name: 'marubozu', run(prices) {
+    if (prices.length < 3) return null;
+    const cur = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const body = Math.abs(cur - prev);
+    const totalRange = Math.abs(cur - prices[Math.max(0, prices.length - 3)]);
+    if (body > 0 && totalRange > 0 && body / totalRange > 0.85) {
+        if (cur > prev) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+        return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    }
+    return null;
+}};
+
+// ── 36. LOCAL SWING BOUNDARY BREAKOUT ─────────────────────────────────────
+const swingBoundaryBreakout: StrategyModule = { name: 'swingBoundary', run(prices) {
+    if (prices.length < 52) return null;
+    const slice50 = prices.slice(-50);
+    const high50 = Math.max(...slice50), low50 = Math.min(...slice50);
+    const price = prices[prices.length - 1];
+    if (price > high50) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    if (price < low50) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 37. SUPPLY & DEMAND ZONES ─────────────────────────────────────────────
+const supplyDemandZones: StrategyModule = { name: 'supplyDemand', run(prices) {
+    if (prices.length < 25) return null;
+    const recent = prices.slice(-10);
+    const high = Math.max(...recent), low = Math.min(...recent);
+    const price = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const greenTick = price > prev;
+    const lookback = prices.slice(-25, -10);
+    const demandZone = Math.min(...lookback);
+    const supplyZone = Math.max(...lookback);
+    if (price <= demandZone * 1.002 && greenTick) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (price >= supplyZone * 0.998 && !greenTick) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 38. TRENDLINE DEFLECTION ──────────────────────────────────────────────
+const trendlineDeflection: StrategyModule = { name: 'trendlineDefl', run(prices) {
+    if (prices.length < 15) return null;
+    const left = prices.slice(-15, -8);
+    const right = prices.slice(-8);
+    const slopeL = (left[left.length - 1] - left[0]) / left.length;
+    const slopeR = (right[right.length - 1] - right[0]) / right.length;
+    const price = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const greenClose = price > prev;
+    if (slopeL < 0 && slopeR > 0 && greenClose) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (slopeL > 0 && slopeR < 0 && !greenClose) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 39. FIB 61.8% GOLDEN POCKET ───────────────────────────────────────────
+const fibGoldenPocket: StrategyModule = { name: 'fibGoldenPocket', run(prices) {
+    if (prices.length < 30) return null;
+    const lookback = prices.slice(-30);
+    const high = Math.max(...lookback), low = Math.min(...lookback);
+    const range = high - low;
+    if (range === 0) return null;
+    const fib618 = low + range * 0.618;
+    const price = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const greenTick = price > prev;
+    // Detect uptrend: recent 10 ticks higher than older 10
+    const recent10 = prices.slice(-10).reduce((a, b) => a + b, 0) / 10;
+    const older10 = prices.slice(-20, -10).reduce((a, b) => a + b, 0) / 10;
+    const uptrend = recent10 > older10, downtrend = recent10 < older10;
+    if (uptrend && Math.abs(price - fib618) / range < 0.02 && greenTick) return { type: 'CALL', score: 2, confidence: 70, weight: getStrategyWeight(this.name), name: this.name };
+    if (downtrend && Math.abs(price - fib618) / range < 0.02 && !greenTick) return { type: 'PUT', score: 2, confidence: 70, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 40. HIGH-VOLUME CLIMAX (price-magnitude proxy) ────────────────────────
+const volumeClimax: StrategyModule = { name: 'volumeClimax', run(prices) {
+    if (prices.length < 102) return null;
+    const slice = prices.slice(-100);
+    let maxAbs = 0;
+    for (let i = 1; i < slice.length; i++) maxAbs = Math.max(maxAbs, Math.abs(slice[i] - slice[i - 1]));
+    const curMove = Math.abs(prices[prices.length - 1] - prices[prices.length - 2]);
+    const curGreen = prices[prices.length - 1] > prices[prices.length - 2];
+    if (curMove >= maxAbs * 0.95) {
+        if (!curGreen) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+        if (curGreen) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    }
+    return null;
+}};
+
+// ── 41. HEIKIN-ASHI COLOR FLOW ────────────────────────────────────────────
+const heikinAshiStrat: StrategyModule = { name: 'heikinAshi', run(prices) {
+    if (prices.length < 4) return null;
+    const ha = heikinAshi(prices);
+    const lowerShadow = Math.min(ha.haOpen, ha.haClose) - ha.haLow;
+    const upperShadow = ha.haHigh - Math.max(ha.haOpen, ha.haClose);
+    if (ha.color === 'GREEN' && ha.prevColor === 'RED' && lowerShadow === 0) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (ha.color === 'RED' && ha.prevColor === 'GREEN' && upperShadow === 0) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 42. ELDER RAY INDEX ───────────────────────────────────────────────────
+const elderRayStrat: StrategyModule = { name: 'elderRay', run(prices) {
+    if (prices.length < 20) return null;
+    const er = elderRay(prices, 13);
+    if (er.emaSlope > 0 && er.bullPower < 0 && er.bullPower > -er.bearPower * 1.2) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (er.emaSlope < 0 && er.bearPower > 0 && er.bearPower < -er.bullPower * 1.2) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 43. THREE-LINE STRIKE ─────────────────────────────────────────────────
+const threeLineStrike: StrategyModule = { name: 'threeLineStrike', run(prices) {
+    if (prices.length < 5) return null;
+    const p = prices, n = p.length;
+    const g = [p[n-1] > p[n-2], p[n-2] > p[n-3], p[n-3] > p[n-4], p[n-4] > p[n-5]];
+    const body4 = Math.abs(p[n-1] - p[n-2]), body3 = Math.abs(p[n-2] - p[n-3]), body2 = Math.abs(p[n-3] - p[n-4]), body1 = Math.abs(p[n-4] - p[n-5]);
+    // Three rising then large bear engulfing
+    if (g[3] && g[2] && g[1] && !g[0] && body4 > body3 + body2 + body1) return { type: 'PUT', score: 2, confidence: 71, weight: getStrategyWeight(this.name), name: this.name };
+    // Three falling then large bull engulfing
+    if (!g[3] && !g[2] && !g[1] && g[0] && body4 > body3 + body2 + body1) return { type: 'CALL', score: 2, confidence: 71, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 44. MORNING / EVENING STAR ────────────────────────────────────────────
+const morningEveningStar: StrategyModule = { name: 'morningEveningStar', run(prices) {
+    if (prices.length < 4) return null;
+    const p = prices, n = p.length;
+    const body1 = Math.abs(p[n-3] - p[n-4]), body2 = Math.abs(p[n-2] - p[n-3]), body3 = Math.abs(p[n-1] - p[n-2]);
+    // Morning: large red, small body, large green closing above midpoint of candle 1
+    if (!(p[n-3] > p[n-4]) && body2 < body1 * 0.5 && p[n-1] > p[n-2] && body3 > body1 * 0.7 && p[n-1] > (p[n-3] + p[n-4]) / 2) return { type: 'CALL', score: 3, confidence: 74, weight: getStrategyWeight(this.name), name: this.name };
+    // Evening: large green, small body, large red closing below midpoint of candle 1
+    if ((p[n-3] > p[n-4]) && body2 < body1 * 0.5 && p[n-1] < p[n-2] && body3 > body1 * 0.7 && p[n-1] < (p[n-3] + p[n-4]) / 2) return { type: 'PUT', score: 3, confidence: 74, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 45. CHOPPINESS INDEX FILTER ──────────────────────────────────────────
+const choppinessFilter: StrategyModule = { name: 'choppinessFilter', run(prices) {
+    if (prices.length < 25) return null;
+    const chop = chopIndex(prices, 14);
+    const e5 = ema(prices, 5), e20 = ema(prices, 20);
+    if (e5.length < 2 || e20.length < 2) return null;
+    const e5c = e5[e5.length - 1], e5p = e5[e5.length - 2];
+    const e20c = e20[e20.length - 1], e20p = e20[e20.length - 2];
+    if (chop < 38 && e5c > e20c && e5p <= e20p) return { type: 'CALL', score: 2, confidence: 70, weight: getStrategyWeight(this.name), name: this.name };
+    if (chop < 38 && e5c < e20c && e5p >= e20p) return { type: 'PUT', score: 2, confidence: 70, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 46. SEQUENTIAL TICK FATIGUE ───────────────────────────────────────────
+const sequentialTickFatigue: StrategyModule = { name: 'tickFatigue', run(prices) {
+    if (prices.length < 6) return null;
+    const streak = priceStreak(prices);
+    if (streak === -5) return { type: 'CALL', score: 3, confidence: 75, weight: getStrategyWeight(this.name), name: this.name };
+    if (streak === 5) return { type: 'PUT', score: 3, confidence: 75, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 47. TICK VELOCITY STD DEV SHOCK ──────────────────────────────────────
+const tickVelocityShock: StrategyModule = { name: 'tickVelocityShock', run(prices) {
+    if (prices.length < 102) return null;
+    const slice = prices.slice(-100);
+    const diffs: number[] = [];
+    for (let i = 1; i < slice.length; i++) diffs.push(Math.abs(slice[i] - slice[i - 1]));
+    const mean = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+    const variance = diffs.reduce((a, b) => a + (b - mean) ** 2, 0) / diffs.length;
+    const std = Math.sqrt(variance);
+    const curMove = prices[prices.length - 1] - prices[prices.length - 2];
+    const curGreen = curMove > 0;
+    if (!curGreen && Math.abs(curMove) > 3 * std) return { type: 'CALL', score: 3, confidence: 76, weight: getStrategyWeight(this.name), name: this.name };
+    if (curGreen && Math.abs(curMove) > 3 * std) return { type: 'PUT', score: 3, confidence: 76, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 48. MULTI-TIMEFRAME CONVERGENCE ──────────────────────────────────────
+const multiTFConvergence: StrategyModule = { name: 'multiTFConv', run(prices) {
+    if (prices.length < 20) return null;
+    const hmaVal = hmaArr(prices, 5);
+    if (hmaVal.length < 2) return null;
+    const hmaUp = hmaVal[hmaVal.length - 1] > hmaVal[hmaVal.length - 2];
+    const last2Green = prices[prices.length - 1] > prices[prices.length - 2];
+    if (last2Green && hmaUp) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (!last2Green && !hmaUp) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 49. LAST-DIGIT STRUCTURAL DISEQUILIBRIUM ────────────────────────────
+const lastDigitDisequilibrium: StrategyModule = { name: 'lastDigitDis', run(prices) {
+    if (prices.length < 7) return null;
+    const digits = prices.slice(-6).map(v => Math.round(Math.abs(v * 100000)) % 10);
+    const even = digits.map(d => d % 2 === 0);
+    const allEven = even.every(Boolean);
+    const allOdd = even.every(v => !v);
+    if (allEven) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (allOdd) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 50. 3-TICK MICRO CHANNEL INVERSION ───────────────────────────────────
+const microChannelInversion: StrategyModule = { name: 'microChannelInv', run(prices) {
+    if (prices.length < 5) return null;
+    const p = prices, n = p.length;
+    const descending = p[n-2] < p[n-3] && p[n-3] < p[n-4];
+    const ascending = p[n-2] > p[n-3] && p[n-3] > p[n-4];
+    if (descending && p[n-1] > p[n-2]) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (ascending && p[n-1] < p[n-2]) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 51. VIRTUAL-LOSS SEQUENCING ──────────────────────────────────────────
+const virtualLossSequencing: StrategyModule = { name: 'virtualLossSeq', run(prices) {
+    // Returns signal aligned with underlying core — but confidence is low
+    // since the actual VH tracking is in market-killer.tsx
+    if (prices.length < 5) return null;
+    const streak = priceStreak(prices);
+    const rsiVal = rsi(prices, 7);
+    if (streak <= -2 && rsiVal < 40) return { type: 'CALL', score: 1, confidence: 62, weight: getStrategyWeight(this.name), name: this.name };
+    if (streak >= 2 && rsiVal > 60) return { type: 'PUT', score: 1, confidence: 62, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 52. DYNAMIC PIVOT S1/R1 DEFLECTION ───────────────────────────────────
+const dynamicPivot: StrategyModule = { name: 'dynamicPivot', run(prices) {
+    if (prices.length < 25) return null;
+    const slice = prices.slice(-24);
+    const high = Math.max(...slice), low = Math.min(...slice), close = prices[prices.length - 1];
+    const pivot = (high + low + close) / 3;
+    const r1 = 2 * pivot - low, s1 = 2 * pivot - high;
+    const prev = prices[prices.length - 2];
+    const greenTick = close > prev;
+    if (close <= s1 * 1.002 && greenTick) return { type: 'CALL', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    if (close >= r1 * 0.998 && !greenTick) return { type: 'PUT', score: 2, confidence: 66, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 53. COPPOCK CURVE ────────────────────────────────────────────────────
+const coppockCurveStrat: StrategyModule = { name: 'coppockCurve', run(prices) {
+    if (prices.length < 35) return null;
+    const cc = coppock(prices);
+    const prevCc = coppock(prices.slice(0, -1));
+    if (cc > 0 && prevCc <= 0) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (cc < 0 && prevCc >= 0) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 54. VORTEX INDICATOR ─────────────────────────────────────────────────
+const vortexIndicator: StrategyModule = { name: 'vortex', run(prices) {
+    if (prices.length < 18) return null;
+    const vi = vortex(prices, 14);
+    const prevVi = vortex(prices.slice(0, -1), 14);
+    if (vi.plusVI > vi.minusVI && prevVi.plusVI <= prevVi.minusVI) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    if (vi.minusVI > vi.plusVI && prevVi.minusVI <= prevVi.plusVI) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 55. CENTER OF GRAVITY ────────────────────────────────────────────────
+const centerOfGravity: StrategyModule = { name: 'centerOfGravity', run(prices) {
+    if (prices.length < 15) return null;
+    const cg = cog(prices, 10);
+    const prevCg = cog(prices.slice(0, -1), 10);
+    if (cg > prevCg && cg < -2) return { type: 'CALL', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    if (cg < prevCg && cg > 2) return { type: 'PUT', score: 2, confidence: 64, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 56. SCHAFF TREND CYCLE ───────────────────────────────────────────────
+const schaffTrendCycle: StrategyModule = { name: 'schaffTC', run(prices) {
+    if (prices.length < 55) return null;
+    const stcVal = stc(prices, 23, 50, 10);
+    const prevStc = stc(prices.slice(0, -1), 23, 50, 10);
+    if (stcVal > 25 && prevStc <= 25) return { type: 'CALL', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    if (stcVal < 75 && prevStc >= 75) return { type: 'PUT', score: 2, confidence: 68, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 57. TTM SQUEEZE ──────────────────────────────────────────────────────
+const ttmSqueeze: StrategyModule = { name: 'ttmSqueeze', run(prices) {
+    if (prices.length < 22) return null;
+    // BB width vs Keltner width
+    const slice20 = prices.slice(-20);
+    const mean = slice20.reduce((a, b) => a + b, 0) / 20;
+    const std = Math.sqrt(slice20.reduce((a, b) => a + (b - mean) ** 2, 0) / 20);
+    const bbWidth = 4 * std;
+    const kc = keltner(prices, 20, 1.5);
+    const kcWidth = kc.upper - kc.lower;
+    const squeezed = bbWidth < kcWidth;
+    const curGreen = prices[prices.length - 1] > prices[prices.length - 2];
+    if (squeezed && curGreen) return { type: 'CALL', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    if (squeezed && !curGreen) return { type: 'PUT', score: 2, confidence: 67, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 58. CONNORS RSI ──────────────────────────────────────────────────────
+const connorsRSIStrat: StrategyModule = { name: 'connorsRSI', run(prices) {
+    if (prices.length < 12) return null;
+    const crsi = connorsRSI(prices, 3);
+    if (crsi < 5) return { type: 'CALL', score: 3, confidence: 78, weight: getStrategyWeight(this.name), name: this.name };
+    if (crsi > 95) return { type: 'PUT', score: 3, confidence: 78, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 59. KLINGER OSCILLATOR ───────────────────────────────────────────────
+const klingerOscStrat: StrategyModule = { name: 'klingerOsc', run(prices) {
+    if (prices.length < 60) return null;
+    const ko = klingerOsc(prices, 34, 55);
+    const prevKo = klingerOsc(prices.slice(0, -1), 34, 55);
+    if (ko.klinger > ko.signal && prevKo.klinger <= prevKo.signal) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (ko.klinger < ko.signal && prevKo.klinger >= prevKo.signal) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
+// ── 60. VOLUME PROFILE POC REJECTION ─────────────────────────────────────
+const volumePOC: StrategyModule = { name: 'volumePOC', run(prices) {
+    if (prices.length < 30) return null;
+    const slice = prices.slice(-20);
+    // Find the price level with highest "volume" (density of ticks)
+    const priceLevels = new Map<number, number>();
+    slice.forEach(v => { priceLevels.set(v, (priceLevels.get(v) || 0) + 1); });
+    let poc = 0, maxFreq = 0;
+    for (const [price, freq] of priceLevels) { if (freq > maxFreq) { maxFreq = freq; poc = price; } }
+    const cur = prices[prices.length - 1], prev = prices[prices.length - 2];
+    const greenTick = cur > prev;
+    if (cur <= poc && greenTick && cur > poc * 0.998) return { type: 'CALL', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    if (cur >= poc && !greenTick && cur < poc * 1.002) return { type: 'PUT', score: 2, confidence: 65, weight: getStrategyWeight(this.name), name: this.name };
+    return null;
+}};
+
 const riseFallStrategies: StrategyModule[] = [
     microTiming, rsiDivergence, macdStrategy, bbStrategy,
     stochasticStrategy, atrBreakout, priceAction, maCross,
@@ -1847,6 +2879,20 @@ const riseFallStrategies: StrategyModule[] = [
     tickPressure, accelMomentum, microTrendStrength, supportBounce,
     tickDivergence, consecGap, tripleMA, microPattern3, tickEntropy,
     rsiDirection, bbTouch, emaCross5_10,
+    sma20Cross, ema50Filter, hma9Slope, supertrendStrat, parabolicSarStrat,
+    ichimokuKijun, vwapBreak, bbStructuralEscape, keltner20, donchian20,
+    adxDI, linregSlope14, wmaCross5_15, almaStrat, stdDevChannel,
+    rsi14Baseline, rsi9Hyper, stoch14, macdCenterLine, williamsR14,
+    cci14Cross, roc9Zero, awesomeOscillator, mfi14, cmoCross,
+    ultimateOscStrat, dpoCross, fisherTransformStrat, tsiCross, ppoCross,
+    engulfingCandle, insideBarBreakout, pinBarRejection, threeSoldiersCrows,
+    marubozu, swingBoundaryBreakout, supplyDemandZones, trendlineDeflection,
+    fibGoldenPocket, volumeClimax, heikinAshiStrat, elderRayStrat,
+    threeLineStrike, morningEveningStar, choppinessFilter, sequentialTickFatigue,
+    tickVelocityShock, multiTFConvergence, lastDigitDisequilibrium,
+    microChannelInversion, virtualLossSequencing, dynamicPivot,
+    coppockCurveStrat, vortexIndicator, centerOfGravity, schaffTrendCycle,
+    ttmSqueeze, connorsRSIStrat, klingerOscStrat, volumePOC,
 ];
 
 /* ═══════════════════════════════════════════════════════════════════════════════
