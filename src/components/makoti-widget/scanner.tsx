@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { ALL_SYMBOLS, SYMBOL_LABELS, PIP_SIZES, openMakotiWS, MakotiWS } from './makoti-ws';
+import { ALL_SYMBOLS, SYMBOL_LABELS, openMakotiWS, MakotiWS } from './makoti-ws';
 import { onNewSystemMessage } from '@/auth/NewDerivAuth';
 
 type BotId = 'pvty_kill' | 'rf_v4';
@@ -38,135 +38,76 @@ function calcDigitPcts(digits: number[]): number[] {
     return counts.map(c => (c / total) * 100);
 }
 
-/* ── Deep choppiness analysis (7-candle window) ──────────────────────────── */
-// Analyzes both the line chart (close prices) and candlestick patterns to
-// detect markets that are struggling to find direction — choppy, indecisive,
-// no sustained momentum. Returns a 0–100 choppiness score (higher = more
-// directionless / random).
-function calcChoppiness(candles: any[]): SymbolDirectionResult {
-    const lookback = Math.min(7, candles.length);
-    const recent = candles.slice(-lookback);
-
-    const closes = recent.map(c => Number(c.close));
-    const opens  = recent.map(c => Number(c.open));
-    const highs  = recent.map(c => Number(c.high));
-    const lows   = recent.map(c => Number(c.low));
-
-    // ──────────── LINE-CHART (close-price) analysis ─────────────────
-
-    // 1. Direction change frequency — how often does close-to-close flip?
-    let dirChanges = 0;
-    for (let i = 2; i < closes.length; i++) {
-        const d1 = closes[i - 1] - closes[i - 2];
-        const d2 = closes[i]     - closes[i - 1];
-        if (d1 > 0 && d2 < 0) dirChanges++;
-        else if (d1 < 0 && d2 > 0) dirChanges++;
+/* ── Micro-choppiness analysis on the current growing candle ────────────── */
+// Analyzes tick-level price action within the current (still-open) candle.
+// Measures direction flip frequency, tick-run length, and body indecision.
+// Higher score = more random / choppy (bad for 1-tick predictions).
+function calcMicroChoppiness(prices: number[]): SymbolDirectionResult {
+    const len = prices.length;
+    if (len < 5) {
+        return { symbol: '', label: '', choppinessScore: 0, bodyRatio: 0, directionChanges: 0, trendStrength: 0, recentBodyRatio: 0, qualifies: false, detail: 'Insufficient ticks' };
     }
-    const dirChangeRate = dirChanges / Math.max(1, closes.length - 2);
 
-    // 2. Average consecutive same-direction run length
-    let runSum = 0, runCount = 0, curRun = 0, curDir = 0;
-    for (let i = 1; i < closes.length; i++) {
-        const diff = closes[i] - closes[i - 1];
-        const d = diff > 0 ? 1 : diff < 0 ? -1 : curDir;
-        if (d === curDir && d !== 0) { curRun++; }
-        else if (d !== 0) {
-            if (curRun > 0) { runSum += curRun; runCount++; }
-            curRun = 1; curDir = d;
+    const open = prices[0];
+    const close = prices[len - 1];
+    const high = Math.max(...prices);
+    const low = Math.min(...prices);
+    const range = high - low || 1;
+
+    // ── 1. Tick-level direction flips ───────────────────────────────
+    let flips = 0, totalDir = 0, prevDir = 0;
+    let runSum = 0, runCount = 0, curRun = 1;
+
+    for (let i = 1; i < len; i++) {
+        const dir = prices[i] > prices[i - 1] ? 1 : prices[i] < prices[i - 1] ? -1 : 0;
+        if (dir === 0) continue;
+        totalDir++;
+        if (prevDir !== 0 && dir !== prevDir) {
+            flips++;
+            runSum += curRun;
+            runCount++;
+            curRun = 1;
+        } else {
+            curRun++;
         }
+        prevDir = dir;
     }
     if (curRun > 0) { runSum += curRun; runCount++; }
     const avgRun = runCount > 0 ? runSum / runCount : 1;
-    const runScore = Math.max(0, 1 - avgRun / 4); // runs of 1–2 = very choppy
+    const flipRate = totalDir > 1 ? flips / (totalDir - 1) : 0;
 
-    // 3. Mean-reversion crossovers — how often price crosses its 5-period SMA
-    const sma5: number[] = [];
-    for (let i = 0; i < closes.length; i++) {
-        if (i < 4) { sma5.push(closes[i]); continue; }
-        let s = 0; for (let j = i - 4; j <= i; j++) s += closes[j];
-        sma5.push(s / 5);
-    }
-    let crossovers = 0;
-    for (let i = 1; i < closes.length; i++) {
-        if ((closes[i - 1] > sma5[i - 1]) !== (closes[i] > sma5[i])) crossovers++;
-    }
-    const crossoverRate = Math.min(1, crossovers / Math.max(1, closes.length - 1));
+    // ── 2. Body-to-range ratio (small = indecision = choppy) ─────────
+    const body = Math.abs(close - open);
+    const bodyRatio = body / range;
 
-    // 4. Lag-1 autocorrelation of returns (low = random walk = choppy)
-    const rets: number[] = [];
-    for (let i = 1; i < closes.length; i++) rets.push(closes[i] - closes[i - 1]);
-    let autoCorr = 0;
-    if (rets.length > 2) {
-        const r1 = rets.slice(0, -1), r2 = rets.slice(1);
-        const m1 = r1.reduce((a, b) => a + b, 0) / r1.length;
-        const m2 = r2.reduce((a, b) => a + b, 0) / r2.length;
-        let num = 0, d1 = 0, d2 = 0;
-        for (let i = 0; i < r1.length; i++) {
-            num += (r1[i] - m1) * (r2[i] - m2);
-            d1  += (r1[i] - m1) ** 2;
-            d2  += (r2[i] - m2) ** 2;
-        }
-        autoCorr = d1 * d2 > 0 ? num / Math.sqrt(d1 * d2) : 0;
-    }
-    const acScore = Math.max(0, 1 - Math.abs(autoCorr));
+    // ── 3. Wick balance (balanced = indecision) ──────────────────────
+    const upperWick = high - Math.max(open, close);
+    const lowerWick = Math.min(open, close) - low;
+    const totalWick = upperWick + lowerWick;
+    const wickBalance = totalWick > 0 ? 1 - Math.abs(upperWick - lowerWick) / totalWick : 0.5;
 
-    // 5. Sideways ratio — % of closes inside the middle 30 % of the range
-    const maxC = Math.max(...closes), minC = Math.min(...closes);
-    const rangeC = maxC - minC || 1;
-    const mid = (maxC + minC) / 2;
-    const band = rangeC * 0.15;
-    const sidewaysPct = closes.filter(c => Math.abs(c - mid) <= band).length / closes.length;
+    // ── 4. Reversal oscillation amplitude ───────────────────────────
+    const rangePct = range / (open || 1);
+    const rangeScore = rangePct > 0 ? Math.min(1, rangePct * 200) : 0;
 
-    // ──────────── CANDLESTICK analysis ────────────────────────────
-
-    // 6. Body-to-range ratio (small = indecision)
-    let bodySum = 0, rangeSum = 0, dojiCount = 0;
-    for (let i = 0; i < recent.length; i++) {
-        const body = Math.abs(closes[i] - opens[i]);
-        const r = highs[i] - lows[i] || 1;
-        bodySum += body / r;
-        rangeSum += r;
-        if (body / r < 0.08) dojiCount++;
-    }
-    const avgBodyRatio = bodySum / recent.length;
-    const dojiRatio = dojiCount / recent.length;
-
-    // 7. Wick symmetry — balanced upper/lower = indecision
-    let wickScoreSum = 0;
-    for (let i = 0; i < recent.length; i++) {
-        const upper = highs[i] - Math.max(opens[i], closes[i]);
-        const lower = Math.min(opens[i], closes[i]) - lows[i];
-        const total = upper + lower;
-        if (total > 0) wickScoreSum += 1 - Math.abs(upper - lower) / total;
-        else wickScoreSum += 0.5;
-    }
-    const avgWickSym = wickScoreSum / recent.length; // 1 = perfectly balanced
-
-    // ──────────── Composite score ────────────────────────────────
+    // ── Composite score ─────────────────────────────────────────────
     const score = Math.min(100, Math.round(
-        dirChangeRate          * 22 +      // frequent direction flips
-        runScore               * 18 +      // short runs (1–2 candles)
-        crossoverRate          * 15 +      // many SMA crossovers
-        acScore                * 12 +      // low autocorrelation (random)
-        sidewaysPct            * 10 +      // price stuck in middle band
-        (1 - avgBodyRatio)     * 10 +      // small bodies = indecision
-        dojiRatio              *  8 +      // many dojis
-        avgWickSym             *  5        // balanced wicks = stalemate
+        flipRate             * 30 +   // frequent direction flips
+        Math.max(0, 1 - avgRun / 3) * 25 +  // short tick runs
+        (1 - bodyRatio)      * 25 +   // small body = indecision
+        wickBalance          * 10 +   // balanced wicks = stalemate
+        rangeScore           * 10     // wide range relative to price = noise
     ));
 
-    // enrich the result object
-    const directionChanges = dirChanges;
-    const bodyRatio = Math.round(avgBodyRatio * 100);
-    const trendStrength = Math.round(Math.abs(autoCorr) * 100);
-
     return {
-        symbol: '', label: '', choppinessScore: score,
-        bodyRatio,
-        directionChanges,
-        trendStrength,
-        recentBodyRatio: Math.round(dojiRatio * 100),
+        symbol: '', label: '',
+        choppinessScore: score,
+        bodyRatio: Math.round(bodyRatio * 100),
+        directionChanges: flips,
+        trendStrength: Math.round(avgRun * 10),
+        recentBodyRatio: Math.round(rangeScore * 100),
         qualifies: score >= 55,
-        detail: `Choppy: ${score}% | Runs: ${avgRun.toFixed(1)} | Xovers: ${crossovers} | Dojis: ${dojiCount}/${lookback} | DirΔ: ${dirChanges}`,
+        detail: `Score: ${score}% | Flips: ${flips}/${totalDir} | Run: ${avgRun.toFixed(1)}t | Body: ${(bodyRatio * 100).toFixed(0)}%`,
     };
 }
 
@@ -271,8 +212,14 @@ export const Scanner: React.FC = () => {
             (data) => msgHandlerRef.current(data),
             () => {
                 if (scanningRef.current) {
-                    setProgress('Fetching 7 candles from all 10 volatilities…');
-                    ALL_SYMBOLS.forEach(sym => mws.send({ ticks_history: sym, count: 7, end: 'latest', style: 'candles', granularity: 60 }));
+                    const bot = botRef.current;
+                    if (bot === 'pvty_kill') {
+                        setProgress('Fetching 1000 ticks from all 10 volatilities…');
+                        ALL_SYMBOLS.forEach(sym => mws.send({ ticks_history: sym, count: 1000, end: 'latest' }));
+                    } else {
+                        setProgress('Fetching 60 ticks from all 10 volatilities…');
+                        ALL_SYMBOLS.forEach(sym => mws.send({ ticks_history: sym, count: 60, end: 'latest' }));
+                    }
                 }
             },
             () => {}
@@ -285,8 +232,6 @@ export const Scanner: React.FC = () => {
     const performScan = useCallback((initial = false) => {
         if (scanningRef.current) return;
         const currentBot = botRef.current;
-        if (currentBot === 'pvty_kill') return;
-
         scanningRef.current = true;
         setScanning(true);
         setProgress('Connecting to Deriv API…');
@@ -295,18 +240,18 @@ export const Scanner: React.FC = () => {
         let finalized = false;
         pendingRef.current = new Set(ALL_SYMBOLS);
         collectedRef.current = new Map();
+        const timeoutMs = currentBot === 'pvty_kill' ? 20000 : 10000;
         const scanTimeout = setTimeout(() => {
             if (!finalized) finalize();
-        }, 8000);
+        }, timeoutMs);
 
         msgHandlerRef.current = (data: any) => {
             if (data.error) return;
-
-            if (data.msg_type === 'candles' && data.candles) {
+            if (data.msg_type === 'history' && data.history?.prices) {
                 const sym: string = data.echo_req?.ticks_history;
                 if (!sym || !pendingRef.current.has(sym)) return;
                 pendingRef.current.delete(sym);
-                collectedRef.current.set(sym, data.candles);
+                collectedRef.current.set(sym, data.history.prices.map(Number));
                 setProgress(`Fetched ${ALL_SYMBOLS.length - pendingRef.current.size} / ${ALL_SYMBOLS.length}…`);
                 if (pendingRef.current.size === 0 && !finalized) { clearTimeout(scanTimeout); finalize(); }
             }
@@ -316,57 +261,87 @@ export const Scanner: React.FC = () => {
             if (finalized) return;
             finalized = true;
             clearTimeout(scanTimeout);
-            const scanResults: SymbolDirectionResult[] = [];
-            collectedRef.current.forEach((candles: any[], sym) => {
-                if (!candles || candles.length < 5) return;
-                const a = calcChoppiness(candles);
-                a.symbol = sym; a.label = SYMBOL_LABELS[sym];
-                scanResults.push(a);
-            });
-            scanResults.sort((a, b) => b.choppinessScore - a.choppinessScore);
-            const best = scanResults.map(r => r.symbol);
-            setResults(scanResults);
-            setBestSymbols(best.slice(0, 3));
+
+            let best: string[] = [];
+            let bestScore = 0;
+            if (currentBot === 'pvty_kill') {
+                const scanResults: SymbolDigitResult[] = [];
+                collectedRef.current.forEach((prices: number[], sym) => {
+                    if (!prices || prices.length < 100) return;
+                    const digits = prices.map(p => Math.floor(Math.abs(p)) % 10);
+                    const pcts = calcDigitPcts(digits);
+                    const qualifies = pcts[7] > 10 && pcts[8] > 10 && pcts[9] > 10;
+                    scanResults.push({
+                        symbol: sym, label: SYMBOL_LABELS[sym],
+                        pcts, totalTicks: prices.length,
+                        qualifies,
+                        detail: qualifies ? '✅ 7,8,9 qualify' : `7:${pcts[7].toFixed(1)}% 8:${pcts[8].toFixed(1)}% 9:${pcts[9].toFixed(1)}%`,
+                    });
+                });
+                scanResults.sort((a, b) => (b.pcts[7] + b.pcts[8] + b.pcts[9]) - (a.pcts[7] + a.pcts[8] + a.pcts[9]));
+                best = scanResults.map(r => r.symbol);
+                bestScore = Math.round((scanResults[0]?.pcts[7] + scanResults[0]?.pcts[8] + scanResults[0]?.pcts[9]) ?? 0);
+                setResults(scanResults);
+                setBestSymbols(best.slice(0, 3));
+            } else {
+                const scanResults: SymbolDirectionResult[] = [];
+                collectedRef.current.forEach((prices: number[], sym) => {
+                    if (!prices || prices.length < 5) return;
+                    const a = calcMicroChoppiness(prices);
+                    a.symbol = sym; a.label = SYMBOL_LABELS[sym];
+                    scanResults.push(a);
+                });
+                scanResults.sort((a, b) => b.choppinessScore - a.choppinessScore);
+                best = scanResults.map(r => r.symbol);
+                bestScore = scanResults[0]?.choppinessScore ?? 0;
+                setResults(scanResults);
+                setBestSymbols(best.slice(0, 3));
+            }
+
             setScanning(false);
             scanningRef.current = false;
 
             const bestSym = best[0] || '';
-            const bestLabel = bestSym ? SYMBOL_LABELS[bestSym] : '';
-            const bestScore = scanResults[0]?.choppinessScore ?? 0;
+            const bestLabel = bestSym ? SYMBOL_LABELS[bestSym] : '—';
 
-            // Auto-switch logic
-            if (bestSym && bestSym !== currentBestRef.current && autoSwitchRef.current) {
-                if ((window as any).__makoti_lastContractSettled) {
-                    applySwitch(bestSym);
-                } else {
-                    setPending(bestSym);
-                    showNotify(`Waiting for contract settlement to switch to ${bestLabel}…`, 'warn');
+            if (currentBot === 'rf_v4') {
+                if (bestSym && bestSym !== currentBestRef.current && autoSwitchRef.current) {
+                    if ((window as any).__makoti_lastContractSettled) {
+                        applySwitch(bestSym);
+                    } else {
+                        setPending(bestSym);
+                        showNotify(`Waiting for contract settlement to switch to ${bestLabel}…`, 'warn');
+                    }
                 }
-            }
 
-            // Apply pending when contract settles
-            const ps = pendingSymbolRef.current;
-            if (ps && (window as any).__makoti_lastContractSettled && autoSwitchRef.current) {
-                if (best.indexOf(ps) >= 0) applySwitch(ps);
-                else clearPending();
-            }
+                const ps = pendingSymbolRef.current;
+                if (ps && (window as any).__makoti_lastContractSettled && autoSwitchRef.current) {
+                    if (best.indexOf(ps) >= 0) applySwitch(ps);
+                    else clearPending();
+                }
 
-            if (autoSwitchRef.current) {
-                const p = pendingSymbolRef.current;
-                setProgress(p ? `Auto: Pending ${SYMBOL_LABELS[p]} (wait settle)` : `Auto: Best ${bestLabel} (${bestScore}%)`);
-                // Keep WS alive for next cycle
+                if (autoSwitchRef.current) {
+                    const p = pendingSymbolRef.current;
+                    setProgress(p ? `Auto: Pending ${SYMBOL_LABELS[p]} (wait settle)` : `Auto: Best ${bestLabel} (${bestScore}%)`);
+                } else {
+                    setProgress(`Top: ${bestLabel} (${bestScore}%)`);
+                    cleanup();
+                }
             } else {
-                setProgress(`Top: ${bestLabel} (${bestScore}%)`);
-                cleanup(); // one-shot scan, close WS
+                setProgress(`Top: ${bestLabel} (7+8+9: ${bestScore}%)`);
+                cleanup();
             }
         };
 
         const mws = ensureWs();
         if (mws.isOpen()) {
-            // WS already connected — fire requests directly
-            msgHandlerRef.current = msgHandlerRef.current; // ensure latest
-            setProgress('Fetching 7 candles from all 10 volatilities…');
-            ALL_SYMBOLS.forEach(sym => mws.send({ ticks_history: sym, count: 7, end: 'latest', style: 'candles', granularity: 60 }));
+            if (currentBot === 'pvty_kill') {
+                setProgress('Fetching 1000 ticks from all 10 volatilities…');
+                ALL_SYMBOLS.forEach(sym => mws.send({ ticks_history: sym, count: 1000, end: 'latest' }));
+            } else {
+                setProgress('Fetching 60 ticks from all 10 volatilities…');
+                ALL_SYMBOLS.forEach(sym => mws.send({ ticks_history: sym, count: 60, end: 'latest' }));
+            }
         }
         // If not open yet, ensureWs will trigger onReady → which fires the requests
     }, [cleanup, ensureWs, showNotify, applySwitch, setPending, clearPending]);
@@ -434,7 +409,7 @@ export const Scanner: React.FC = () => {
                 <div className='mw-scanner__desc'>
                     {bot === 'pvty_kill'
                         ? 'Scans 1 000 ticks per volatility. Finds markets where digits 7, 8 and 9 each exceed 10%.'
-                        : 'Analyses 7 candles per volatility (1 min). Finds choppy/undirectional markets — auto-switches every 3s.'}
+                        : 'Analyses 60 recent ticks per volatility (current candle). Finds choppy micro-markets — auto-switches every 3s.'}
                 </div>
                 {bot === 'rf_v4' && (
                     <label className='mw-switch-row'>
@@ -458,7 +433,7 @@ export const Scanner: React.FC = () => {
                     <div className='mw-scanner__results-head'>
                         {bot === 'pvty_kill'
                             ? 'Digit 7 / 8 / 9 Distribution (1 000 ticks)'
-                                                         : `Choppiness Analysis (7 candles) ${autoSwitcherActive ? '— Auto-switching ON' : ''}`}
+                                                         : `Micro-Choppiness (current candle, 60 ticks) ${autoSwitcherActive ? '— Auto-switching ON' : ''}`}
                     </div>
                     {bestSymbols.length > 0 && (
                         <div className='mw-scanner__best'>
