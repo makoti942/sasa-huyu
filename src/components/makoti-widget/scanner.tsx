@@ -162,6 +162,7 @@ export const Scanner: React.FC = () => {
     const currentBestRef = useRef<string>('');
     const pendingSymbolRef = useRef<string>('');
     const msgHandlerRef = useRef<(data: any) => void>(() => {});
+    const cancelScanRef = useRef<(() => void) | null>(null);
 
     const showNotify = useCallback((msg: string, type: 'info' | 'success' | 'warn' = 'info') => {
         setNotification({ msg, type });
@@ -222,7 +223,7 @@ export const Scanner: React.FC = () => {
                     }
                 }
             },
-            () => {}
+            () => { cancelScanRef.current?.(); }
         );
         wsRef.current = mws;
         return mws;
@@ -232,6 +233,7 @@ export const Scanner: React.FC = () => {
     const performScan = useCallback((initial = false) => {
         if (scanningRef.current) return;
         const currentBot = botRef.current;
+        cancelScanRef.current = null;
         scanningRef.current = true;
         setScanning(true);
         setProgress('Connecting to Deriv API…');
@@ -246,7 +248,17 @@ export const Scanner: React.FC = () => {
         }, timeoutMs);
 
         msgHandlerRef.current = (data: any) => {
-            if (data.error) return;
+            if (data.error) {
+                if (data.msg_type === 'history') {
+                    const sym: string = data.echo_req?.ticks_history;
+                    if (sym && pendingRef.current.has(sym)) {
+                        pendingRef.current.delete(sym);
+                        setProgress(`Fetched ${ALL_SYMBOLS.length - pendingRef.current.size} / ${ALL_SYMBOLS.length}…`);
+                        if (pendingRef.current.size === 0 && !finalized) { clearTimeout(scanTimeout); finalize(); }
+                    }
+                }
+                return;
+            }
             if (data.msg_type === 'history' && data.history?.prices) {
                 const sym: string = data.echo_req?.ticks_history;
                 if (!sym || !pendingRef.current.has(sym)) return;
@@ -260,6 +272,7 @@ export const Scanner: React.FC = () => {
         const finalize = () => {
             if (finalized) return;
             finalized = true;
+            cancelScanRef.current = null;
             clearTimeout(scanTimeout);
 
             let best: string[] = [];
@@ -333,6 +346,7 @@ export const Scanner: React.FC = () => {
                 cleanup();
             }
         };
+        cancelScanRef.current = finalize;
 
         const mws = ensureWs();
         if (mws.isOpen()) {
