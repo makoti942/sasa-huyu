@@ -284,12 +284,12 @@ export const Scanner: React.FC = () => {
                     const pipSize = PIP_SIZES[sym] || 2;
                     const digits = prices.map(p => Number(Number(p).toFixed(pipSize).slice(-1)));
                     const pcts = calcDigitPcts(digits);
-                    const qualifies = pcts[7] > 10 && pcts[8] > 10 && pcts[9] > 10;
+                    const qualifies = pcts[7] < 10 && pcts[8] < 10 && pcts[9] < 10;
                     scanResults.push({
                         symbol: sym, label: SYMBOL_LABELS[sym],
                         pcts, totalTicks: prices.length,
                         qualifies,
-                        detail: qualifies ? '✅ 7,8,9 qualify' : `7:${pcts[7].toFixed(1)}% 8:${pcts[8].toFixed(1)}% 9:${pcts[9].toFixed(1)}%`,
+                        detail: qualifies ? '✅ 7,8,9 below 10%' : `7:${pcts[7].toFixed(1)}% 8:${pcts[8].toFixed(1)}% 9:${pcts[9].toFixed(1)}%`,
                     });
                 });
                 scanResults.sort((a, b) => (b.pcts[7] + b.pcts[8] + b.pcts[9]) - (a.pcts[7] + a.pcts[8] + a.pcts[9]));

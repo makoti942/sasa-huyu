@@ -25,6 +25,10 @@ export default Engine =>
         }
 
         async virtualPurchase(contract_type) {
+            // Sync symbol from scanner override before reading tradeOptions,
+            // so virtual hook trades follow the auto-analyzer's volatility switch.
+            this.applyAlternateMarketsToCurrentTradeOptions();
+
             // contract_type is the specific type being purchased (e.g. 'DIGITOVER', 'CALL').
             // Do NOT use this.tradeOptions.contract_type — that field is undefined on the
             // tradeOptions object (it stores contractTypes as a plural array instead).
