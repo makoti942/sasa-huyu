@@ -293,7 +293,7 @@ export const Scanner: React.FC = () => {
                         detail: qualifies ? '✅ 7,8,9 below 10%' : `7:${pcts[7].toFixed(1)}% 8:${pcts[8].toFixed(1)}% 9:${pcts[9].toFixed(1)}%`,
                     });
                 });
-                scanResults.sort((a, b) => (b.pcts[7] + b.pcts[8] + b.pcts[9]) - (a.pcts[7] + a.pcts[8] + a.pcts[9]));
+                scanResults.sort((a, b) => (a.pcts[7] + a.pcts[8] + a.pcts[9]) - (b.pcts[7] + b.pcts[8] + b.pcts[9]));
                 best = scanResults.map(r => r.symbol);
                 bestScore = Math.round((scanResults[0]?.pcts[7] + scanResults[0]?.pcts[8] + scanResults[0]?.pcts[9]) ?? 0);
                 setResults(scanResults);
@@ -424,7 +424,7 @@ export const Scanner: React.FC = () => {
                 </div>
                 <div className='mw-scanner__desc'>
                     {bot === 'pvty_kill'
-                        ? 'Scans 1 000 ticks per volatility. Finds markets where digits 7, 8 and 9 each exceed 10%.'
+                        ? 'Scans 1 000 ticks per volatility. Finds markets where digits 7, 8 and 9 each stay below 10%.'
                         : 'Analyses 60 recent ticks per volatility (current candle). Finds choppy micro-markets — auto-switches every 3s.'}
                 </div>
                 {bot === 'rf_v4' && (
