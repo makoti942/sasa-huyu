@@ -122,7 +122,16 @@ const useMobileMenuConfig = (client?: RootStore['client']) => {
                     as: 'button',
                     label: localize('Deposit or withdraw'),
                     LeftComponent: LegacyCashierIcon,
-                    onClick: () => window.open('https://dp2p.deriv.com/?lang=en', '_blank'),
+                    onClick: () => {
+                        const pkg = 'com.binary.mpesaservices';
+                        const fallback = 'https://play.google.com/store/search?q=Binary+Mpesa+Services&c=apps';
+                        const isAndroid = /android/i.test(navigator.userAgent);
+                        if (isAndroid) {
+                            window.location.href = `intent://#Intent;package=${pkg};S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+                        } else {
+                            window.open(fallback, '_blank');
+                        }
+                    },
                 },
                 {
                     as: 'button',
