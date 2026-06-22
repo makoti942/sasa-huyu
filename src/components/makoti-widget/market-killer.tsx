@@ -56,8 +56,9 @@ export const MarketKiller: React.FC = () => {
     const [martingale,  setMartingale]  = useState('2');
     const [takeProfit,  setTakeProfit]  = useState('10');
     const [stopLoss,    setStopLoss]    = useState('5');
-    const [vhEnabled,   setVhEnabled]   = useState(false);
-    const [vhThreshold, setVhThreshold] = useState('1');
+    const [vhEnabled,    setVhEnabled]   = useState(false);
+    const [vhThreshold,  setVhThreshold] = useState('1');
+    const [accurateMode, setAccurateMode] = useState(false);
     const [running,     setRunning]     = useState(false);
     const [pnl,         setPnl]         = useState(0);
     const [logs,        setLogs]        = useState<LogEntry[]>(loadSavedLogs);
@@ -87,6 +88,7 @@ export const MarketKiller: React.FC = () => {
     const vhStateRef = useRef({ enabled: false, threshold: 1, is_virtual: false, loss_count: 0 });
     const vhEnabledRef = useRef(false);
     const vhThresholdRef = useRef(1);
+    const accurateRef = useRef(false);
     const lastTickSymRef = useRef('');
     const virtualTradeRef = useRef<{
         symbol: string;
@@ -233,10 +235,17 @@ export const MarketKiller: React.FC = () => {
         return findBestDuration(prices, direction);
     }, []);
 
+    /* ── Dynamic confidence threshold for ACCURATE mode ─────────────────── */
+    const getConfidenceThreshold = useCallback(() => {
+        if (!accurateRef.current) return CONFIDENCE_THRESHOLD;
+        const losses = consecutiveLossesRef.current;
+        return Math.min(CONFIDENCE_THRESHOLD + losses * 5, 85);
+    }, []);
+
     /* ── Execute ONE trade using the global stake ────────────────────────── */
     const executeTrade = useCallback(async (sym: string, signal: TradeSignal) => {
         if (!runningRef.current) return;
-        if (!signal || signal.confidence < CONFIDENCE_THRESHOLD) return;
+        if (!signal || signal.confidence < getConfidenceThreshold()) return;
 
         const sd = symbolDataRef.current[sym];
         if (!sd) return;
@@ -376,7 +385,7 @@ export const MarketKiller: React.FC = () => {
             activeContractsRef.current = 0;
             setActiveContracts(0);
         }
-    }, [addLog, flushDisplay]);
+    }, [addLog, flushDisplay, getConfidenceThreshold]);
 
     /* ── Handle every incoming tick ──────────────────────────────────────── */
     const onTickReceived = useCallback(() => {
@@ -447,9 +456,10 @@ export const MarketKiller: React.FC = () => {
         if (globalLock.current)  return;
         if (cooldownTicksRef.current > 0) { cooldownTicksRef.current--; return; }
 
+        const dynThreshold = getConfidenceThreshold();
         let bestSym  = '';
         let bestSig: TradeSignal | null = null;
-        let bestConf = CONFIDENCE_THRESHOLD - 1;
+        let bestConf = dynThreshold - 1;
 
         ALL_SYMBOLS.forEach(s => {
             const sd = symbolDataRef.current[s];
@@ -476,7 +486,7 @@ export const MarketKiller: React.FC = () => {
                 executeTrade(bestSym, bestSig).catch(() => {});
             }
         }
-    }, [executeTrade]);
+    }, [executeTrade, getConfidenceThreshold]);
 
     // Ref for onTickReceived to avoid stale closure in WS handler
     const onTickRef = useRef(onTickReceived);
@@ -504,6 +514,7 @@ export const MarketKiller: React.FC = () => {
 
         vhEnabledRef.current = vhEnabled;
         vhThresholdRef.current = Math.max(1, parseInt(vhThreshold) || 1);
+        accurateRef.current = accurateMode;
         vhStateRef.current = {
             enabled: vhEnabled,
             threshold: vhThresholdRef.current,
@@ -512,6 +523,9 @@ export const MarketKiller: React.FC = () => {
         };
         if (vhEnabled) {
             addLog(`🤖 [VIRTUAL HOOK] Enabled — ${vhThresholdRef.current} virtual losses before real trades`, 'info');
+        }
+        if (accurateMode) {
+            addLog(`🎯 ACCURATE mode ON — confidence rises after each real loss (70➔75➔80➔85)`, 'info');
         }
 
         setPnl(0);
@@ -721,6 +735,15 @@ export const MarketKiller: React.FC = () => {
                             value={vhThreshold} onChange={e => setVhThreshold(e.target.value)} disabled={running} />
                     </div>
                 )}
+            </div>
+
+            {/* ── ACCURATE mode toggle ── */}
+            <div className='mw-killer__vh'>
+                <label className='mw-killer__vh-toggle'>
+                    <input type='checkbox' checked={accurateMode}
+                        onChange={e => setAccurateMode(e.target.checked)} disabled={running} />
+                    <span>ACCURATE <small style={{opacity:0.6,fontWeight:400}}>(raises confidence after each loss)</small></span>
+                </label>
             </div>
 
             {/* ── Kill Market button ── */}
