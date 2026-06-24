@@ -68,6 +68,7 @@ const LoginScreenInner = () => {
                     <button
                         className='login-screen__btn login-screen__btn--primary'
                         onClick={handleStandardLogin}
+                        disabled
                     >
                         <span className='login-screen__btn-icon'>→</span>
                         Log In
