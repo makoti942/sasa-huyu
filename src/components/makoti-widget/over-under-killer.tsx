@@ -690,7 +690,7 @@ export const OverUnderKiller: React.FC = () => {
             }
         );
         wsRef.current = mws;
-    }, [stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, addLog, flushDisplay, checkLimits, stopKiller, onTickReceived]);
+    }, [stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold, addLog, flushDisplay, checkLimits, stopKiller, onTickReceived]);
 
     const startKillerRef = useRef(startKiller);
     startKillerRef.current = startKiller;
