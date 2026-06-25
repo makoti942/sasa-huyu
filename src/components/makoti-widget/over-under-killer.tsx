@@ -334,16 +334,6 @@ export const OverUnderKiller: React.FC = () => {
         const sd = symbolDataRef.current[sym];
         if (!sd) return;
 
-        if (signal.contract_type === 'DIGITOVER' || signal.contract_type === 'DIGITUNDER') {
-            const last3 = sd.ticks.slice(-3);
-            if (last3.length === 3) {
-                const rising = last3[0] < last3[1] && last3[1] < last3[2];
-                const falling = last3[0] > last3[1] && last3[1] > last3[2];
-                if (signal.contract_type === 'DIGITOVER' && falling) return;
-                if (signal.contract_type === 'DIGITUNDER' && rising) return;
-            }
-        }
-
         globalLock.current = true;
         activeContractsRef.current = 1;
         setActiveContracts(1);
@@ -351,15 +341,6 @@ export const OverUnderKiller: React.FC = () => {
         const { contract_type, reason, confidence, details } = signal;
         const tradeStake = Number(globalStakeRef.current.toFixed(2));
         const duration = 1;
-        const userSide = inManualRecoveryRef.current ? recoverySideRef.current : contractSideRef.current;
-
-        if (contract_type !== userSide) {
-            addLog(`⏳ Signal is ${contract_type === 'DIGITOVER' ? 'OVER' : 'UNDER'} but need ${userSide === 'DIGITOVER' ? 'OVER' : 'UNDER'} — waiting for alignment`, 'info');
-            globalLock.current = false;
-            activeContractsRef.current = 0;
-            setActiveContracts(0);
-            return;
-        }
 
         addLog(`Trade stake: $${tradeStake.toFixed(2)} (base: $${stakeParsed.current.toFixed(2)}, mg: ${martingaleParsed.current}x)`, 'trade');
 
@@ -368,7 +349,7 @@ export const OverUnderKiller: React.FC = () => {
             ? strategyMatch[1].split(',').map(s => s.trim().split('(')[0])
             : ['ensemble'];
 
-        const actualBarrier = inManualRecoveryRef.current ? recoveryDigitRef.current : predictionDigitRef.current;
+        const actualBarrier = inManualRecoveryRef.current ? recoveryDigitRef.current : (signal.barrier || String(predictionDigitRef.current));
         const contractTypeStr = contract_type === 'DIGITOVER' ? 'DIGITOVER' : 'DIGITUNDER';
 
         const params: any = {
@@ -479,14 +460,8 @@ export const OverUnderKiller: React.FC = () => {
         }
 
         if (bestSym && bestSig) {
-            signalHistoryRef.current.push({ sym: bestSym, type: bestSig.contract_type, conf: bestSig.confidence });
-            if (signalHistoryRef.current.length > 2) signalHistoryRef.current.shift();
-            const last2 = signalHistoryRef.current;
-            const confirmed = last2.length === 2 && last2.every(s => s.sym === bestSym && s.type === bestSig.contract_type);
-            if (confirmed) {
-                signalHistoryRef.current = [];
-                executeTrade(bestSym, bestSig).catch(() => {});
-            }
+            signalHistoryRef.current = [];
+            executeTrade(bestSym, bestSig).catch(() => {});
         }
     }, [executeTrade]);
 
@@ -540,7 +515,7 @@ export const OverUnderKiller: React.FC = () => {
         runningRef.current = true;
         setRunning(true);
 
-        addLog(`⚔ Over/Under Killer — ${contractSide === 'DIGITOVER' ? 'OVER' : 'UNDER'} ${predVal} | stake $${stakeVal}  MG ×${mgVal}  TP $${tpVal}  SL $${slVal}`, 'info');
+        addLog(`⚔ Over/Under Killer — Auto (both sides) | stake $${stakeVal}  MG ×${mgVal}  TP $${tpVal}  SL $${slVal}`, 'info');
         if (recoveryMode) {
             addLog(`🔄 RECOVERY MODE ON — real losses switch to Rise/Fall via Market Killer`, 'info');
         }
@@ -833,7 +808,7 @@ export const OverUnderKiller: React.FC = () => {
                 <div className='mw-killer__mode-note'>
                     {inManualRecoveryRef.current
                         ? <span style={{color:'#f97316'}}>🔴 MANUAL RECOVERY — {recoverySideRef.current === 'DIGITOVER' ? 'OVER' : 'UNDER'} {recoveryDigitRef.current}</span>
-                        : <>Auto (Over/Under) — Digit {predictionDigitRef.current} {contractSide === 'DIGITOVER' ? 'OVER' : 'UNDER'}</>
+                        : <>Auto (Over/Under) — Adaptive side + barrier</>
                     }
                     {activeContracts > 0 && <span className='mw-killer__active-dot'> ● TRADE LIVE</span>}
                 </div>

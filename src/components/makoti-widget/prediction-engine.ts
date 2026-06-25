@@ -3572,7 +3572,7 @@ function findBestValueBarrier(
             bestType = 'DIGITOVER';
             bestBarrier = c.barrier;
             // Confidence: base 68 + value score contribution
-            bestConf = Math.min(84, 68 + Math.round((s - 50) * 0.3));
+            bestConf = Math.min(88, 70 + Math.round((s - 50) * 0.35));
         }
     }
     for (const c of underCands) {
@@ -3581,7 +3581,7 @@ function findBestValueBarrier(
             bestScore = s;
             bestType = 'DIGITUNDER';
             bestBarrier = c.barrier;
-            bestConf = Math.min(84, 68 + Math.round((s - 50) * 0.3));
+            bestConf = Math.min(88, 70 + Math.round((s - 50) * 0.35));
         }
     }
 
@@ -3683,7 +3683,7 @@ const windowAlignment: StrategyModule = {
         }
 
         if (!bestType || bestConsensus < 70) return null;
-        const conf = Math.min(82, 64 + Math.round(bestConsensus * 0.15));
+        const conf = Math.min(86, 68 + Math.round(bestConsensus * 0.15));
         return {
             type: bestType,
             barrier: bestBarrier,
@@ -3730,7 +3730,7 @@ const timedEntry: StrategyModule = {
         if (valueResult.type === 'DIGITOVER' && upCount >= 4) timingBonus = 4;
         if (valueResult.type === 'DIGITUNDER' && downCount >= 4) timingBonus = 4;
 
-        const conf = Math.min(86, valueResult.confidence + timingBonus);
+        const conf = Math.min(90, valueResult.confidence + timingBonus);
         return {
             type: valueResult.type,
             barrier: valueResult.barrier,
@@ -3769,12 +3769,12 @@ const digitGapAnalysis: StrategyModule = {
         if (jumpDir > 0 && lastDigit <= 5) {
             // Jumped up but still mid-range → likely to fall back
             const bar = UNDER_BARRIERS.reduce((best, b) => Math.abs(b - lastDigit) < Math.abs(best - lastDigit) ? b : best, UNDER_BARRIERS[0]);
-            const conf = Math.min(76, 64 + Math.abs(maxJump) * 2);
+            const conf = Math.min(80, 66 + Math.abs(maxJump) * 2);
             return { type: 'DIGITUNDER', barrier: String(bar), score: 1, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
         if (jumpDir < 0 && lastDigit >= 4) {
             const bar = OVER_BARRIERS.reduce((best, b) => Math.abs(b - lastDigit) < Math.abs(best - lastDigit) ? b : best, OVER_BARRIERS[0]);
-            const conf = Math.min(76, 64 + Math.abs(maxJump) * 2);
+            const conf = Math.min(80, 66 + Math.abs(maxJump) * 2);
             return { type: 'DIGITOVER', barrier: String(bar), score: 1, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
         }
 
@@ -3814,7 +3814,7 @@ const streakWithDist: StrategyModule = {
                 if (prob > bestScore) { bestScore = prob; bestBar = b; }
             }
             if (bestBar >= 0 && bestScore >= 45 && bestScore <= 78) {
-                const conf = Math.min(80, 66 + streakUp * 2);
+                const conf = Math.min(84, 70 + streakUp * 2);
                 return { type: 'DIGITUNDER', barrier: String(bestBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
             }
         }
@@ -3825,7 +3825,7 @@ const streakWithDist: StrategyModule = {
                 if (prob > bestScore) { bestScore = prob; bestBar = b; }
             }
             if (bestBar >= 0 && bestScore >= 45 && bestScore <= 78) {
-                const conf = Math.min(80, 66 + streakDown * 2);
+                const conf = Math.min(84, 70 + streakDown * 2);
                 return { type: 'DIGITOVER', barrier: String(bestBar), score: 2, confidence: Math.round(conf), weight: getStrategyWeight(this.name), name: this.name };
             }
         }
@@ -3854,8 +3854,8 @@ const digitMomentum: StrategyModule = {
         const total = ups + downs;
         if (total < 6) return null;
         const r = ups / total;
-        if (r > 0.72) return { type: 'DIGITOVER', score: 2, confidence: Math.min(82, 68 + Math.round((r - 0.72) * 80)), weight: getStrategyWeight(this.name), name: this.name };
-        if (1 - r > 0.72) return { type: 'DIGITUNDER', score: 2, confidence: Math.min(82, 68 + Math.round(((1 - r) - 0.72) * 80)), weight: getStrategyWeight(this.name), name: this.name };
+        if (r > 0.72) return { type: 'DIGITOVER', score: 2, confidence: Math.min(86, 72 + Math.round((r - 0.72) * 80)), weight: getStrategyWeight(this.name), name: this.name };
+        if (1 - r > 0.72) return { type: 'DIGITUNDER', score: 2, confidence: Math.min(86, 72 + Math.round(((1 - r) - 0.72) * 80)), weight: getStrategyWeight(this.name), name: this.name };
         return null;
     },
 };
@@ -3869,7 +3869,7 @@ const frequencyAnomaly: StrategyModule = {
         let hiD = 0, hiP = 0;
         pcts.forEach((p, i) => { if (p > hiP) { hiP = p; hiD = i; } });
         if (hiP < 18) return null;
-        const c = Math.min(80, 62 + Math.round((hiP - 10) * 1.5));
+        const c = Math.min(84, 66 + Math.round((hiP - 10) * 1.5));
         if (hiD >= 6) return { type: 'DIGITUNDER', score: 2, confidence: c, weight: getStrategyWeight(this.name), name: this.name };
         if (hiD <= 3) return { type: 'DIGITOVER', score: 2, confidence: c, weight: getStrategyWeight(this.name), name: this.name };
         const cur = ticks[ticks.length - 1];
@@ -3893,8 +3893,8 @@ const barrierProximity: StrategyModule = {
         const m = t[cur];
         if (!m || m.h + m.l < 8) return null;
         const r = m.h / (m.h + m.l);
-        if (r > 0.68) return { type: 'DIGITOVER', score: 2, confidence: Math.min(80, 65 + Math.round((r - 0.68) * 70)), weight: getStrategyWeight(this.name), name: this.name };
-        if (1 - r > 0.68) return { type: 'DIGITUNDER', score: 2, confidence: Math.min(80, 65 + Math.round(((1 - r) - 0.68) * 70)), weight: getStrategyWeight(this.name), name: this.name };
+        if (r > 0.68) return { type: 'DIGITOVER', score: 2, confidence: Math.min(84, 69 + Math.round((r - 0.68) * 70)), weight: getStrategyWeight(this.name), name: this.name };
+        if (1 - r > 0.68) return { type: 'DIGITUNDER', score: 2, confidence: Math.min(84, 69 + Math.round(((1 - r) - 0.68) * 70)), weight: getStrategyWeight(this.name), name: this.name };
         return null;
     },
 };
@@ -4184,7 +4184,7 @@ export function findBestDuration(
         const accuracy = correct / total;
 
         const indicatorBonus = rsiDurationBonus[d] + bbDurationBonus[d] + emaDurationBonus[d];
-        const score = accuracy * 100 + (maxDuration - d) * 0.5 + indicatorBonus;
+        const score = accuracy * 100 + (maxDuration - d) * 1.0 + indicatorBonus;
 
         if (score > bestScore) {
             bestScore = score;
@@ -4284,10 +4284,13 @@ export function analyzeSignals(
 
     // Adjust confidence based on regime
     let regimeBonus = 0;
-    if (regime === 'STRONG_BULL' && (contractType === 'CALL' || contractType === 'DIGITOVER')) regimeBonus = 5;
-    if (regime === 'STRONG_BEAR' && (contractType === 'PUT' || contractType === 'DIGITUNDER')) regimeBonus = 5;
-    if (regime === 'CHOPPY' && (contractType === 'CALL' || contractType === 'PUT')) regimeBonus = -3;
+    if (regime === 'STRONG_BULL' && (contractType === 'CALL' || contractType === 'DIGITOVER')) regimeBonus = 8;
+    if (regime === 'STRONG_BEAR' && (contractType === 'PUT' || contractType === 'DIGITUNDER')) regimeBonus = 8;
+    if (regime === 'WEAK_BULL' && (contractType === 'CALL' || contractType === 'DIGITOVER')) regimeBonus = 4;
+    if (regime === 'WEAK_BEAR' && (contractType === 'PUT' || contractType === 'DIGITUNDER')) regimeBonus = 4;
+    if (regime === 'CHOPPY' && (contractType === 'CALL' || contractType === 'PUT')) regimeBonus = -5;
     if (regime === 'CHOPPY' && (contractType === 'DIGITEVEN' || contractType === 'DIGITODD')) regimeBonus = 0;
+    if (regime === 'VOLATILE_SPIKE' && (contractType === 'CALL' || contractType === 'PUT')) regimeBonus = -3;
 
     const finalConfidence = Math.max(CONFIDENCE_FLOOR, Math.min(CONFIDENCE_CEILING, Math.round(avgConf + regimeBonus)));
 

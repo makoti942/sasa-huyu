@@ -188,7 +188,7 @@ export const MarketKiller: React.FC = () => {
                     consecutiveLossesRef.current++;
                     globalStakeRef.current = Number((tradeStake * martingaleParsed.current).toFixed(2));
                     if (consecutiveLossesRef.current >= 3) {
-                        cooldownTicksRef.current = 8;
+                        cooldownTicksRef.current = 5;
                         addLog(`⚠ ${consecutiveLossesRef.current} consecutive losses — cooldown ${cooldownTicksRef.current} ticks`, 'loss');
                     }
                     addLog(`❌ LOST -$${Math.abs(profit).toFixed(2)} on ${SYMBOL_LABELS[sym]} | Next stake $${globalStakeRef.current.toFixed(2)} | P&L $${pnlRef.current.toFixed(2)}`, 'loss');
@@ -341,17 +341,6 @@ export const MarketKiller: React.FC = () => {
             } catch (_) {}
             signalHistoryRef.current = [];
             return;
-        }
-
-        // Micro-trend entry gate: don't trade against the trend
-        if (signal.contract_type === 'CALL' || signal.contract_type === 'PUT') {
-            const last3 = sd.prices.slice(-3);
-            if (last3.length === 3) {
-                const rising = last3[0] < last3[1] && last3[1] < last3[2];
-                const falling = last3[0] > last3[1] && last3[1] > last3[2];
-                if (signal.contract_type === 'CALL' && falling) return;
-                if (signal.contract_type === 'PUT' && rising) return;
-            }
         }
 
         globalLock.current = true;
@@ -528,11 +517,11 @@ export const MarketKiller: React.FC = () => {
         });
 
         if (bestSym && bestSig) {
-            // Signal confirmation: require same direction on 4 consecutive ticks
+            // Signal confirmation: require same direction on 2 consecutive ticks
             signalHistoryRef.current.push({ sym: bestSym, type: bestSig.contract_type, conf: bestSig.confidence });
-            if (signalHistoryRef.current.length > 4) signalHistoryRef.current.shift();
-            const last4 = signalHistoryRef.current;
-            const confirmed = last4.length === 4 && last4.every(s => s.sym === bestSym && s.type === bestSig.contract_type);
+            if (signalHistoryRef.current.length > 2) signalHistoryRef.current.shift();
+            const last2 = signalHistoryRef.current;
+            const confirmed = last2.length === 2 && last2.every(s => s.sym === bestSym && s.type === bestSig.contract_type);
             if (confirmed) {
                 signalHistoryRef.current = [];
                 executeTrade(bestSym, bestSig).catch(() => {});
