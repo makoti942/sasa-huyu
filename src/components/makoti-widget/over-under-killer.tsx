@@ -511,7 +511,8 @@ export const OverUnderKiller: React.FC = () => {
         manualRecoveryRef.current = manualRecovery;
         recoverySideRef.current   = recoverySide;
         recoveryDigitRef.current  = Math.min(9, Math.max(0, parseInt(recoveryDigit) || 5));
-        recoveryLossThresholdRef.current = Math.max(0, parseInt(recoveryLossThreshold) || 1);
+        const parsedRlt = parseInt(recoveryLossThreshold);
+        recoveryLossThresholdRef.current = isNaN(parsedRlt) ? 1 : Math.max(0, parsedRlt);
         inManualRecoveryRef.current = false;
         pnlRef.current           = 0;
         globalLock.current       = false;
