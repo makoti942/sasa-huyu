@@ -23,7 +23,7 @@ interface LogEntry {
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
-const CONFIDENCE_THRESHOLD   = 75;
+const CONFIDENCE_THRESHOLD   = 71;
 const CONTRACT_FAMILIES: { label: string; types: ContractType[] }[] = [
     { label: 'Rise/Fall', types: ['CALL', 'PUT'] },
 ];
@@ -577,7 +577,7 @@ export const MarketKiller: React.FC = () => {
             addLog(`🤖 [VIRTUAL HOOK] Enabled — ${vhThresholdRef.current} virtual losses before real trades`, 'info');
         }
         if (accurateMode) {
-            addLog(`🎯 ACCURATE mode ON — confidence rises after each real loss (75➔76➔77…)`, 'info');
+            addLog(`🎯 ACCURATE mode ON — confidence rises after each real loss (71➔72➔73…)`, 'info');
         }
 
         // ── Recovery mode override ──

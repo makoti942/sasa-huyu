@@ -36,7 +36,7 @@ type MarketRegime = 'STRONG_BULL' | 'WEAK_BULL' | 'RANGING' | 'WEAK_BEAR' | 'STR
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_STRATEGY_HISTORY = 50;
 const REGIME_LOOKBACK = 20;
-const CONFIDENCE_FLOOR = 75;
+const CONFIDENCE_FLOOR = 71;
 const CONFIDENCE_CEILING = 98;
 const MIN_TICK_FOR_ANALYSIS = 5;
 
