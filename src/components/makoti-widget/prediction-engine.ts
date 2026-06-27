@@ -36,7 +36,7 @@ type MarketRegime = 'STRONG_BULL' | 'WEAK_BULL' | 'RANGING' | 'WEAK_BEAR' | 'STR
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_STRATEGY_HISTORY = 50;
 const REGIME_LOOKBACK = 20;
-const CONFIDENCE_FLOOR = 68;
+const CONFIDENCE_FLOOR = 75;
 const CONFIDENCE_CEILING = 98;
 const MIN_TICK_FOR_ANALYSIS = 5;
 
@@ -4267,7 +4267,10 @@ export function analyzeSignals(
         }
     }
 
-    if (!bestGroup) return null;
+    if (!bestGroup || bestGroup.votes.length < 2) return null;
+    // Consensus: at least 2 of the top 3 strategies by confidence must agree
+    const top3 = [...bestGroup.votes].sort((a, b) => b.conf - a.conf).slice(0, 3);
+    if (top3.length >= 2 && top3[0].conf < CONFIDENCE_FLOOR + 5) return null;
 
     const key = bestKey;
     const data = bestGroup;
