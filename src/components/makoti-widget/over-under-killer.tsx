@@ -25,7 +25,7 @@ interface LogEntry {
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_TICKS              = 1000;
 const MIN_TICKS_BEFORE_TRADE = 30;
-const CONFIDENCE_THRESHOLD   = 71;
+const CONFIDENCE_THRESHOLD   = 75;
 
 const CONTRACT_SIDES: { label: string; value: ContractSide }[] = [
     { label: 'Over',  value: 'DIGITOVER' },
