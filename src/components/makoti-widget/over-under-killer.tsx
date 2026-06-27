@@ -36,7 +36,7 @@ const LS_LOGS_KEY    = 'mw_ouk_logs';
 const LS_CONFIG_KEY  = 'mw_ouk_config';
 const MAX_SAVED_LOGS = 80;
 
-const DEFAULT_CONFIG = { stake: '0.35', martingale: '2', takeProfit: '10', stopLoss: '5', predictionDigit: '5', contractSide: 'DIGITOVER' as const, recoveryMode: false, manualRecovery: false, recoverySide: 'DIGITOVER' as const, recoveryDigit: '5', recoveryLossThreshold: '1' };
+const DEFAULT_CONFIG = { stake: '0.35', martingale: '2', takeProfit: '10', stopLoss: '5', predictionDigit: '5', contractSide: 'DIGITOVER' as const, recoveryMode: false, manualRecovery: false, recoverySide: 'DIGITOVER' as const, recoveryDigit: '5', recoveryLossThreshold: '1', automate: false };
 
 function loadSavedLogs(): LogEntry[] {
     try { const raw = localStorage.getItem(LS_LOGS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
@@ -116,6 +116,7 @@ export const OverUnderKiller: React.FC = () => {
     const [recoverySide, setRecoverySide] = useState<ContractSide>(initCfg.recoverySide);
     const [recoveryDigit, setRecoveryDigit] = useState(initCfg.recoveryDigit);
     const [recoveryLossThreshold, setRecoveryLossThreshold] = useState(initCfg.recoveryLossThreshold);
+    const [automate,    setAutomate]    = useState(initCfg.automate);
     const [running,     setRunning]     = useState(false);
     const [pnl,         setPnl]         = useState(0);
     const [logs,        setLogs]        = useState<LogEntry[]>(loadSavedLogs);
@@ -143,6 +144,7 @@ export const OverUnderKiller: React.FC = () => {
     const recoveryDigitRef      = useRef(5);
     const recoveryLossThresholdRef = useRef(1);
     const inManualRecoveryRef   = useRef(false);
+    const automateRef           = useRef(false);
 
     const globalLock            = useRef(false);
     const activeContractsRef    = useRef(0);
@@ -155,7 +157,7 @@ export const OverUnderKiller: React.FC = () => {
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
     useEffect(() => { saveLogs(logs); }, [logs]);
-    useEffect(() => { saveConfig({ stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold }); }, [stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold]);
+    useEffect(() => { saveConfig({ stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold, automate }); }, [stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold, automate]);
 
     /* ── Log helper (defined FIRST — no deps) ────────────────────────────── */
     const addLog = useCallback((msg: string, type: LogEntry['type'] = 'info') => {
@@ -348,17 +350,19 @@ export const OverUnderKiller: React.FC = () => {
         activeContractsRef.current = 1;
         setActiveContracts(1);
 
-        const { contract_type, reason, confidence, details } = signal;
+        const { contract_type, reason, confidence, details, barrier: signalBarrier } = signal;
         const tradeStake = Number(globalStakeRef.current.toFixed(2));
         const duration = 1;
-        const userSide = inManualRecoveryRef.current ? recoverySideRef.current : contractSideRef.current;
 
-        if (contract_type !== userSide) {
-            addLog(`⏳ Signal is ${contract_type === 'DIGITOVER' ? 'OVER' : 'UNDER'} but need ${userSide === 'DIGITOVER' ? 'OVER' : 'UNDER'} — waiting for alignment`, 'info');
-            globalLock.current = false;
-            activeContractsRef.current = 0;
-            setActiveContracts(0);
-            return;
+        if (!automateRef.current) {
+            const userSide = inManualRecoveryRef.current ? recoverySideRef.current : contractSideRef.current;
+            if (contract_type !== userSide) {
+                addLog(`⏳ Signal is ${contract_type === 'DIGITOVER' ? 'OVER' : 'UNDER'} but need ${userSide === 'DIGITOVER' ? 'OVER' : 'UNDER'} — waiting for alignment`, 'info');
+                globalLock.current = false;
+                activeContractsRef.current = 0;
+                setActiveContracts(0);
+                return;
+            }
         }
 
         addLog(`Trade stake: $${tradeStake.toFixed(2)} (base: $${stakeParsed.current.toFixed(2)}, mg: ${martingaleParsed.current}x)`, 'trade');
@@ -368,7 +372,7 @@ export const OverUnderKiller: React.FC = () => {
             ? strategyMatch[1].split(',').map(s => s.trim().split('(')[0])
             : ['ensemble'];
 
-        const actualBarrier = inManualRecoveryRef.current ? recoveryDigitRef.current : predictionDigitRef.current;
+        const actualBarrier = automateRef.current ? (signalBarrier || '5') : (inManualRecoveryRef.current ? recoveryDigitRef.current : predictionDigitRef.current);
         const contractTypeStr = contract_type === 'DIGITOVER' ? 'DIGITOVER' : 'DIGITUNDER';
 
         const params: any = {
@@ -513,6 +517,7 @@ export const OverUnderKiller: React.FC = () => {
         recoveryDigitRef.current  = Math.min(9, Math.max(0, parseInt(recoveryDigit) || 5));
         const parsedRlt = parseInt(recoveryLossThreshold);
         recoveryLossThresholdRef.current = isNaN(parsedRlt) ? 1 : Math.max(0, parsedRlt);
+        automateRef.current = automate;
         inManualRecoveryRef.current = false;
         pnlRef.current           = 0;
         globalLock.current       = false;
@@ -540,7 +545,8 @@ export const OverUnderKiller: React.FC = () => {
         runningRef.current = true;
         setRunning(true);
 
-        addLog(`⚔ Over/Under Killer — ${contractSide === 'DIGITOVER' ? 'OVER' : 'UNDER'} ${predVal} | stake $${stakeVal}  MG ×${mgVal}  TP $${tpVal}  SL $${slVal}`, 'info');
+        const modeDesc = automate ? 'Auto (OU) — any signal/barrier' : `${contractSide === 'DIGITOVER' ? 'OVER' : 'UNDER'} ${predVal}`;
+        addLog(`⚔ Over/Under Killer — ${modeDesc} | stake $${stakeVal}  MG ×${mgVal}  TP $${tpVal}  SL $${slVal}`, 'info');
         if (recoveryMode) {
             addLog(`🔄 RECOVERY MODE ON — real losses switch to Rise/Fall via Market Killer`, 'info');
         }
@@ -820,6 +826,14 @@ export const OverUnderKiller: React.FC = () => {
                 </div>
             )}
 
+            <div className='mw-killer__vh'>
+                <label className='mw-killer__vh-toggle'>
+                    <input type='checkbox' checked={automate}
+                        onChange={e => setAutomate(e.target.checked)} disabled={running} />
+                    <span>Automate <small style={{opacity:0.6,fontWeight:400}}>(trade any signal, ignore config)</small></span>
+                </label>
+            </div>
+
             <button
                 className={`mw-btn${running ? ' mw-btn--stop' : ' mw-btn--kill'}`}
                 onClick={running ? stopKiller : startKiller}
@@ -833,6 +847,8 @@ export const OverUnderKiller: React.FC = () => {
                 <div className='mw-killer__mode-note'>
                     {inManualRecoveryRef.current
                         ? <span style={{color:'#f97316'}}>🔴 MANUAL RECOVERY — {recoverySideRef.current === 'DIGITOVER' ? 'OVER' : 'UNDER'} {recoveryDigitRef.current}</span>
+                        : automateRef.current
+                        ? <span style={{color:'#22c55e'}}>🤖 AUTOMATE — any signal / any barrier</span>
                         : <>Auto (Over/Under) — Digit {predictionDigitRef.current} {contractSide === 'DIGITOVER' ? 'OVER' : 'UNDER'}</>
                     }
                     {activeContracts > 0 && <span className='mw-killer__active-dot'> ● TRADE LIVE</span>}
