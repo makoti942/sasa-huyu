@@ -36,7 +36,7 @@ type MarketRegime = 'STRONG_BULL' | 'WEAK_BULL' | 'RANGING' | 'WEAK_BEAR' | 'STR
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 const MAX_STRATEGY_HISTORY = 50;
 const REGIME_LOOKBACK = 20;
-const CONFIDENCE_FLOOR = 60;
+const CONFIDENCE_FLOOR = 68;
 const CONFIDENCE_CEILING = 98;
 const MIN_TICK_FOR_ANALYSIS = 5;
 
@@ -58,7 +58,7 @@ function getStrategyWeight(name: string): number {
     const p = strategyPerf[name];
     if (!p || p.total < 5) return 1.0;
     const rate = p.wins / p.total;
-    return Math.max(0.3, Math.min(1.5, rate * 2));
+    return Math.max(0.3, Math.min(3.0, rate * 4));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -4184,7 +4184,7 @@ export function findBestDuration(
         const accuracy = correct / total;
 
         const indicatorBonus = rsiDurationBonus[d] + bbDurationBonus[d] + emaDurationBonus[d];
-        const score = accuracy * 100 + (maxDuration - d) * 0.5 + indicatorBonus;
+        const score = accuracy * 100 + (maxDuration - d) * 0.5 + indicatorBonus + (d === 1 ? 10 : 0);
 
         if (score > bestScore) {
             bestScore = score;
@@ -4233,40 +4233,45 @@ export function analyzeSignals(
     if (votes.length === 0) return null;
 
     // Group votes by contract type
-    const groups = new Map<string, { totalWeight: number; weightedConf: number; reasons: string[]; scores: number[]; barriers: string[] }>();
+    type GroupData = { votes: { conf: number; weight: number; score: number; barrier?: string }[]; barriers: string[] };
+    const groups = new Map<string, GroupData>();
 
     for (const v of votes) {
         const key = v.type;
-        if (!groups.has(key)) {
-            groups.set(key, { totalWeight: 0, weightedConf: 0, reasons: [], scores: [], barriers: [] });
-        }
+        if (!groups.has(key)) groups.set(key, { votes: [], barriers: [] });
         const g = groups.get(key)!;
-        g.totalWeight += v.weight;
-        g.weightedConf += v.confidence * v.weight;
-        g.scores.push(v.score);
+        g.votes.push({ conf: v.confidence, weight: v.weight, score: v.score, barrier: v.barrier });
         if (v.barrier) g.barriers.push(v.barrier);
     }
 
-    // Pick the best group — use weighted average confidence as primary metric
-    let bestGroup: { key: string; data: typeof groups extends Map<string, infer V> ? V : never } | null = null;
+    // Pick the best group using top-quartile weighted average confidence
+    function topQuartileConf(vs: GroupData['votes']): number {
+        const sorted = [...vs].sort((a, b) => b.conf - a.conf);
+        const take = Math.max(1, Math.ceil(sorted.length / 4));
+        const top = sorted.slice(0, take);
+        const tw = top.reduce((s, v) => s + v.weight, 0);
+        return tw > 0 ? top.reduce((s, v) => s + v.conf * v.weight, 0) / tw : 0;
+    }
+
+    let bestKey = '';
+    let bestGroup: GroupData | null = null;
     let bestScore = 0;
 
-    for (const [key, data] of groups) {
-        const avgConf = data.totalWeight > 0 ? data.weightedConf / data.totalWeight : 0;
-        const voterCount = data.scores.length;
-        // Use avgConf as primary score, small bonus for multi-strategy consensus
-        const groupScore = avgConf + Math.min(3, voterCount * 0.5);
-
+    for (const [key, g] of groups) {
+        const tqConf = topQuartileConf(g.votes);
+        const groupScore = tqConf + Math.min(3, g.votes.length * 0.5);
         if (groupScore > bestScore) {
             bestScore = groupScore;
-            bestGroup = { key, data };
+            bestKey = key;
+            bestGroup = g;
         }
     }
 
     if (!bestGroup) return null;
 
-    const { key, data } = bestGroup;
-    const avgConf = data.totalWeight > 0 ? data.weightedConf / data.totalWeight : 0;
+    const key = bestKey;
+    const data = bestGroup;
+    const avgConf = topQuartileConf(data.votes);
     let barrier = data.barriers.length > 0
         ? data.barriers.sort((a, b) => {
             const freqA = data.barriers.filter(x => x === a).length;
