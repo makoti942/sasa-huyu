@@ -537,7 +537,6 @@ export const MarketKiller: React.FC = () => {
         martingaleParsed.current = mgVal;
         tpRef.current            = tpVal;
         slRef.current            = slVal;
-        pnlRef.current           = 0;
         globalLock.current       = false;
         virtualTradeRef.current  = null;
         lastTickSymRef.current   = '';
@@ -579,7 +578,6 @@ export const MarketKiller: React.FC = () => {
             addLog(`🔄 RECOVERY MODE — recover $${recovery.pending.toFixed(2)} loss | stake $${recovery.stake} ×${recovery.martingale} | VH threshold ${vhThresh}`, 'info');
         }
 
-        setPnl(0);
         setActiveContracts(0);
         setSymbolDisplay({});
         contractMapRef.current = new Map();

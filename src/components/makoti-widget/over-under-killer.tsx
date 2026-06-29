@@ -509,7 +509,6 @@ export const OverUnderKiller: React.FC = () => {
         recoveryLossThresholdRef.current = isNaN(parsedRlt) ? 1 : Math.max(0, parsedRlt);
         automateRef.current = automate;
         inManualRecoveryRef.current = false;
-        pnlRef.current           = 0;
         globalLock.current       = false;
         lastTickSymRef.current   = '';
         activeContractsRef.current = 0;
@@ -517,7 +516,6 @@ export const OverUnderKiller: React.FC = () => {
         consecutiveLossesRef.current = 0;
         cooldownTicksRef.current = 0;
 
-        setPnl(0);
         setActiveContracts(0);
         setSymbolDisplay({});
         setSignalDisplay(null);
