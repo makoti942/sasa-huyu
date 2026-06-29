@@ -28,26 +28,9 @@ const CONTRACT_FAMILIES: { label: string; types: ContractType[] }[] = [
     { label: 'Rise/Fall', types: ['CALL', 'PUT'] },
 ];
 
-const LS_LOGS_KEY            = 'mw_mk_logs';
 const LS_CONFIG_KEY          = 'mw_mk_config';
-const MAX_SAVED_LOGS         = 80;
 
 const DEFAULT_CONFIG = { stake: '0.35', martingale: '2', takeProfit: '10', stopLoss: '5', vhEnabled: false, vhThreshold: '1', accurateMode: false };
-
-function loadSavedLogs(): LogEntry[] {
-    try {
-        const raw = localStorage.getItem(LS_LOGS_KEY);
-        return raw ? (JSON.parse(raw) as LogEntry[]) : [];
-    } catch {
-        return [];
-    }
-}
-
-function saveLogs(logs: LogEntry[]) {
-    try {
-        localStorage.setItem(LS_LOGS_KEY, JSON.stringify(logs.slice(0, MAX_SAVED_LOGS)));
-    } catch {}
-}
 
 function loadConfig(): typeof DEFAULT_CONFIG {
     try {
@@ -80,7 +63,7 @@ export const MarketKiller: React.FC = () => {
     const [accurateMode, setAccurateMode] = useState(initCfg.accurateMode);
     const [running,     setRunning]     = useState(false);
     const [pnl,         setPnl]         = useState(0);
-    const [logs,        setLogs]        = useState<LogEntry[]>(loadSavedLogs);
+    const [logs,        setLogs]        = useState<LogEntry[]>([]);
     const [activeContracts, setActiveContracts] = useState(0);
     const [symbolDisplay, setSymbolDisplay] = useState<
         Record<string, { lastSignal: string; wins: number; losses: number; stake: number }>
@@ -123,7 +106,6 @@ export const MarketKiller: React.FC = () => {
     } | null>(null);
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
-    useEffect(() => { saveLogs(logs); }, [logs]);
     useEffect(() => { saveConfig({ stake, martingale, takeProfit, stopLoss, vhEnabled, vhThreshold, accurateMode }); }, [stake, martingale, takeProfit, stopLoss, vhEnabled, vhThreshold, accurateMode]);
 
     /* ── Recovery auto-start ─────────────────────────────────────────────── */

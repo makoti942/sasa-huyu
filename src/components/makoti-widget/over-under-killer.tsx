@@ -32,18 +32,9 @@ const CONTRACT_SIDES: { label: string; value: ContractSide }[] = [
     { label: 'Under', value: 'DIGITUNDER' },
 ];
 
-const LS_LOGS_KEY    = 'mw_ouk_logs';
 const LS_CONFIG_KEY  = 'mw_ouk_config';
-const MAX_SAVED_LOGS = 80;
 
 const DEFAULT_CONFIG = { stake: '0.35', martingale: '2', takeProfit: '10', stopLoss: '5', predictionDigit: '5', contractSide: 'DIGITOVER' as const, recoveryMode: false, manualRecovery: false, recoverySide: 'DIGITOVER' as const, recoveryDigit: '5', recoveryLossThreshold: '1', automate: false };
-
-function loadSavedLogs(): LogEntry[] {
-    try { const raw = localStorage.getItem(LS_LOGS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
-}
-function saveLogs(logs: LogEntry[]) {
-    try { localStorage.setItem(LS_LOGS_KEY, JSON.stringify(logs.slice(0, MAX_SAVED_LOGS))); } catch {}
-}
 
 function loadConfig(): typeof DEFAULT_CONFIG {
     try {
@@ -119,7 +110,7 @@ export const OverUnderKiller: React.FC = () => {
     const [automate,    setAutomate]    = useState(initCfg.automate);
     const [running,     setRunning]     = useState(false);
     const [pnl,         setPnl]         = useState(0);
-    const [logs,        setLogs]        = useState<LogEntry[]>(loadSavedLogs);
+    const [logs,        setLogs]        = useState<LogEntry[]>([]);
     const [activeContracts, setActiveContracts] = useState(0);
     const [digitAnalysis, setDigitAnalysis] = useState<ReturnType<typeof analyzeDigitPsychology> | null>(null);
     const [signalDisplay, setSignalDisplay] = useState<{
@@ -156,7 +147,6 @@ export const OverUnderKiller: React.FC = () => {
     const lastTickSymRef        = useRef('');
 
     /* ── Persist ──────────────────────────────────────────────────────────── */
-    useEffect(() => { saveLogs(logs); }, [logs]);
     useEffect(() => { saveConfig({ stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold, automate }); }, [stake, martingale, takeProfit, stopLoss, predictionDigit, contractSide, recoveryMode, manualRecovery, recoverySide, recoveryDigit, recoveryLossThreshold, automate]);
 
     /* ── Log helper (defined FIRST — no deps) ────────────────────────────── */
