@@ -75,6 +75,9 @@ const StandaloneLoginScreen: React.FC = () => {
     return (
         <div className={`login-screen${visible ? ' login-screen--visible' : ''}`}>
             <div className='login-screen__bg'>
+                <video className='login-screen__video' autoPlay muted loop playsInline preload='auto'>
+                    <source src='/videos/bg1.mp4' type='video/mp4' />
+                </video>
                 <div className='login-screen__bg-orbs'>
                     <div className='login-screen__orb login-screen__orb--1' />
                     <div className='login-screen__orb login-screen__orb--2' />
