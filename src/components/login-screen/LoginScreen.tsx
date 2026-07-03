@@ -136,7 +136,7 @@ const LoginScreenInner = () => {
                 </div>
                 <div className='login-screen__footer-info'>
                     <span className='login-screen__footer-label'>Contact</span>
-                    <span className='login-screen__footer-value'>makotitraders@proton.me</span>
+                    <span className='login-screen__footer-value'>+254 799 476 880</span>
                 </div>
                 <div className='login-screen__footer-info'>
                     <span className='login-screen__footer-label'>Version</span>
