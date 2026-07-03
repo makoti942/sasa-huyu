@@ -7,10 +7,28 @@ import './makoti-widget.scss';
 type Tab = 'scanner' | 'market_killer' | 'over_under';
 const PAD = 8;
 
+function isLoggedIn(): boolean {
+    try {
+        const loggedState = document.cookie.includes('logged_state=true');
+        const accountsList = JSON.parse(localStorage.getItem('accountsList') ?? '{}');
+        return loggedState || Object.keys(accountsList).length > 0;
+    } catch { return false; }
+}
+
 export const MakotiWidget: React.FC = () => {
     const [open, setOpen]         = useState(() => localStorage.getItem('mw_open') === 'true');
     const [tab, setTab]           = useState<Tab>(() => (localStorage.getItem('mw_tab') as Tab) || 'scanner');
     const [minimized, setMinimized] = useState(false);
+    const [loggedIn, setLoggedIn] = useState(isLoggedIn());
+
+    useEffect(() => {
+        const check = () => setLoggedIn(isLoggedIn());
+        const interval = setInterval(check, 1000);
+        window.addEventListener('storage', check);
+        return () => { clearInterval(interval); window.removeEventListener('storage', check); };
+    }, []);
+
+    if (!loggedIn) return null;
 
     /* ── FAB position (refs for zero-rerender drag) ─────────── */
     const btnPosRef = useRef({ x: Math.max(PAD, window.innerWidth - 88), y: Math.max(PAD, window.innerHeight - 108) });
