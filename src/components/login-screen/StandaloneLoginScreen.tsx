@@ -4,8 +4,8 @@ import { generateOAuthURL } from '@/components/shared';
 import { startNewLogin, startNewSignup } from '@/auth/NewDerivAuth';
 import './LoginScreen.scss';
 
-const FLOATING_ICONS = ['✦', '◆', '⬡', '●', '★', '◆', '✦', '⬡'];
-const SPARKLES = 16;
+const FLOATING_ICONS = ['✦', '◆', '⬡', '●', '★', '⟡', '◆', '✦', '⬡', '◈', '▣', '◇'];
+const SPARKLES = 30;
 
 const isUserLoggedIn = () => {
     const loggedState = Cookies.get('logged_state') === 'true';
@@ -79,42 +79,49 @@ const StandaloneLoginScreen: React.FC = () => {
                     <div className='login-screen__orb login-screen__orb--1' />
                     <div className='login-screen__orb login-screen__orb--2' />
                     <div className='login-screen__orb login-screen__orb--3' />
+                    <div className='login-screen__orb login-screen__orb--4' />
                 </div>
             </div>
+
+            <div className='login-screen__grid' />
 
             <div className='login-screen__floating-icons'>
                 {FLOATING_ICONS.map((icon, i) => (
                     <span key={i} className='login-screen__float-icon' style={{
-                        left: `${8 + (i * 11) % 85}%`,
-                        animationDelay: `${i * 1.8}s`,
-                        animationDuration: `${14 + (i % 5) * 3}s`,
-                        fontSize: `${1.2 + (i % 4) * 0.5}rem`,
+                        left: `${(i * 7.7 + 2) % 92}%`,
+                        animationDelay: `${i * 1.4}s`,
+                        animationDuration: `${16 + (i % 6) * 4}s`,
+                        fontSize: `${1 + (i % 5) * 0.6}rem`,
+                        opacity: 0.04 + (i % 3) * 0.02,
                     }}>{icon}</span>
                 ))}
             </div>
 
             {[...Array(SPARKLES)].map((_, i) => (
                 <div key={i} className='login-screen__sparkle' style={{
-                    left: `${(i * 7.3 + 3) % 100}%`,
-                    top: `${(i * 11.7 + 5) % 100}%`,
-                    animationDelay: `${i * 0.7}s`,
-                    animationDuration: `${3 + (i % 3) * 2}s`,
+                    left: `${(i * 4.1 + 1) % 100}%`,
+                    top: `${(i * 6.3 + 3) % 100}%`,
+                    animationDelay: `${i * 0.5}s`,
+                    animationDuration: `${2.5 + (i % 5) * 1.8}s`,
+                    width: `${2 + (i % 3)}px`,
+                    height: `${2 + (i % 3)}px`,
                 }} />
             ))}
 
-            <div className='login-screen__content'>
-                <div className='login-screen__glow' />
+            <div className='login-screen__top-glow' />
 
+            <div className='login-screen__header'>
                 <div className='login-screen__logo-wrap'>
                     <div className='login-screen__logo-ring' />
                     <img src='/makoti-logo.jpg' alt='Makoti Traders' className='login-screen__logo' />
                 </div>
-
                 <div className='login-screen__brand'>
                     <h1 className='login-screen__title'>MAKOTI TRADERS</h1>
                     <p className='login-screen__sub'>POWERED BY DERIV</p>
                 </div>
+            </div>
 
+            <div className='login-screen__center'>
                 <p className='login-screen__tagline'>
                     Your intelligent trading platform.<br />
                     Automate strategies. Trade smarter.
@@ -145,10 +152,22 @@ const StandaloneLoginScreen: React.FC = () => {
                     <span className='login-screen__btn-icon'>+</span>
                     <span className='login-screen__btn-text'>Create Account</span>
                 </button>
+            </div>
 
-                <p className='login-screen__footer-note'>
-                    Secure login powered by Deriv OAuth
-                </p>
+            <div className='login-screen__footer'>
+                <div className='login-screen__footer-info'>
+                    <span className='login-screen__footer-label'>Developed by</span>
+                    <span className='login-screen__footer-value'>Makoti Developers</span>
+                </div>
+                <div className='login-screen__footer-info'>
+                    <span className='login-screen__footer-label'>Contact</span>
+                    <span className='login-screen__footer-value'>makotitraders@proton.me</span>
+                </div>
+                <div className='login-screen__footer-info'>
+                    <span className='login-screen__footer-label'>Version</span>
+                    <span className='login-screen__footer-value'>2.0.0</span>
+                </div>
+                <p className='login-screen__footer-note'>Secure login powered by Deriv OAuth</p>
             </div>
         </div>
     );
