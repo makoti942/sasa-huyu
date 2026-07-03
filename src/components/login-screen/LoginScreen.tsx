@@ -5,6 +5,9 @@ import { startNewLogin, startNewSignup } from '@/auth/NewDerivAuth';
 import useTMB from '@/hooks/useTMB';
 import './LoginScreen.scss';
 
+const FLOATING_ICONS = ['✦', '◆', '⬡', '●', '★', '◆', '✦', '⬡'];
+const SPARKLES = 16;
+
 const LoginScreenInner = () => {
     const [isNewLoginLoading, setIsNewLoginLoading] = useState(false);
     const [newLoginError, setNewLoginError] = useState('');
@@ -46,11 +49,39 @@ const LoginScreenInner = () => {
 
     return (
         <div className={`login-screen${visible ? ' login-screen--visible' : ''}`}>
-            <div className='login-screen__bg' style={{ backgroundImage: "url('/makoti-logo.jpg')" }} />
-            <div className='login-screen__overlay' />
+            <div className='login-screen__bg'>
+                <div className='login-screen__bg-orbs'>
+                    <div className='login-screen__orb login-screen__orb--1' />
+                    <div className='login-screen__orb login-screen__orb--2' />
+                    <div className='login-screen__orb login-screen__orb--3' />
+                </div>
+            </div>
+
+            <div className='login-screen__floating-icons'>
+                {FLOATING_ICONS.map((icon, i) => (
+                    <span key={i} className='login-screen__float-icon' style={{
+                        left: `${8 + (i * 11) % 85}%`,
+                        animationDelay: `${i * 1.8}s`,
+                        animationDuration: `${14 + (i % 5) * 3}s`,
+                        fontSize: `${1.2 + (i % 4) * 0.5}rem`,
+                    }}>{icon}</span>
+                ))}
+            </div>
+
+            {[...Array(SPARKLES)].map((_, i) => (
+                <div key={i} className='login-screen__sparkle' style={{
+                    left: `${(i * 7.3 + 3) % 100}%`,
+                    top: `${(i * 11.7 + 5) % 100}%`,
+                    animationDelay: `${i * 0.7}s`,
+                    animationDuration: `${3 + (i % 3) * 2}s`,
+                }} />
+            ))}
 
             <div className='login-screen__content'>
+                <div className='login-screen__glow' />
+
                 <div className='login-screen__logo-wrap'>
+                    <div className='login-screen__logo-ring' />
                     <img src='/makoti-logo.jpg' alt='Makoti Traders' className='login-screen__logo' />
                 </div>
 
@@ -64,25 +95,15 @@ const LoginScreenInner = () => {
                     Automate strategies. Trade smarter.
                 </p>
 
-                <div className='login-screen__buttons'>
-                    <button
-                        className='login-screen__btn login-screen__btn--primary'
-                        onClick={handleStandardLogin}
-                        disabled
-                    >
-                        <span className='login-screen__btn-icon'>→</span>
-                        Log In
-                    </button>
-
-                    <button
-                        className={`login-screen__btn login-screen__btn--secondary${isNewLoginLoading ? ' login-screen__btn--loading' : ''}`}
-                        onClick={handleNewAccountsLogin}
-                        disabled={isNewLoginLoading}
-                    >
-                        <span className='login-screen__btn-icon'>✦</span>
-                        {isNewLoginLoading ? 'Preparing…' : 'Login (New Accounts)'}
-                    </button>
-                </div>
+                <button
+                    className={`login-screen__btn login-screen__btn--login${isNewLoginLoading ? ' login-screen__btn--loading' : ''}`}
+                    onClick={handleNewAccountsLogin}
+                    disabled={isNewLoginLoading}
+                >
+                    <span className='login-screen__btn-shimmer' />
+                    <span className='login-screen__btn-icon'>✦</span>
+                    <span className='login-screen__btn-text'>{isNewLoginLoading ? 'Preparing…' : 'Login (New Accounts)'}</span>
+                </button>
 
                 {newLoginError && (
                     <p className='login-screen__error'>{newLoginError}</p>
@@ -92,25 +113,17 @@ const LoginScreenInner = () => {
                     <span>or</span>
                 </div>
 
-                <div className='login-screen__create-wrap'>
-                    <button
-                        className='login-screen__btn login-screen__btn--create'
-                        onClick={startNewSignup}
-                    >
-                        <span className='login-screen__btn-icon'>+</span>
-                        Create Account
-                    </button>
-                </div>
+                <button
+                    className='login-screen__btn login-screen__btn--create'
+                    onClick={startNewSignup}
+                >
+                    <span className='login-screen__btn-icon'>+</span>
+                    <span className='login-screen__btn-text'>Create Account</span>
+                </button>
 
                 <p className='login-screen__footer-note'>
                     Secure login powered by Deriv OAuth
                 </p>
-            </div>
-
-            <div className='login-screen__particles'>
-                {[...Array(12)].map((_, i) => (
-                    <div key={i} className={`login-screen__particle login-screen__particle--${i + 1}`} />
-                ))}
             </div>
         </div>
     );
