@@ -8,7 +8,21 @@ const pip_sizes: Record<string, number> = {
   '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
 };
 const SYMBOLS = Object.keys(pip_sizes);
+const DTRADER_CONFIG_KEY = 'mw_dtrader_config';
+
+function loadDtraderConfig() {
+  try {
+    const raw = localStorage.getItem(DTRADER_CONFIG_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveDtraderConfig(cfg: Record<string, any>) {
+  try { localStorage.setItem(DTRADER_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
+}
+
 const MAX_TICKS = 1000;
+const DIGIT_WINDOW = 200; // match OU killer digit window
 
 const TRADE_TYPES = [
   { value: 'rise_fall', label: 'Rise/Fall' },
@@ -70,36 +84,35 @@ const NewDTrader: React.FC = () => {
   const chartStyleRef = useRef<'line' | 'candle'>('line');
   const timeframeRef = useRef(60);
 
-  const [symbol, setSymbol] = useState('R_100');
-  const [tradeType, setTradeType] = useState('rise_fall');
-  const [stake, setStake] = useState('0.35');
-  const [barrier, setBarrier] = useState('5');
-  const [duration, setDuration] = useState(1);
-  const [durationUnit, setDurationUnit] = useState<'t' | 'm'>('t');
-  const [allowEquals, setAllowEquals] = useState(false);
-  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
-  const [currentDigit, setCurrentDigit] = useState<number | null>(null);
-  const [tickHistory, setTickHistory] = useState<number[]>([]);
-  const [digitCounts, setDigitCounts] = useState<number[]>(Array(10).fill(0));
-  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
-  const [balance, setBalance] = useState<number | null>(null);
-  const [activeContracts, setActiveContracts] = useState<ContractInfo[]>([]);
-  const [contractHistory, setContractHistory] = useState<ContractInfo[]>([]);
-  const [sessionStats, setSessionStats] = useState({ wins: 0, losses: 0, profit: 0 });
-  const [isTrading, setIsTrading] = useState(false);
-  const [exitHighlight, setExitHighlight] = useState<{ digit: number; win: boolean } | null>(null);
-  const [showChart, setShowChart] = useState(true);
-  const [contractType, setContractType] = useState('CALL');
+  const savedCfg = loadDtraderConfig();
+
+  const [symbol, setSymbol] = useState(savedCfg.symbol || 'R_100');
+  const [tradeType, setTradeType] = useState(savedCfg.tradeType || 'rise_fall');
+  const [stake, setStake] = useState(savedCfg.stake || '0.35');
+  const [barrier, setBarrier] = useState(savedCfg.barrier || '5');
+  const [duration, setDuration] = useState(savedCfg.duration ?? 1);
+  const [durationUnit, setDurationUnit] = useState<'t' | 'm'>(savedCfg.durationUnit || 't');
+  const [allowEquals, setAllowEquals] = useState(savedCfg.allowEquals ?? false);
+  const [contractType, setContractType] = useState(savedCfg.contractType || 'CALL');
+  const [growthRate, setGrowthRate] = useState(savedCfg.growthRate ?? 0.01);
+  const [takeProfit, setTakeProfit] = useState(savedCfg.takeProfit || '');
+  const [chartStyle, setChartStyle] = useState<'line' | 'candle'>(savedCfg.chartStyle || 'line');
+  const [timeframe, setTimeframe] = useState(savedCfg.timeframe ?? 60);
   const [payout, setPayout] = useState<string | null>(null);
   const [tradeResult, setTradeResult] = useState<{ isWin: boolean; profit: number; contract_type: string; entry_digit: number; exit_digit: number } | null>(null);
-  const [growthRate, setGrowthRate] = useState(0.01);
-  const [takeProfit, setTakeProfit] = useState('');
   const contractTypeRef = useRef('CALL');
-  const [chartStyle, setChartStyle] = useState<'line' | 'candle'>('line');
-  const [timeframe, setTimeframe] = useState(60);
   const [showIndicators, setShowIndicators] = useState(false);
   const [tickCounter, setTickCounter] = useState(0);
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig[]>([]);
+
+  /* ── Persist config ──────────────────────────────────────────── */
+  useEffect(() => {
+    saveDtraderConfig({
+      symbol, tradeType, stake, barrier, duration, durationUnit, allowEquals,
+      contractType, growthRate, takeProfit, chartStyle, timeframe,
+    });
+  }, [symbol, tradeType, stake, barrier, duration, durationUnit, allowEquals, contractType, growthRate, takeProfit, chartStyle, timeframe]);
+
   const indicatorRef = useRef<IndicatorConfig[]>([]);
   const indicatorValues = useRef<Map<string, (number | null)[]>>(new Map());
   const contractHistoryRef = useRef<ContractInfo[]>([]);
@@ -1325,7 +1338,7 @@ const NewDTrader: React.FC = () => {
                   const isHighlight = exitHighlight?.digit === i;
                   const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
                   const isBarrier = String(i) === barrier;
-                  const pct = tickHistory.length > 0 ? (digitCounts[i] / tickHistory.length) * 100 : 0;
+                  const win = tickHistory.slice(-DIGIT_WINDOW); const winTotal = win.length || 1; const pct = (win.filter(d => d === i).length / winTotal) * 100;
                   return (
                     <div key={i} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => setBarrier(String(i))}>
                       <div style={{
@@ -1644,7 +1657,7 @@ const NewDTrader: React.FC = () => {
               const isHighlight = exitHighlight?.digit === i;
               const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
               const isBarrier = String(i) === barrier;
-              const pct = tickHistory.length > 0 ? (digitCounts[i] / tickHistory.length) * 100 : 0;
+              const win = tickHistory.slice(-DIGIT_WINDOW); const winTotal = win.length || 1; const pct = (win.filter(d => d === i).length / winTotal) * 100;
               const halfAngle = (pct / 100) * 180;
               const barColor = isHighlight ? hlColor : (pct > 12 ? '#4caf50' : pct > 9 ? '#ff9800' : '#f44336');
               return (
