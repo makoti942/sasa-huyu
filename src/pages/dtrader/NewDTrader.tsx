@@ -21,13 +21,19 @@ function saveDtraderConfig(cfg: Record<string, any>) {
   try { localStorage.setItem(DTRADER_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
 }
 
-const MAX_TICKS = 1000;
+const VOLATILITY_NAMES: Record<string, string> = {
+  R_100: 'Volatility 100 Index', R_75: 'Volatility 75 Index', R_50: 'Volatility 50 Index',
+  R_25: 'Volatility 25 Index', R_10: 'Volatility 10 Index',
+  '1HZ100V': 'Volatility 100 (1s) Index', '1HZ75V': 'Volatility 75 (1s) Index',
+  '1HZ50V': 'Volatility 50 (1s) Index', '1HZ25V': 'Volatility 25 (1s) Index',
+  '1HZ10V': 'Volatility 10 (1s) Index',
+};
 const DIGIT_WINDOW = 200; // match OU killer digit window
 
 const TRADE_TYPES = [
   { value: 'rise_fall', label: 'Rise/Fall' },
   { value: 'over_under', label: 'Over/Under' },
-  { value: 'digits', label: 'Digits' },
+    { value: 'digits', label: 'Matches/Differs' },
   { value: 'even_odd', label: 'Even/Odd' },
   { value: 'accumulator', label: 'Accumulator' },
 ];
@@ -104,6 +110,7 @@ const NewDTrader: React.FC = () => {
   const [showIndicators, setShowIndicators] = useState(false);
   const [tickCounter, setTickCounter] = useState(0);
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig[]>([]);
+  const [activeContracts, setActiveContracts] = useState<ContractInfo[]>([]);
 
   /* ── Persist config ──────────────────────────────────────────── */
   useEffect(() => {
@@ -781,12 +788,27 @@ const NewDTrader: React.FC = () => {
       settledContractIds.current.add(c.id);
       const exitPrice = prices[prices.length - 1];
       const exitD = extractDigit(exitPrice, pipSizeRef.current);
+      const entryD = c.entry_digit;
+      const barrierD = (c as any).barrier != null ? parseInt(String((c as any).barrier)) : -1;
 
-      setExitHighlight({ digit: exitD, win: false });
+      let isWin = false;
+      switch (c.contract_type) {
+        case 'DIGITMATCH': isWin = entryD === exitD; break;
+        case 'DIGITDIFF':  isWin = entryD !== exitD; break;
+        case 'DIGITOVER':  isWin = exitD > barrierD; break;
+        case 'DIGITUNDER': isWin = exitD < barrierD; break;
+        case 'DIGITEVEN':  isWin = exitD % 2 === 0; break;
+        case 'DIGITODD':   isWin = exitD % 2 !== 0; break;
+        case 'CALL':       isWin = exitPrice >= (c.entry_tick || 0); break;
+        case 'PUT':        isWin = exitPrice <= (c.entry_tick || 0); break;
+        default:           isWin = false;
+      }
+
+      setExitHighlight({ digit: exitD, win: isWin });
       setTimeout(() => setExitHighlight(null), 3000);
       setTradeResult({
-        isWin: false, profit: 0,
-        contract_type: c.contract_type, entry_digit: c.entry_digit, exit_digit: exitD,
+        isWin, profit: 0,
+        contract_type: c.contract_type, entry_digit: entryD, exit_digit: exitD,
       });
 
       setActiveContracts(prev => {
@@ -800,7 +822,7 @@ const NewDTrader: React.FC = () => {
           ...c,
           exit_tick: exitPrice, exit_digit: exitD,
           exit_epoch: tickEpochs.current[tickEpochs.current.length - 1],
-          profit: 0, is_sold: true, is_win: false,
+          profit: 0, is_sold: true, is_win: isWin,
         }];
         contractHistoryRef.current = next;
         return next;
@@ -1205,7 +1227,7 @@ const NewDTrader: React.FC = () => {
   const navTradeTypes = [
     { value: 'rise_fall', label: 'Rise/Fall' },
     { value: 'over_under', label: 'Over/Under' },
-    { value: 'digits', label: 'Digits' },
+  { value: 'digits', label: 'Matches/Differs' },
     { value: 'even_odd', label: 'Even/Odd' },
     { value: 'accumulator', label: 'Accumulator' },
   ];
@@ -1243,15 +1265,20 @@ const NewDTrader: React.FC = () => {
           </div>
         </div>
 
+        {/* Volatility selector row */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '6px 16px', background: '#fff', borderBottom: '1px solid #e0e0e0', gap: '12px' }}>
+          <span style={{ color: '#555', fontSize: '12px', fontWeight: 600 }}>Volatility</span>
+          <select value={symbol} onChange={e => setSymbol(e.target.value)}
+            style={{ background: '#fff', color: '#222', border: '1px solid #bbb', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', minWidth: '180px' }}>
+            {SYMBOLS.map(s => <option key={s} value={s}>{VOLATILITY_NAMES[s] || s}</option>)}
+          </select>
+        </div>
+
         {/* MAIN AREA */}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           {/* CHART */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', background: '#151515', borderBottom: '1px solid #222' }}>
-              <select value={symbol} onChange={e => setSymbol(e.target.value)}
-                style={{ background: '#1a1a1a', color: '#ddd', border: '1px solid #333', borderRadius: '4px', padding: '3px 8px', fontSize: '12px' }}>
-                {SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
               {currentPrice !== null && (
                 <span style={{ color: '#fff', fontSize: '14px', fontWeight: 'bold' }}>
                   {currentPrice.toFixed(2)}
@@ -1351,11 +1378,11 @@ const NewDTrader: React.FC = () => {
                   return (
                     <div key={i} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => setBarrier(String(i))}>
                       <div style={{
-                        width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center',
+                        width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center',
                         justifyContent: 'center',
                         background: isHighlight ? hlColor : (isCurrent ? '#ffeb3b' : (isBarrier ? '#4fc3f7' : '#e0e0e0')),
                         color: (isCurrent || isBarrier) && !isHighlight ? '#000' : '#333',
-                        fontWeight: 'bold', fontSize: '15px',
+                        fontWeight: 'bold', fontSize: '18px',
                         boxShadow: isCurrent ? '0 0 8px rgba(255,235,59,0.6)' : (isBarrier ? '0 0 8px rgba(79,195,247,0.6)' : 'none'),
                       }}>{i}</div>
                       <div style={{ marginTop: '2px', height: '3px', background: '#444', borderRadius: '2px', overflow: 'hidden' }}>
@@ -1560,10 +1587,6 @@ const NewDTrader: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', color: '#333', fontSize: '13px', background: '#fff', overflow: 'hidden' }}>
       {/* TOP NAV — compact */}
       <div style={{ display: 'flex', gap: '4px', padding: '6px 8px', background: '#f0f0f0', overflowX: 'auto', whiteSpace: 'nowrap', borderBottom: '1px solid #ddd', alignItems: 'center', minHeight: '36px' }}>
-        <select value={symbol} onChange={e => setSymbol(e.target.value)}
-          style={{ background: '#fff', color: '#333', border: '1px solid #ccc', borderRadius: '4px', padding: '2px 4px', fontSize: '10px' }}>
-          {SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
         {navTradeTypes.map(t => (
           <button key={t.value} onClick={() => setTradeType(t.value)}
             style={{
@@ -1576,6 +1599,15 @@ const NewDTrader: React.FC = () => {
           </button>
         ))}
         <span style={{ marginLeft: 'auto', color: connectionStatus === 'Live' ? '#4caf50' : '#ff9800', fontSize: '8px' }}>\u25CF</span>
+      </div>
+
+      {/* Volatility selector row */}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '6px 12px', background: '#fff', borderBottom: '1px solid #ddd', gap: '8px' }}>
+        <span style={{ color: '#555', fontSize: '11px', fontWeight: 600 }}>Volatility</span>
+        <select value={symbol} onChange={e => setSymbol(e.target.value)}
+          style={{ background: '#fff', color: '#222', border: '1px solid #bbb', borderRadius: '4px', padding: '4px 6px', fontSize: '11px', flex: 1 }}>
+          {SYMBOLS.map(s => <option key={s} value={s}>{VOLATILITY_NAMES[s] || s}</option>)}
+        </select>
       </div>
 
       {/* CHART (rise_fall / accumulator) OR DIGIT CIRCLES */}
@@ -1683,7 +1715,7 @@ const NewDTrader: React.FC = () => {
                     }} />
                   )}
                   {/* Outer ring container */}
-                  <div style={{ position: 'relative', width: '48px', height: '48px', margin: '0 auto' }}>
+                  <div style={{ position: 'relative', width: '60px', height: '60px', margin: '0 auto' }}>
                     {/* Ring track */}
                     <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: '#ddd' }} />
                     {/* Ring fill — conic gradient growing upward on both sides */}
@@ -1693,12 +1725,12 @@ const NewDTrader: React.FC = () => {
                     }} />
                     {/* Inner circle with digit */}
                     <div style={{
-                      position: 'absolute', top: '6px', left: '6px',
-                      width: '36px', height: '36px', borderRadius: '50%',
+                      position: 'absolute', top: '7px', left: '7px',
+                      width: '46px', height: '46px', borderRadius: '50%',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: isHighlight ? hlColor : (isCurrent ? '#ffeb3b' : (isBarrier ? '#4fc3f7' : '#e0e0e0')),
                       color: (isCurrent || isBarrier) && !isHighlight ? '#000' : '#333',
-                      fontWeight: 'bold', fontSize: '16px',
+                      fontWeight: 'bold', fontSize: '20px',
                       boxShadow: isCurrent ? '0 0 8px rgba(255,235,59,0.6)' : (isBarrier ? '0 0 8px rgba(79,195,247,0.6)' : 'none'),
                     }}>
                       {i}
