@@ -72,7 +72,7 @@ const NewDTrader: React.FC = () => {
 
   const [symbol, setSymbol] = useState('R_100');
   const [tradeType, setTradeType] = useState('rise_fall');
-  const [stake, setStake] = useState('5');
+  const [stake, setStake] = useState('0.35');
   const [barrier, setBarrier] = useState('5');
   const [duration, setDuration] = useState(1);
   const [durationUnit, setDurationUnit] = useState<'t' | 'm'>('t');
@@ -1090,7 +1090,7 @@ const NewDTrader: React.FC = () => {
     setIsTrading(true);
     const isAccu = tradeType === 'accumulator';
     const params: Record<string, any> = {
-      amount: parseFloat(stake) || 0.5, basis: 'stake', currency: 'USD',
+      amount: parseFloat(stake) || 0.35, basis: 'stake', currency: 'USD',
       symbol, contract_type: ct,
     };
     if (isAccu) {
@@ -1105,7 +1105,7 @@ const NewDTrader: React.FC = () => {
     if (ct === 'DIGITOVER' || ct === 'DIGITUNDER' || ct === 'DIGITMATCH' || ct === 'DIGITDIFF') {
       params.barrier = barrier;
     }
-    sendViaNewSystem({ buy: 1, price: parseFloat(stake) || 0.5, parameters: params });
+    sendViaNewSystem({ buy: 1, price: parseFloat(stake) || 0.35, parameters: params });
   };
 
   const handleSellContract = async (contractId: string) => {
@@ -1130,7 +1130,7 @@ const NewDTrader: React.FC = () => {
     try {
       const isAccu = tradeType === 'accumulator';
       const params: Record<string, any> = {
-        proposal: 1, amount: parseFloat(stake) || 0.5, basis: 'stake', currency: 'USD',
+        proposal: 1, amount: parseFloat(stake) || 0.35, basis: 'stake', currency: 'USD',
         symbol, contract_type: ct,
       };
       if (isAccu) {
@@ -1437,9 +1437,9 @@ const NewDTrader: React.FC = () => {
                 <span style={fieldLabel}>Stake</span>
                 <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                   <span style={{ color: '#888', fontSize: '12px' }}>$</span>
-                  <input type="number" min={0.5} step={0.5} value={stake}
+                  <input type="number" min={0.35} step={0.35} value={stake}
                     onChange={e => setStake(e.target.value)}
-                    onBlur={() => setStake(s => { const n = parseFloat(s); return (isNaN(n) || n < 0.5) ? '0.5' : s; })}
+                    onBlur={() => setStake(s => { const n = parseFloat(s); return (isNaN(n) || n < 0.35) ? '0.35' : s; })}
                     style={{ ...fieldVal, width: '80px' }} />
                 </div>
               </div>
@@ -1490,7 +1490,7 @@ const NewDTrader: React.FC = () => {
                 )}
                 {tradeType === 'accumulator' ? (
                   <div style={{ textAlign: 'center', marginTop: '8px', color: '#888', fontSize: '11px' }}>
-                    {activeAccuContract ? 'Active · ' : ''}Growth: {growthRate * 100}% · Stake: ${parseFloat(stake) || 0.5}
+                    {activeAccuContract ? 'Active · ' : ''}Growth: {growthRate * 100}% · Stake: ${parseFloat(stake) || 0.35}
                   </div>
                 ) : payout && (
                   <div style={{ textAlign: 'center', marginTop: '8px', color: '#888', fontSize: '12px' }}>
@@ -1732,9 +1732,9 @@ const NewDTrader: React.FC = () => {
               <div style={{ fontSize: '8px', color: '#999', marginBottom: '1px' }}>Stake</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
                 <span style={{ color: '#333', fontSize: '12px', fontWeight: 'bold' }}>$</span>
-                <input type="number" min={0.5} step={0.5} value={stake}
+                <input type="number" min={0.35} step={0.35} value={stake}
                   onChange={e => setStake(e.target.value)}
-                  onBlur={() => setStake(s => { const n = parseFloat(s); return (isNaN(n) || n < 0.5) ? '0.5' : s; })}
+                  onBlur={() => setStake(s => { const n = parseFloat(s); return (isNaN(n) || n < 0.35) ? '0.35' : s; })}
                   style={{ width: '40px', background: 'transparent', color: '#333', border: 'none', fontSize: '12px', fontWeight: 'bold', padding: '0', outline: 'none' }} />
               </div>
             </div>
@@ -1765,9 +1765,9 @@ const NewDTrader: React.FC = () => {
               <div style={{ fontSize: '8px', color: '#999', marginBottom: '1px' }}>Stake</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
                 <span style={{ color: '#333', fontSize: '12px', fontWeight: 'bold' }}>$</span>
-                <input type="number" min={0.5} step={0.5} value={stake}
+                <input type="number" min={0.35} step={0.35} value={stake}
                   onChange={e => setStake(e.target.value)}
-                  onBlur={() => setStake(s => { const n = parseFloat(s); return (isNaN(n) || n < 0.5) ? '0.5' : s; })}
+                  onBlur={() => setStake(s => { const n = parseFloat(s); return (isNaN(n) || n < 0.35) ? '0.35' : s; })}
                   style={{ width: '40px', background: 'transparent', color: '#333', border: 'none', fontSize: '12px', fontWeight: 'bold', padding: '0', outline: 'none' }} />
               </div>
             </div>
@@ -1818,7 +1818,7 @@ const NewDTrader: React.FC = () => {
         )}
         {tradeType === 'accumulator' ? (
           <div style={{ textAlign: 'center', marginTop: '4px', color: '#999', fontSize: '10px' }}>
-            {activeAccuContract ? 'Active · ' : ''}{growthRate * 100}% growth · ${parseFloat(stake) || 0.5} stake
+            {activeAccuContract ? 'Active · ' : ''}{growthRate * 100}% growth · ${parseFloat(stake) || 0.35} stake
           </div>
         ) : payout && (
           <div style={{ textAlign: 'center', marginTop: '4px', color: '#999', fontSize: '11px' }}>
