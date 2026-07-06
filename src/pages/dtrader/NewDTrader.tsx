@@ -63,6 +63,39 @@ const contractLabels: Record<string, string> = {
 
 interface Candle { open: number; high: number; low: number; close: number; epoch: number }
 
+type DrawToolType = 'trendline' | 'hline' | 'vline' | 'ray' | 'rectangle' | 'circle' | 'fibonacci' | 'pitchfork' | 'triangle' | 'arrow' | 'parallel' | 'text';
+
+interface DrawPoint { x: number; y: number }
+
+interface Drawing {
+  id: string;
+  type: DrawToolType;
+  points: DrawPoint[];
+  color: string;
+  thickness: number;
+  style: 'solid' | 'dashed' | 'dotted';
+  text?: string;
+  filled?: boolean;
+}
+
+const DRAW_TOOLS: { type: DrawToolType; label: string; icon: string; points: number }[] = [
+  { type: 'trendline', label: 'Trend Line', icon: '📐', points: 2 },
+  { type: 'hline', label: 'Horizontal Line', icon: '━', points: 1 },
+  { type: 'vline', label: 'Vertical Line', icon: '┃', points: 1 },
+  { type: 'ray', label: 'Ray', icon: '➡', points: 2 },
+  { type: 'rectangle', label: 'Rectangle', icon: '▭', points: 2 },
+  { type: 'circle', label: 'Circle', icon: '○', points: 2 },
+  { type: 'fibonacci', label: 'Fibonacci', icon: 'φ', points: 2 },
+  { type: 'pitchfork', label: 'Pitchfork', icon: 'Ψ', points: 3 },
+  { type: 'triangle', label: 'Triangle', icon: '△', points: 3 },
+  { type: 'arrow', label: 'Arrow', icon: '→', points: 2 },
+  { type: 'parallel', label: 'Parallel Channel', icon: '⫽', points: 2 },
+  { type: 'text', label: 'Text', icon: 'T', points: 1 },
+];
+
+const DRAW_COLORS = ['#ff4444', '#4caf50', '#2196f3', '#ff9800', '#9c27b0', '#ffeb3b', '#ffffff', '#00ffff'];
+const DRAW_THICKNESS = [1, 2, 3, 4];
+
 const GRANULARITIES = [
   { label: '1m', value: 60 },
   { label: '5m', value: 300 },
@@ -124,6 +157,20 @@ const NewDTrader: React.FC = () => {
   const [contractHistory, setContractHistory] = useState<ContractInfo[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
 
+  // Drawing toolbox state
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [activeDrawTool, setActiveDrawTool] = useState<DrawToolType | null>(null);
+  const [drawPoints, setDrawPoints] = useState<DrawPoint[]>([]);
+  const [selectedDrawing, setSelectedDrawing] = useState<string | null>(null);
+  const [showToolbox, setShowToolbox] = useState(false);
+  const [showDrawConfig, setShowDrawConfig] = useState(false);
+  const [drawColor, setDrawColor] = useState('#ff4444');
+  const [drawThickness, setDrawThickness] = useState(2);
+  const [drawStyle, setDrawStyle] = useState<'solid' | 'dashed' | 'dotted'>('solid');
+  const drawingsRef = useRef<Drawing[]>([]);
+  const activeDrawToolRef = useRef<DrawToolType | null>(null);
+  const drawPointsRef = useRef<DrawPoint[]>([]);
+
   /* ── Persist config ──────────────────────────────────────────── */
   useEffect(() => {
     saveDtraderConfig({
@@ -157,6 +204,9 @@ const NewDTrader: React.FC = () => {
   growthRateRef.current = growthRate; contractTypeRef.current = contractType;
   chartStyleRef.current = chartStyle; timeframeRef.current = timeframe;
   indicatorRef.current = activeIndicators;
+  drawingsRef.current = drawings;
+  activeDrawToolRef.current = activeDrawTool;
+  drawPointsRef.current = drawPoints;
 
   const drawChart = useCallback(() => {
     const canvas = canvasRef.current;
@@ -261,6 +311,7 @@ const NewDTrader: React.FC = () => {
       if (hasBelow) drawBelowIndicators(ctx, W, H, paneH, pad, chartW, chartH);
       drawContractOverlays(ctx, W, H, pad, chartW, chartH, cToY);
       drawExitOverlay(ctx, W, pad, chartW, cToY);
+      drawUserDrawings(ctx, W, pad, chartW, chartH);
       ctx.restore();
       return;
     }
@@ -358,6 +409,7 @@ const NewDTrader: React.FC = () => {
     if (hasBelow) drawBelowIndicators(ctx, W, H, paneH, pad, chartW, chartH);
     drawContractOverlays(ctx, W, H, pad, chartW, chartH, toY);
     drawExitOverlay(ctx, W, pad, chartW, toY);
+    drawUserDrawings(ctx, W, pad, chartW, chartH);
     ctx.restore();
     return;
   }, []);
@@ -786,6 +838,157 @@ const NewDTrader: React.FC = () => {
     ctx.fillText(exitLabel, pad.left + 4, ey - 4);
   }
 
+  /* ── Drawing toolbox rendering ──────────────────────────────────── */
+  function drawUserDrawings(ctx: CanvasRenderingContext2D, W: number, pad: any, chartW: number, chartH: number) {
+    const ds = drawingsRef.current;
+    if (ds.length === 0 && drawPointsRef.current.length === 0) return;
+
+    const applyStyle = (d: Drawing, isSelected: boolean) => {
+      ctx.strokeStyle = isSelected ? '#ffffff' : d.color;
+      ctx.lineWidth = d.thickness;
+      ctx.fillStyle = d.color + '30';
+      ctx.setLineDash(d.style === 'dashed' ? [8, 4] : d.style === 'dotted' ? [2, 2] : []);
+    };
+
+    for (const d of ds) {
+      const isSel = selectedDrawing === d.id;
+      ctx.save();
+      applyStyle(d, isSel);
+
+      switch (d.type) {
+        case 'trendline':
+        case 'ray':
+        case 'arrow': {
+          if (d.points.length < 2) break;
+          const [p1, p2] = d.points;
+          ctx.beginPath(); ctx.moveTo(p1.x, p1.y);
+          if (d.type === 'ray') {
+            const dx = p2.x - p1.x, dy = p2.y - p1.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            ctx.lineTo(p1.x + (dx / len) * 3000, p1.y + (dy / len) * 3000);
+          } else {
+            ctx.lineTo(p2.x, p2.y);
+          }
+          ctx.stroke();
+          if (d.type === 'arrow') {
+            const dx = p2.x - p1.x, dy = p2.y - p1.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const ux = dx / len, uy = dy / len;
+            const hl = 14;
+            ctx.beginPath();
+            ctx.moveTo(p2.x, p2.y);
+            ctx.lineTo(p2.x - ux * hl - uy * hl * 0.5, p2.y - uy * hl + ux * hl * 0.5);
+            ctx.moveTo(p2.x, p2.y);
+            ctx.lineTo(p2.x - ux * hl + uy * hl * 0.5, p2.y - uy * hl - ux * hl * 0.5);
+            ctx.stroke();
+          }
+          break;
+        }
+        case 'hline': {
+          if (d.points.length < 1) break;
+          const y = d.points[0].y;
+          ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+          ctx.fillStyle = d.color; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+          const priceAtY = d.text || '';
+          if (priceAtY) ctx.fillText(priceAtY, W - pad.right + 4, y + 3);
+          break;
+        }
+        case 'vline': {
+          if (d.points.length < 1) break;
+          const x = d.points[0].x;
+          ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + chartH); ctx.stroke();
+          break;
+        }
+        case 'rectangle': {
+          if (d.points.length < 2) break;
+          const [pa, pb] = d.points;
+          const rx = Math.min(pa.x, pb.x), ry = Math.min(pa.y, pb.y);
+          const rw = Math.abs(pb.x - pa.x), rh = Math.abs(pb.y - pa.y);
+          if (d.filled) ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeRect(rx, ry, rw, rh);
+          break;
+        }
+        case 'circle': {
+          if (d.points.length < 2) break;
+          const [pc, pe] = d.points;
+          const rx = Math.abs(pe.x - pc.x), ry = Math.abs(pe.y - pc.y);
+          ctx.beginPath(); ctx.ellipse(pc.x, pc.y, rx || 1, ry || 1, 0, 0, Math.PI * 2);
+          if (d.filled) ctx.fill();
+          ctx.stroke();
+          break;
+        }
+        case 'fibonacci': {
+          if (d.points.length < 2) break;
+          const [pf1, pf2] = d.points;
+          const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+          const range = pf2.y - pf1.y;
+          for (const lv of levels) {
+            const ly = pf1.y + range * lv;
+            ctx.beginPath(); ctx.moveTo(pad.left, ly); ctx.lineTo(W - pad.right, ly); ctx.stroke();
+            ctx.fillStyle = d.color; ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText(`${(lv * 100).toFixed(1)}%`, pad.left + 4, ly - 3);
+          }
+          break;
+        }
+        case 'pitchfork': {
+          if (d.points.length < 3) break;
+          const [pp1, pp2, pp3] = d.points;
+          const mx = (pp1.x + pp3.x) / 2, my = (pp1.y + pp3.y) / 2;
+          ctx.beginPath(); ctx.moveTo(pp1.x, pp1.y); ctx.lineTo(mx, my); ctx.lineTo(pp3.x, pp3.y); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx, my);
+          ctx.lineTo(mx + (mx - pp2.x), my + (my - pp2.y)); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(pp2.x, pp2.y);
+          ctx.lineTo(pp2.x - (mx - pp1.x), pp2.y - (my - pp1.y)); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(pp2.x, pp2.y);
+          ctx.lineTo(pp2.x - (mx - pp3.x), pp2.y - (my - pp3.y)); ctx.stroke();
+          break;
+        }
+        case 'triangle': {
+          if (d.points.length < 3) break;
+          const [pt1, pt2, pt3] = d.points;
+          ctx.beginPath(); ctx.moveTo(pt1.x, pt1.y); ctx.lineTo(pt2.x, pt2.y); ctx.lineTo(pt3.x, pt3.y); ctx.closePath(); ctx.stroke();
+          break;
+        }
+        case 'parallel': {
+          if (d.points.length < 2) break;
+          const [pl1, pl2] = d.points;
+          const dy = pl2.y - pl1.y;
+          ctx.beginPath(); ctx.moveTo(pl1.x, pl1.y); ctx.lineTo(pl2.x, pl2.y); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(pl1.x, pl1.y - dy); ctx.lineTo(pl2.x, pl2.y - dy); ctx.stroke();
+          ctx.setLineDash([3, 3]); ctx.beginPath();
+          ctx.moveTo(pl1.x, pl1.y); ctx.lineTo(pl1.x, pl1.y - dy); ctx.stroke();
+          ctx.moveTo(pl2.x, pl2.y); ctx.lineTo(pl2.x, pl2.y - dy); ctx.stroke();
+          ctx.setLineDash([]);
+          break;
+        }
+        case 'text': {
+          if (d.points.length < 1 || !d.text) break;
+          ctx.fillStyle = d.color; ctx.font = `${d.thickness * 5 + 8}px sans-serif`; ctx.textAlign = 'left';
+          ctx.fillText(d.text, d.points[0].x, d.points[0].y);
+          break;
+        }
+      }
+
+      if (isSel) {
+        for (const pt of d.points) {
+          ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    // In-progress points
+    if (drawPointsRef.current.length > 0 && activeDrawToolRef.current) {
+      ctx.save();
+      for (const pt of drawPointsRef.current) {
+        ctx.fillStyle = '#ffeb3b'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   function checkAutoSettle() {
     const contracts = activeContractsRef.current;
     if (contracts.length === 0) return;
@@ -958,6 +1161,71 @@ const NewDTrader: React.FC = () => {
       canvas.removeEventListener('touchstart', onTouchStart);
       canvas.removeEventListener('touchmove', onTouchMove);
       canvas.removeEventListener('touchend', onTouchEnd);
+    };
+  }, []);
+
+  // Drawing click handler — places points when a tool is active
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleDrawClick = (e: MouseEvent | TouchEvent) => {
+      const tool = activeDrawToolRef.current;
+      if (!tool) return;
+      const rect = canvas.getBoundingClientRect();
+      let cx: number, cy: number;
+      if ('touches' in e) {
+        cx = e.touches[0].clientX - rect.left;
+        cy = e.touches[0].clientY - rect.top;
+      } else {
+        cx = e.clientX - rect.left;
+        cy = e.clientY - rect.top;
+      }
+      const toolDef = DRAW_TOOLS.find(t => t.type === tool);
+      if (!toolDef) return;
+
+      const newPoints = [...drawPointsRef.current, { x: cx, y: cy }];
+      drawPointsRef.current = newPoints;
+      setDrawPoints(newPoints);
+
+      if (newPoints.length >= toolDef.points) {
+        const newDrawing: Drawing = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          type: tool,
+          points: newPoints,
+          color: drawColor,
+          thickness: drawThickness,
+          style: drawStyle,
+          text: tool === 'text' ? prompt('Enter text:') || '' : undefined,
+        };
+        const updated = [...drawingsRef.current, newDrawing];
+        drawingsRef.current = updated;
+        setDrawings(updated);
+        drawPointsRef.current = [];
+        setDrawPoints([]);
+      }
+    };
+
+    const handleSelectClick = (e: MouseEvent) => {
+      if (activeDrawToolRef.current) return;
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      let found: string | null = null;
+      for (const d of drawingsRef.current) {
+        for (const pt of d.points) {
+          const dx = pt.x - cx, dy = pt.y - cy;
+          if (Math.sqrt(dx * dx + dy * dy) < 10) { found = d.id; break; }
+        }
+        if (found) break;
+      }
+      setSelectedDrawing(found);
+    };
+
+    canvas.addEventListener('click', handleDrawClick);
+    canvas.addEventListener('click', handleSelectClick);
+    return () => {
+      canvas.removeEventListener('click', handleDrawClick);
+      canvas.removeEventListener('click', handleSelectClick);
     };
   }, []);
 
@@ -1423,6 +1691,87 @@ const NewDTrader: React.FC = () => {
                   })}
                 </div>
               </div>
+              {/* Drawing toolbox button */}
+              <div style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 6, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <button onClick={() => { setShowToolbox(!showToolbox); setShowDrawConfig(false); }}
+                  style={{ width: '32px', height: '32px', borderRadius: '6px', border: showToolbox ? '2px solid #4fc3f7' : '1px solid #555', background: showToolbox ? '#1a3a5a' : 'rgba(0,0,0,0.6)', color: '#fff', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Drawing Tools">✎</button>
+                {activeDrawTool && (
+                  <button onClick={() => { setActiveDrawTool(null); setDrawPoints([]); drawPointsRef.current = []; }}
+                    style={{ width: '32px', height: '32px', borderRadius: '6px', border: '1px solid #f44336', background: 'rgba(244,67,54,0.3)', color: '#f44336', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Cancel Drawing">✕</button>
+                )}
+              </div>
+              {/* Toolbox panel */}
+              {showToolbox && (
+                <div style={{ position: 'absolute', top: '48px', left: '8px', zIndex: 7, background: '#1a1a1a', border: '1px solid #444', borderRadius: '8px', padding: '8px', width: '200px', boxShadow: '0 4px 16px rgba(0,0,0,0.6)' }}>
+                  <div style={{ color: '#aaa', fontSize: '10px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Drawing Tools</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', marginBottom: '8px' }}>
+                    {DRAW_TOOLS.map(tool => (
+                      <button key={tool.type} onClick={() => { setActiveDrawTool(tool.type); setDrawPoints([]); drawPointsRef.current = []; setShowDrawConfig(false); }}
+                        style={{ padding: '6px 2px', borderRadius: '4px', border: activeDrawTool === tool.type ? '2px solid #4fc3f7' : '1px solid #333', background: activeDrawTool === tool.type ? '#1a3a5a' : '#222', color: activeDrawTool === tool.type ? '#4fc3f7' : '#ccc', cursor: 'pointer', fontSize: '10px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '16px' }}>{tool.icon}</div>
+                        <div style={{ marginTop: '2px' }}>{tool.label}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {/* Config section */}
+                  <div style={{ borderTop: '1px solid #333', paddingTop: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ color: '#aaa', fontSize: '10px' }}>Color</span>
+                      <div style={{ display: 'flex', gap: '3px' }}>
+                        {DRAW_COLORS.map(c => (
+                          <div key={c} onClick={() => setDrawColor(c)}
+                            style={{ width: '16px', height: '16px', borderRadius: '3px', background: c, cursor: 'pointer', border: drawColor === c ? '2px solid #fff' : '1px solid #555' }} />
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ color: '#aaa', fontSize: '10px' }}>Width</span>
+                      <div style={{ display: 'flex', gap: '3px' }}>
+                        {DRAW_THICKNESS.map(t => (
+                          <button key={t} onClick={() => setDrawThickness(t)}
+                            style={{ width: '24px', height: '20px', borderRadius: '3px', border: drawThickness === t ? '2px solid #4fc3f7' : '1px solid #333', background: drawThickness === t ? '#1a3a5a' : '#222', color: '#ccc', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ color: '#aaa', fontSize: '10px' }}>Style</span>
+                      <div style={{ display: 'flex', gap: '3px' }}>
+                        {(['solid', 'dashed', 'dotted'] as const).map(s => (
+                          <button key={s} onClick={() => setDrawStyle(s)}
+                            style={{ padding: '2px 6px', borderRadius: '3px', border: drawStyle === s ? '2px solid #4fc3f7' : '1px solid #333', background: drawStyle === s ? '#1a3a5a' : '#222', color: '#ccc', cursor: 'pointer', fontSize: '9px' }}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Selected drawing actions */}
+                  {selectedDrawing && (
+                    <div style={{ borderTop: '1px solid #333', paddingTop: '6px', display: 'flex', gap: '4px' }}>
+                      <button onClick={() => {
+                        const d = drawingsRef.current.find(x => x.id === selectedDrawing);
+                        if (d) {
+                          const dup = { ...d, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), points: [...d.points.map(p => ({ ...p }))] };
+                          const updated = [...drawingsRef.current, dup];
+                          drawingsRef.current = updated; setDrawings(updated);
+                        }
+                      }} style={{ flex: 1, padding: '4px', borderRadius: '4px', border: '1px solid #333', background: '#222', color: '#4fc3f7', cursor: 'pointer', fontSize: '10px' }}>Duplicate</button>
+                      <button onClick={() => {
+                        const updated = drawingsRef.current.filter(x => x.id !== selectedDrawing);
+                        drawingsRef.current = updated; setDrawings(updated); setSelectedDrawing(null);
+                      }} style={{ flex: 1, padding: '4px', borderRadius: '4px', border: '1px solid #333', background: '#222', color: '#f44336', cursor: 'pointer', fontSize: '10px' }}>Delete</button>
+                    </div>
+                  )}
+                  {drawings.length > 0 && (
+                    <button onClick={() => { drawingsRef.current = []; setDrawings([]); setSelectedDrawing(null); }}
+                      style={{ width: '100%', padding: '4px', marginTop: '4px', borderRadius: '4px', border: '1px solid #333', background: '#222', color: '#f44336', cursor: 'pointer', fontSize: '10px' }}>Clear All</button>
+                  )}
+                </div>
+              )}
             </div>
             {/* Resize handle */}
             <div onMouseDown={(e) => { isResizing.current = true; resizeStartY.current = e.clientY; resizeStartPct.current = chartHeightPct.current; e.preventDefault(); }}
@@ -1720,6 +2069,74 @@ const NewDTrader: React.FC = () => {
           </div>
           <div style={{ flex: '1 1 auto', position: 'relative', minHeight: 0, background: '#111' }}>
             <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block', touchAction: 'none' }} />
+            {/* Drawing toolbox button — mobile */}
+            <div style={{ position: 'absolute', top: '6px', left: '6px', zIndex: 6, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <button onClick={() => { setShowToolbox(!showToolbox); setShowDrawConfig(false); }}
+                style={{ width: '28px', height: '28px', borderRadius: '5px', border: showToolbox ? '2px solid #4fc3f7' : '1px solid #555', background: showToolbox ? '#1a3a5a' : 'rgba(0,0,0,0.6)', color: '#fff', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Drawing Tools">✎</button>
+              {activeDrawTool && (
+                <button onClick={() => { setActiveDrawTool(null); setDrawPoints([]); drawPointsRef.current = []; }}
+                  style={{ width: '28px', height: '28px', borderRadius: '5px', border: '1px solid #f44336', background: 'rgba(244,67,54,0.3)', color: '#f44336', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Cancel">✕</button>
+              )}
+            </div>
+            {/* Toolbox panel — mobile */}
+            {showToolbox && (
+              <div style={{ position: 'absolute', top: '40px', left: '6px', zIndex: 7, background: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '6px', width: '170px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+                <div style={{ color: '#333', fontSize: '9px', fontWeight: 'bold', marginBottom: '4px', textTransform: 'uppercase' }}>Drawing Tools</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '3px', marginBottom: '6px' }}>
+                  {DRAW_TOOLS.map(tool => (
+                    <button key={tool.type} onClick={() => { setActiveDrawTool(tool.type); setDrawPoints([]); drawPointsRef.current = []; }}
+                      style={{ padding: '4px 1px', borderRadius: '3px', border: activeDrawTool === tool.type ? '2px solid #2196f3' : '1px solid #ddd', background: activeDrawTool === tool.type ? '#e3f2fd' : '#fff', color: activeDrawTool === tool.type ? '#2196f3' : '#333', cursor: 'pointer', fontSize: '9px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '13px' }}>{tool.icon}</div>
+                      <div style={{ marginTop: '1px', fontSize: '8px' }}>{tool.label}</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ borderTop: '1px solid #eee', paddingTop: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#666', fontSize: '9px' }}>Color</span>
+                    <div style={{ display: 'flex', gap: '2px' }}>
+                      {DRAW_COLORS.slice(0, 6).map(c => (
+                        <div key={c} onClick={() => setDrawColor(c)}
+                          style={{ width: '14px', height: '14px', borderRadius: '2px', background: c, cursor: 'pointer', border: drawColor === c ? '2px solid #333' : '1px solid #ddd' }} />
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#666', fontSize: '9px' }}>Width</span>
+                    <div style={{ display: 'flex', gap: '2px' }}>
+                      {DRAW_THICKNESS.map(t => (
+                        <button key={t} onClick={() => setDrawThickness(t)}
+                          style={{ width: '20px', height: '18px', borderRadius: '2px', border: drawThickness === t ? '2px solid #2196f3' : '1px solid #ddd', background: drawThickness === t ? '#e3f2fd' : '#fff', color: '#333', cursor: 'pointer', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {selectedDrawing && (
+                  <div style={{ borderTop: '1px solid #eee', paddingTop: '4px', display: 'flex', gap: '3px' }}>
+                    <button onClick={() => {
+                      const d = drawingsRef.current.find(x => x.id === selectedDrawing);
+                      if (d) {
+                        const dup = { ...d, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), points: [...d.points.map(p => ({ ...p }))] };
+                        const updated = [...drawingsRef.current, dup];
+                        drawingsRef.current = updated; setDrawings(updated);
+                      }
+                    }} style={{ flex: 1, padding: '3px', borderRadius: '3px', border: '1px solid #ddd', background: '#fff', color: '#2196f3', cursor: 'pointer', fontSize: '9px' }}>Duplicate</button>
+                    <button onClick={() => {
+                      const updated = drawingsRef.current.filter(x => x.id !== selectedDrawing);
+                      drawingsRef.current = updated; setDrawings(updated); setSelectedDrawing(null);
+                    }} style={{ flex: 1, padding: '3px', borderRadius: '3px', border: '1px solid #ddd', background: '#fff', color: '#f44336', cursor: 'pointer', fontSize: '9px' }}>Delete</button>
+                  </div>
+                )}
+                {drawings.length > 0 && (
+                  <button onClick={() => { drawingsRef.current = []; setDrawings([]); setSelectedDrawing(null); }}
+                    style={{ width: '100%', padding: '3px', marginTop: '3px', borderRadius: '3px', border: '1px solid #ddd', background: '#fff', color: '#f44336', cursor: 'pointer', fontSize: '9px' }}>Clear All</button>
+                )}
+              </div>
+            )}
           </div>
           {/* Resize handle */}
           <div onMouseDown={(e) => { isResizing.current = true; resizeStartY.current = e.clientY; resizeStartPct.current = chartHeightPct.current; e.preventDefault(); }}
