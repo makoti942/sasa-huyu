@@ -177,6 +177,12 @@ const NewDTrader: React.FC = () => {
     const chartH = H - pad.top - pad.bottom - paneH;
     ctx.clearRect(0, 0, W, H);
 
+    // Clip to chart area to prevent overflow
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.clip();
+
     if (chartStyleRef.current === 'candle') {
       const candles = candleData.current;
       if (candles.length < 1) {
@@ -255,6 +261,7 @@ const NewDTrader: React.FC = () => {
       if (hasBelow) drawBelowIndicators(ctx, W, H, paneH, pad, chartW, chartH);
       drawContractOverlays(ctx, W, H, pad, chartW, chartH, cToY);
       drawExitOverlay(ctx, W, pad, chartW, cToY);
+      ctx.restore();
       return;
     }
 
@@ -351,6 +358,7 @@ const NewDTrader: React.FC = () => {
     if (hasBelow) drawBelowIndicators(ctx, W, H, paneH, pad, chartW, chartH);
     drawContractOverlays(ctx, W, H, pad, chartW, chartH, toY);
     drawExitOverlay(ctx, W, pad, chartW, toY);
+    ctx.restore();
     return;
   }, []);
 
@@ -857,7 +865,7 @@ const NewDTrader: React.FC = () => {
     return () => cancelAnimationFrame(animRef.current);
   }, [drawChart]);
 
-  // Chart panning via mouse drag on canvas
+  // Chart panning, zooming (mouse + touch pinch) on canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -882,7 +890,6 @@ const NewDTrader: React.FC = () => {
       const delta = e.deltaY > 0 ? 0.88 : 1/0.88;
       const newZoom = Math.max(0.3, Math.min(50, zoomRef.current * delta));
       zoomRef.current = newZoom;
-      // Adjust pan so zoom centers on cursor position
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left - 5;
       if (mx > 0) {
@@ -890,16 +897,67 @@ const NewDTrader: React.FC = () => {
         panPx.current = (panPx.current + mx) * ratio - mx;
       }
     };
+
+    // Touch: single finger pan, two finger pinch zoom
+    let touchStartDist = 0;
+    let touchStartZoom = 1;
+    let touchStartMidX = 0;
+    let touchPanStartPx = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        isPanning.current = true;
+        panStartX.current = e.touches[0].clientX;
+        panStartPx.current = panPx.current;
+      } else if (e.touches.length === 2) {
+        isPanning.current = false;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        touchStartDist = Math.sqrt(dx * dx + dy * dy);
+        touchStartZoom = zoomRef.current;
+        touchStartMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        touchPanStartPx = panPx.current;
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 1 && isPanning.current) {
+        panPx.current = panStartPx.current + (e.touches[0].clientX - panStartX.current);
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (touchStartDist > 0) {
+          const scale = dist / touchStartDist;
+          const newZoom = Math.max(0.3, Math.min(50, touchStartZoom * scale));
+          const rect = canvas.getBoundingClientRect();
+          const mx = touchStartMidX - rect.left - 5;
+          const ratio = newZoom / touchStartZoom;
+          panPx.current = (touchPanStartPx + mx) * ratio - mx;
+          zoomRef.current = newZoom;
+        }
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) { touchStartDist = 0; }
+      if (e.touches.length === 0) { isPanning.current = false; }
+    };
+
     canvas.addEventListener('mousedown', onDown);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
     canvas.style.cursor = 'crosshair';
     return () => {
       canvas.removeEventListener('mousedown', onDown);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
     };
   }, []);
 
