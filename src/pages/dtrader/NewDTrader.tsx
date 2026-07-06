@@ -112,6 +112,11 @@ const NewDTrader: React.FC = () => {
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig[]>([]);
   const [activeContracts, setActiveContracts] = useState<ContractInfo[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [currentDigit, setCurrentDigit] = useState<number | null>(null);
+  const [exitHighlight, setExitHighlight] = useState<{ digit: number; win: boolean } | null>(null);
+  const [sessionStats, setSessionStats] = useState<{ wins: number; losses: number; profit: number }>({ wins: 0, losses: 0, profit: 0 });
+  const [isTrading, setIsTrading] = useState(false);
 
   /* ── Persist config ──────────────────────────────────────────── */
   useEffect(() => {
