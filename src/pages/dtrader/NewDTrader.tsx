@@ -1336,6 +1336,35 @@ const NewDTrader: React.FC = () => {
             </div>
             <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
               <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block', touchAction: 'none' }} />
+              {/* Digit circles overlay — top of chart */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', padding: '8px 0', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)', zIndex: 5, pointerEvents: 'none' }}>
+                <div style={{ display: 'flex', gap: '8px', pointerEvents: 'auto' }}>
+                  {Array.from({ length: 10 }, (_, i) => {
+                    const isCurrent = currentDigit === i;
+                    const isHighlight = exitHighlight?.digit === i;
+                    const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
+                    const isBarrier = String(i) === barrier;
+                    const win = tickHistory.slice(-DIGIT_WINDOW); const winTotal = win.length || 1; const pct = (win.filter(d => d === i).length / winTotal) * 100;
+                    return (
+                      <div key={i} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => setBarrier(String(i))}>
+                        <div style={{
+                          width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center',
+                          background: isHighlight ? hlColor : (isCurrent ? '#ffeb3b' : (isBarrier ? '#4fc3f7' : 'rgba(224,224,224,0.85)')),
+                          color: (isCurrent || isBarrier) && !isHighlight ? '#000' : '#333',
+                          fontWeight: 'bold', fontSize: '16px',
+                          boxShadow: isCurrent ? '0 0 8px rgba(255,235,59,0.6)' : (isBarrier ? '0 0 8px rgba(79,195,247,0.6)' : 'none'),
+                          border: (isCurrent || isBarrier) ? 'none' : '2px solid rgba(0,0,0,0.15)',
+                        }}>{i}</div>
+                        <div style={{ marginTop: '2px', height: '3px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: isHighlight ? hlColor : (pct > 12 ? '#4caf50' : pct > 9 ? '#ff9800' : '#f44336') }} />
+                        </div>
+                        <div style={{ fontSize: '8px', color: '#ccc' }}>{pct.toFixed(1)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             {/* Resize handle */}
             <div onMouseDown={(e) => { isResizing.current = true; resizeStartY.current = e.clientY; resizeStartPct.current = chartHeightPct.current; e.preventDefault(); }}
@@ -1379,33 +1408,6 @@ const NewDTrader: React.FC = () => {
                 )}
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0', background: '#1a1a1a', borderTop: '1px solid #333' }}>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {Array.from({ length: 10 }, (_, i) => {
-                  const isCurrent = currentDigit === i;
-                  const isHighlight = exitHighlight?.digit === i;
-                  const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
-                  const isBarrier = String(i) === barrier;
-                  const win = tickHistory.slice(-DIGIT_WINDOW); const winTotal = win.length || 1; const pct = (win.filter(d => d === i).length / winTotal) * 100;
-                  return (
-                    <div key={i} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => setBarrier(String(i))}>
-                      <div style={{
-                        width: '44px', height: '44px', borderRadius: '50%', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center',
-                        background: isHighlight ? hlColor : (isCurrent ? '#ffeb3b' : (isBarrier ? '#4fc3f7' : '#e0e0e0')),
-                        color: (isCurrent || isBarrier) && !isHighlight ? '#000' : '#333',
-                        fontWeight: 'bold', fontSize: '18px',
-                        boxShadow: isCurrent ? '0 0 8px rgba(255,235,59,0.6)' : (isBarrier ? '0 0 8px rgba(79,195,247,0.6)' : 'none'),
-                      }}>{i}</div>
-                      <div style={{ marginTop: '2px', height: '3px', background: '#444', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${pct}%`, background: isHighlight ? hlColor : (pct > 12 ? '#4caf50' : pct > 9 ? '#ff9800' : '#f44336') }} />
-                      </div>
-                      <div style={{ fontSize: '9px', color: '#aaa' }}>{pct.toFixed(1)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
           {/* RIGHT SIDEBAR - TRADING PANEL */}
