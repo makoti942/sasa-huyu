@@ -222,7 +222,7 @@ const NewDTrader: React.FC = () => {
     const H = rect.height;
     const hasBelow = indicatorRef.current.some(i => i.pane === 'below');
     const paneH = hasBelow ? Math.max(60, H * 0.25) : 0;
-    const pad = { top: 10, right: 60, bottom: 20, left: 5 };
+    const pad = { top: 10, right: 60, bottom: 20, left: 50 };
     const chartW = W - pad.left - pad.right;
     const chartH = H - pad.top - pad.bottom - paneH;
     ctx.clearRect(0, 0, W, H);
@@ -1094,7 +1094,7 @@ const NewDTrader: React.FC = () => {
       const newZoom = Math.max(0.3, Math.min(50, zoomRef.current * delta));
       zoomRef.current = newZoom;
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left - 5;
+      const mx = e.clientX - rect.left - 50;
       if (mx > 0) {
         const ratio = newZoom / oldZoom;
         panPx.current = (panPx.current + mx) * ratio - mx;
@@ -1107,11 +1107,8 @@ const NewDTrader: React.FC = () => {
     let touchStartMidX = 0;
     let touchPanStartPx = 0;
     const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        isPanning.current = true;
-        panStartX.current = e.touches[0].clientX;
-        panStartPx.current = panPx.current;
-      } else if (e.touches.length === 2) {
+      if (e.touches.length === 2) {
+        e.preventDefault();
         isPanning.current = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -1119,25 +1116,27 @@ const NewDTrader: React.FC = () => {
         touchStartZoom = zoomRef.current;
         touchStartMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         touchPanStartPx = panPx.current;
+      } else if (e.touches.length === 1) {
+        isPanning.current = true;
+        panStartX.current = e.touches[0].clientX;
+        panStartPx.current = panPx.current;
       }
     };
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
-      if (e.touches.length === 1 && isPanning.current) {
-        panPx.current = panStartPx.current + (e.touches[0].clientX - panStartX.current);
-      } else if (e.touches.length === 2) {
+      if (e.touches.length === 2 && touchStartDist > 0) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (touchStartDist > 0) {
-          const scale = dist / touchStartDist;
-          const newZoom = Math.max(0.3, Math.min(50, touchStartZoom * scale));
-          const rect = canvas.getBoundingClientRect();
-          const mx = touchStartMidX - rect.left - 5;
-          const ratio = newZoom / touchStartZoom;
-          panPx.current = (touchPanStartPx + mx) * ratio - mx;
-          zoomRef.current = newZoom;
-        }
+        const scale = dist / touchStartDist;
+        const newZoom = Math.max(0.3, Math.min(50, touchStartZoom * scale));
+        const rect = canvas.getBoundingClientRect();
+        const mx = touchStartMidX - rect.left - 50;
+        const ratio = newZoom / touchStartZoom;
+        panPx.current = (touchPanStartPx + mx) * ratio - mx;
+        zoomRef.current = newZoom;
+      } else if (e.touches.length === 1 && isPanning.current) {
+        panPx.current = panStartPx.current + (e.touches[0].clientX - panStartX.current);
       }
     };
     const onTouchEnd = (e: TouchEvent) => {
@@ -1164,68 +1163,81 @@ const NewDTrader: React.FC = () => {
     };
   }, []);
 
-  // Drawing click handler — places points when a tool is active
+  // Drawing click handler — places points when a tool is active (mouse + touch)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const handleDrawClick = (e: MouseEvent | TouchEvent) => {
+    const getCoords = (e: MouseEvent | Touch) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    const placePoint = (cx: number, cy: number) => {
       const tool = activeDrawToolRef.current;
       if (!tool) return;
-      const rect = canvas.getBoundingClientRect();
-      let cx: number, cy: number;
-      if ('touches' in e) {
-        cx = e.touches[0].clientX - rect.left;
-        cy = e.touches[0].clientY - rect.top;
-      } else {
-        cx = e.clientX - rect.left;
-        cy = e.clientY - rect.top;
-      }
       const toolDef = DRAW_TOOLS.find(t => t.type === tool);
       if (!toolDef) return;
-
       const newPoints = [...drawPointsRef.current, { x: cx, y: cy }];
       drawPointsRef.current = newPoints;
       setDrawPoints(newPoints);
-
       if (newPoints.length >= toolDef.points) {
         const newDrawing: Drawing = {
           id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          type: tool,
-          points: newPoints,
-          color: drawColor,
-          thickness: drawThickness,
-          style: drawStyle,
+          type: tool, points: newPoints,
+          color: drawColor, thickness: drawThickness, style: drawStyle,
           text: tool === 'text' ? prompt('Enter text:') || '' : undefined,
         };
         const updated = [...drawingsRef.current, newDrawing];
-        drawingsRef.current = updated;
-        setDrawings(updated);
-        drawPointsRef.current = [];
-        setDrawPoints([]);
+        drawingsRef.current = updated; setDrawings(updated);
+        drawPointsRef.current = []; setDrawPoints([]);
       }
     };
-
+    const handleMouseClick = (e: MouseEvent) => {
+      if (!activeDrawToolRef.current) return;
+      const { x, y } = getCoords(e);
+      placePoint(x, y);
+    };
+    const handleTouchDraw = (e: TouchEvent) => {
+      if (!activeDrawToolRef.current) return;
+      const touch = e.changedTouches?.[0];
+      if (!touch) return;
+      const { x, y } = getCoords(touch);
+      placePoint(x, y);
+    };
     const handleSelectClick = (e: MouseEvent) => {
       if (activeDrawToolRef.current) return;
-      const rect = canvas.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
+      const { x, y } = getCoords(e);
       let found: string | null = null;
       for (const d of drawingsRef.current) {
         for (const pt of d.points) {
-          const dx = pt.x - cx, dy = pt.y - cy;
-          if (Math.sqrt(dx * dx + dy * dy) < 10) { found = d.id; break; }
+          if (Math.sqrt((pt.x - x) ** 2 + (pt.y - y) ** 2) < 10) { found = d.id; break; }
         }
         if (found) break;
       }
       setSelectedDrawing(found);
     };
-
-    canvas.addEventListener('click', handleDrawClick);
+    const handleTouchSelect = (e: TouchEvent) => {
+      if (activeDrawToolRef.current) return;
+      const touch = e.changedTouches?.[0];
+      if (!touch) return;
+      const { x, y } = getCoords(touch);
+      let found: string | null = null;
+      for (const d of drawingsRef.current) {
+        for (const pt of d.points) {
+          if (Math.sqrt((pt.x - x) ** 2 + (pt.y - y) ** 2) < 15) { found = d.id; break; }
+        }
+        if (found) break;
+      }
+      setSelectedDrawing(found);
+    };
+    canvas.addEventListener('click', handleMouseClick);
+    canvas.addEventListener('touchend', handleTouchDraw);
     canvas.addEventListener('click', handleSelectClick);
+    canvas.addEventListener('touchend', handleTouchSelect);
     return () => {
-      canvas.removeEventListener('click', handleDrawClick);
+      canvas.removeEventListener('click', handleMouseClick);
+      canvas.removeEventListener('touchend', handleTouchDraw);
       canvas.removeEventListener('click', handleSelectClick);
+      canvas.removeEventListener('touchend', handleTouchSelect);
     };
   }, []);
 
