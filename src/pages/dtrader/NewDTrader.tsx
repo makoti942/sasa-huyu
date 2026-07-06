@@ -96,7 +96,7 @@ const NewDTrader: React.FC = () => {
   const [contractType, setContractType] = useState(savedCfg.contractType || 'CALL');
   const [growthRate, setGrowthRate] = useState(savedCfg.growthRate ?? 0.01);
   const [takeProfit, setTakeProfit] = useState(savedCfg.takeProfit || '');
-  const [chartStyle, setChartStyle] = useState<'line' | 'candle'>(savedCfg.chartStyle || 'line');
+  const [chartStyle, setChartStyle] = useState<'line' | 'candle'>(savedCfg.chartStyle || 'candle');
   const [timeframe, setTimeframe] = useState(savedCfg.timeframe ?? 60);
   const [payout, setPayout] = useState<string | null>(null);
   const [tradeResult, setTradeResult] = useState<{ isWin: boolean; profit: number; contract_type: string; entry_digit: number; exit_digit: number } | null>(null);
@@ -167,7 +167,7 @@ const NewDTrader: React.FC = () => {
         ctx.fillText('Waiting for candles...', W / 2, H / 2);
         return;
       }
-      const candleCount = Math.max(5, Math.floor(80 / zoomRef.current));
+      const candleCount = Math.max(3, Math.floor(200 / zoomRef.current));
       const vis = candles.slice(-candleCount);
       let cMin = Infinity, cMax = -Infinity;
       vis.forEach(c => { cMin = Math.min(cMin, c.low); cMax = Math.max(cMax, c.high); });
@@ -249,8 +249,8 @@ const NewDTrader: React.FC = () => {
     }
 
     const pOff = panPx.current;
-    const visibleCount = Math.max(10, Math.floor(300 / zoomRef.current));
-    const sliceStart = Math.max(0, prices.length - visibleCount - pOff);
+    const visibleCount = Math.max(5, Math.floor(300 / zoomRef.current));
+    const sliceStart = Math.max(0, prices.length - visibleCount - Math.round(pOff));
     const visible = prices.slice(sliceStart, sliceStart + visibleCount);
     let minP = Math.min(...visible);
     let maxP = Math.max(...visible);
@@ -341,8 +341,8 @@ const NewDTrader: React.FC = () => {
     const vals = indicatorValues.current;
     const prices = tickPrices.current;
     const pOff = panPx.current;
-    const vc = Math.max(10, Math.floor(300 / zoomRef.current));
-    const sliceStart = Math.max(0, prices.length - vc - pOff);
+    const vc = Math.max(5, Math.floor(300 / zoomRef.current));
+    const sliceStart = Math.max(0, prices.length - vc - Math.round(pOff));
     const visible = prices.slice(sliceStart, sliceStart + vc);
     if (visible.length < 2) return;
     const minP = Math.min(...visible), maxP = Math.max(...visible);
@@ -430,8 +430,8 @@ const NewDTrader: React.FC = () => {
     if (inds.length === 0) return;
     const prices = tickPrices.current;
     const pOff = panPx.current;
-    const vc = Math.max(10, Math.floor(300 / zoomRef.current));
-    const sliceStart = Math.max(0, prices.length - vc - pOff);
+    const vc = Math.max(5, Math.floor(300 / zoomRef.current));
+    const sliceStart = Math.max(0, prices.length - vc - Math.round(pOff));
     const visible = prices.slice(sliceStart, sliceStart + vc);
     if (visible.length < 2) return;
 
@@ -844,8 +844,17 @@ const NewDTrader: React.FC = () => {
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      zoomRef.current = Math.max(0.2, Math.min(10, zoomRef.current * delta));
+      const oldZoom = zoomRef.current;
+      const delta = e.deltaY > 0 ? 0.88 : 1/0.88;
+      const newZoom = Math.max(0.3, Math.min(50, zoomRef.current * delta));
+      zoomRef.current = newZoom;
+      // Adjust pan so zoom centers on cursor position
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left - pad.left;
+      if (mx > 0) {
+        const ratio = newZoom / oldZoom;
+        panPx.current = (panPx.current + mx) * ratio - mx;
+      }
     };
     canvas.addEventListener('mousedown', onDown);
     window.addEventListener('mousemove', onMove);
