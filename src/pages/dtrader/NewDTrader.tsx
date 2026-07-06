@@ -111,6 +111,7 @@ const NewDTrader: React.FC = () => {
   const [tickCounter, setTickCounter] = useState(0);
   const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig[]>([]);
   const [activeContracts, setActiveContracts] = useState<ContractInfo[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
 
   /* ── Persist config ──────────────────────────────────────────── */
   useEffect(() => {
