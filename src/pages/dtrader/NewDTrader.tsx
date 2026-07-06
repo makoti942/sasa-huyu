@@ -1344,7 +1344,7 @@ const NewDTrader: React.FC = () => {
                     const isHighlight = exitHighlight?.digit === i;
                     const hlColor = exitHighlight ? (exitHighlight.win ? '#4caf50' : '#f44336') : '#ffeb3b';
                     const isBarrier = String(i) === barrier;
-                    const win = tickHistory.slice(-DIGIT_WINDOW); const winTotal = win.length || 1; const pct = (win.filter(d => d === i).length / winTotal) * 100;
+                    const win = tickHistory.slice(-DIGIT_WINDOW); const counts = new Array(10).fill(0); win.forEach(d => { if (d >= 0 && d <= 9) counts[d]++; }); const winTotal = counts.reduce((a, v) => a + v, 0); const pct = winTotal > 0 ? (counts[i] / winTotal) * 100 : 0;
                     return (
                       <div key={i} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => setBarrier(String(i))}>
                         <div style={{
