@@ -21,6 +21,8 @@ function saveDtraderConfig(cfg: Record<string, any>) {
   try { localStorage.setItem(DTRADER_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
 }
 
+const MAX_TICKS = 1000;
+
 const VOLATILITY_NAMES: Record<string, string> = {
   R_100: 'Volatility 100 Index', R_75: 'Volatility 75 Index', R_50: 'Volatility 50 Index',
   R_25: 'Volatility 25 Index', R_10: 'Volatility 10 Index',
@@ -117,6 +119,10 @@ const NewDTrader: React.FC = () => {
   const [exitHighlight, setExitHighlight] = useState<{ digit: number; win: boolean } | null>(null);
   const [sessionStats, setSessionStats] = useState<{ wins: number; losses: number; profit: number }>({ wins: 0, losses: 0, profit: 0 });
   const [isTrading, setIsTrading] = useState(false);
+  const [tickHistory, setTickHistory] = useState<number[]>([]);
+  const [digitCounts, setDigitCounts] = useState<number[]>(Array(10).fill(0));
+  const [contractHistory, setContractHistory] = useState<ContractInfo[]>([]);
+  const [balance, setBalance] = useState<number | null>(null);
 
   /* ── Persist config ──────────────────────────────────────────── */
   useEffect(() => {
@@ -878,7 +884,7 @@ const NewDTrader: React.FC = () => {
       zoomRef.current = newZoom;
       // Adjust pan so zoom centers on cursor position
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left - pad.left;
+      const mx = e.clientX - rect.left - 5;
       if (mx > 0) {
         const ratio = newZoom / oldZoom;
         panPx.current = (panPx.current + mx) * ratio - mx;
