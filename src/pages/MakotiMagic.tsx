@@ -1,184 +1,201 @@
 import React, { useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
-import { motion } from 'framer-motion';
-import { Zap, BarChart2, Cpu, RefreshCw, TrendingUp, Play, Square } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Zap, Play, Square, TrendingUp, TrendingDown, Activity, Target, BarChart2, DollarSign } from 'lucide-react';
 import MakotiMagicStore from '@/stores/makoti-magic-store';
 import './MakotiMagic.scss';
 
+const SYMBOL_LABELS = {
+  R_10: 'Vol 10', R_25: 'Vol 25', R_50: 'Vol 50', R_75: 'Vol 75', R_100: 'Vol 100',
+  '1HZ10V': 'Vol 10 (1s)', '1HZ25V': 'Vol 25 (1s)', '1HZ50V': 'Vol 50 (1s)',
+  '1HZ75V': 'Vol 75 (1s)', '1HZ100V': 'Vol 100 (1s)',
+};
+
+const ALL_SYMBOLS = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'];
+
 const MakotiMagic = observer(() => {
-    const {
-        connectWebSocket,
-        setSelectedSymbol,
-        runScan,
-        stopScan,
-        loadBot,
-        last_digit,
-        prediction,
-        is_loading,
-        selected_symbol,
-        connection_status,
-        tick_history,
-        scan_attempts,
-        is_auto_scanning,
-    } = MakotiMagicStore;
+  const {
+    connectWebSocket, startRunning, stopRunning, setStake,
+    stake, isRunning, connection_status, symbolData,
+    bestSignal, scanAttempts, activeContract, hasWon,
+    wins, losses, pnl, tradeHistory, logs,
+  } = MakotiMagicStore;
 
-    useEffect(() => {
-        connectWebSocket();
-        return () => MakotiMagicStore.dispose();
-    }, []);
+  useEffect(() => {
+    connectWebSocket();
+    return () => MakotiMagicStore.dispose();
+  }, []);
 
-    const volatilityOptions = [
-        { label: 'Volatility 10 Index', value: 'R_10' },
-        { label: 'Volatility 25 Index', value: 'R_25' },
-        { label: 'Volatility 50 Index', value: 'R_50' },
-        { label: 'Volatility 75 Index', value: 'R_75' },
-        { label: 'Volatility 100 Index', value: 'R_100' },
-        { label: 'Volatility 10 (1s)', value: '1HZ10V' },
-        { label: 'Volatility 25 (1s)', value: '1HZ25V' },
-        { label: 'Volatility 50 (1s)', value: '1HZ50V' },
-        { label: 'Volatility 75 (1s)', value: '1HZ75V' },
-        { label: 'Volatility 100 (1s)', value: '1HZ100V' },
-    ];
+  const totalTrades = wins + losses;
+  const winRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(0) : '0';
 
-    const getConfidenceColor = (confidence) => {
-        if (confidence >= 0.4) return '#2ecc71';
-        if (confidence >= 0.31) return '#f39c12';
-        return '#e74c3c';
-    };
+  return (
+    <div className='mm-root'>
+      {/* Animated background */}
+      <div className='mm-bg'>
+        {Array.from({ length: 60 }).map((_, i) => (
+          <span key={i} className='mm-bg__char' style={{ animationDelay: `${Math.random() * 5}s` }}>
+            {Math.floor(Math.random() * 10)}
+          </span>
+        ))}
+      </div>
 
-    const confidencePercent = prediction?.confidence ? (prediction.confidence * 100).toFixed(0) : '0';
-    const showLoadButton = prediction && prediction.predictedDigit !== null && prediction.predictedDigit !== undefined && !is_loading;
-    const hasPrediction = prediction && prediction.predictedDigit !== null && prediction.predictedDigit !== undefined;
-
-    return (
-        <div className='makoti-magic'>
-            <div className='mm-matrix-bg'>
-                {Array.from({ length: 100 }).map((_, i) => (
-                    <span key={i} className='mm-matrix-char' style={{ animationDelay: `${Math.random() * 5}s` }}>
-                        {Math.floor(Math.random() * 10)}
-                    </span>
-                ))}
+      <div className='mm-layout'>
+        {/* ── LEFT PANEL: Controls ── */}
+        <div className='mm-panel mm-panel--controls'>
+          <div className='mm-panel__head'>
+            <Zap size={16} />
+            <span>Makoti Magic</span>
+            <div className='mm-conn'>
+              <div className={`mm-dot mm-dot--${connection_status.split(' ')[0].toLowerCase()}`} />
+              {connection_status}
             </div>
+          </div>
 
-            <header className='mm-header'>
-                <div className='mm-header__left'>
-                    <div className='mm-header__icon'><Zap size={17} /></div>
-                    <div>
-                        <div className='mm-header__title'>Makoti Magic</div>
-                        <div className='mm-header__sub'>Prediction Engine</div>
-                    </div>
-                </div>
-                <div className='mm-header__right'>
-                    <div className='mm-connection-status'>
-                        <div className={`mm-status-dot mm-status-dot--${connection_status.split(' ')[0].toLowerCase()}`} />
-                        {connection_status}
-                    </div>
-                    <div className='mm-current-digit'>
-                        <div className='mm-current-digit__label'>Live Digit</div>
-                        <div className='mm-current-digit__value'>{last_digit === null ? '-' : last_digit}</div>
-                    </div>
-                </div>
-            </header>
+          {/* Stake */}
+          <div className='mm-field'>
+            <label className='mm-field__label'><DollarSign size={12} /> Stake (USD)</label>
+            <input className='mm-field__input' type='number' min='0.35' step='0.1'
+              value={stake} onChange={e => setStake(e.target.value)} disabled={isRunning} />
+          </div>
 
-            <div className='mm-body'>
-                <div className='mm-panel'>
-                    <div className='mm-panel__title'>
-                        <Cpu size={14} /> Configuration
-                    </div>
+          {/* Run / Stop */}
+          <div className='mm-actions'>
+            {!isRunning ? (
+              <button className='mm-btn mm-btn--run' onClick={startRunning} disabled={hasWon}>
+                <Play size={18} />
+                <span>{hasWon ? 'WON — Rerun' : 'RUN SCANNER'}</span>
+              </button>
+            ) : (
+              <button className='mm-btn mm-btn--stop' onClick={stopRunning}>
+                <Square size={18} />
+                <span>STOP</span>
+              </button>
+            )}
+          </div>
 
-                    <div className='mm-row-wrap'>
-                        <div className='mm-row-label'><BarChart2 size={11} /> Market</div>
-                        <div className='mm-row-fields'>
-                            <div className='mm-f mm-f--grow'>
-                                <span className='mm-fl'>Index</span>
-                                <select
-                                    className='mm-sel'
-                                    value={selected_symbol}
-                                    onChange={e => setSelectedSymbol(e.target.value)}
-                                    disabled={is_loading}
-                                >
-                                    {volatilityOptions.map(v => (
-                                        <option key={v.value} value={v.value}>{v.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className='mm-tick-count'>
-                        <span className='mm-tick-count__label'>Ticks Collected</span>
-                        <span className='mm-tick-count__value'>{tick_history.length}</span>
-                    </div>
-
-                    <div className='mm-prediction'>
-                        <div className='mm-prediction__title'>Predicted Digit</div>
-                        <div className={`mm-prediction__digit ${hasPrediction ? 'mm-prediction__digit--active' : ''}`}>
-                            {hasPrediction ? prediction.predictedDigit : '-'}
-                        </div>
-                        {hasPrediction && (
-                            <div className='mm-prediction__meta'>
-                                <div className='mm-confidence'>
-                                    <TrendingUp size={12} />
-                                    <span style={{ color: getConfidenceColor(prediction.confidence) }}>
-                                        {confidencePercent}% confidence
-                                    </span>
-                                </div>
-                                <div className='mm-tick-range'>
-                                    Valid for {prediction.tickRange} ticks
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {is_auto_scanning && (
-                        <div className='mm-scan-progress'>
-                            <div className='mm-scan-progress__bar'>
-                                <motion.div 
-                                    className='mm-scan-progress__fill'
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${Math.min((scan_attempts / 50) * 100, 100)}%` }}
-                                />
-                            </div>
-                            <div className='mm-scan-progress__text'>
-                                Scanning... {scan_attempts}/50 attempts
-                            </div>
-                        </div>
-                    )}
-
-                    <div className='mm-cta-wrap' style={{ paddingBottom: '2rem' }}>
-                        {!is_auto_scanning ? (
-                            <motion.button className='mm-cta' onClick={runScan} disabled={is_loading}>
-                                <span className='mm-cta__ico'>
-                                    <Zap size={17} />
-                                </span>
-                                <span className='mm-cta__txt'>SCAN (Min 40% Confidence)</span>
-                            </motion.button>
-                        ) : (
-                            <motion.button className='mm-cta mm-cta--stop' onClick={stopScan}>
-                                <span className='mm-cta__ico'>
-                                    <Square size={17} />
-                                </span>
-                                <span className='mm-cta__txt'>STOP SCANNING</span>
-                            </motion.button>
-                        )}
-                        
-                        {showLoadButton && (
-                            <motion.button 
-                                className='mm-load-btn'
-                                onClick={loadBot}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.3 }}
-                            >
-                                <Play size={17} />
-                                <span>LOAD BOT</span>
-                            </motion.button>
-                        )}
-                    </div>
-                </div>
+          {/* Stats */}
+          <div className='mm-stats'>
+            <div className='mm-stat'>
+              <div className='mm-stat__val mm-stat__val--green'>{wins}</div>
+              <div className='mm-stat__lbl'>Wins</div>
             </div>
+            <div className='mm-stat'>
+              <div className='mm-stat__val mm-stat__val--red'>{losses}</div>
+              <div className='mm-stat__lbl'>Losses</div>
+            </div>
+            <div className='mm-stat'>
+              <div className='mm-stat__val' style={{ color: pnl >= 0 ? '#4caf50' : '#f44336' }}>
+                {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+              </div>
+              <div className='mm-stat__lbl'>P&L</div>
+            </div>
+            <div className='mm-stat'>
+              <div className='mm-stat__val'>{winRate}%</div>
+              <div className='mm-stat__lbl'>Win Rate</div>
+            </div>
+          </div>
+
+          {/* Active Trade */}
+          <AnimatePresence>
+            {activeContract && (
+              <motion.div className='mm-active-trade'
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                <Target size={14} className='mm-active-trade__icon' />
+                <div>
+                  <div className='mm-active-trade__title'>ACTIVE TRADE</div>
+                  <div className='mm-active-trade__detail'>
+                    {SYMBOL_LABELS[activeContract.symbol]} — D{activeContract.digit} — ${activeContract.stake}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Best Signal */}
+          {bestSignal && !activeContract && isRunning && (
+            <div className='mm-signal'>
+              <Activity size={14} />
+              <span>Best: {SYMBOL_LABELS[bestSignal.symbol]} D{bestSignal.digit} ({(bestSignal.confidence * 100).toFixed(0)}%)</span>
+            </div>
+          )}
+
+          {/* Scan count */}
+          {isRunning && (
+            <div className='mm-scan-count'>Scanning... {scanAttempts} cycles</div>
+          )}
         </div>
-    );
+
+        {/* ── CENTER: Symbol Grid ── */}
+        <div className='mm-panel mm-panel--grid'>
+          <div className='mm-panel__head'>
+            <BarChart2 size={16} />
+            <span>Live Analysis</span>
+          </div>
+          <div className='mm-symbol-grid'>
+            {ALL_SYMBOLS.map(sym => {
+              const sd = symbolData[sym];
+              const pred = sd?.prediction;
+              const conf = sd?.confidence || 0;
+              const isActive = bestSignal?.symbol === sym;
+              const ticks = sd?.ticks?.length || 0;
+              return (
+                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${pred && conf >= 0.38 ? 'mm-scard--ready' : ''}`}>
+                  <div className='mm-scard__name'>{SYMBOL_LABELS[sym]}</div>
+                  <div className='mm-scard__ticks'>{ticks} ticks</div>
+                  {pred ? (
+                    <>
+                      <div className='mm-scard__digit' style={{ color: conf >= 0.38 ? '#4caf50' : '#888' }}>
+                        D{pred.digit}
+                      </div>
+                      <div className='mm-scard__conf'>
+                        <div className='mm-scard__bar'>
+                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.38 ? '#4caf50' : conf >= 0.3 ? '#ff9800' : '#f44336' }} />
+                        </div>
+                        <span>{(conf * 100).toFixed(0)}%</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className='mm-scard__waiting'>Collecting...</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── RIGHT: Logs ── */}
+        <div className='mm-panel mm-panel--logs'>
+          <div className='mm-panel__head'>
+            <TrendingUp size={16} />
+            <span>Activity</span>
+          </div>
+          <div className='mm-logs'>
+            {logs.length === 0 && <div className='mm-logs__empty'>No activity yet. Click RUN to start.</div>}
+            {logs.map((log, i) => (
+              <div key={i} className={`mm-log mm-log--${log.type}`}>
+                <span className='mm-log__text'>{log.text}</span>
+              </div>
+            ))}
+          </div>
+          {tradeHistory.length > 0 && (
+            <div className='mm-history'>
+              <div className='mm-history__title'>Trade History</div>
+              {tradeHistory.slice(-10).reverse().map((t, i) => (
+                <div key={i} className={`mm-history__item ${t.won ? 'mm-history__item--win' : 'mm-history__item--loss'}`}>
+                  <span>{SYMBOL_LABELS[t.symbol] || t.symbol}</span>
+                  <span>D{t.digit}</span>
+                  <span style={{ color: t.won ? '#4caf50' : '#f44336' }}>
+                    {t.won ? '+' : ''}{t.profit.toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 });
 
 export default MakotiMagic;

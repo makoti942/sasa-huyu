@@ -1,292 +1,314 @@
-import { makeAutoObservable, action, runInAction } from 'mobx';
+import { makeAutoObservable, runInAction } from 'mobx';
 import { predictNextDigits } from '@/utils/differs-prediction-engine';
 import { getAppId, getSocketURL } from '@/components/shared';
-import { isNewLoggedIn } from '@/auth/NewDerivAuth';
+import { sendViaNewSystemWithPromise, onNewSystemMessage } from '@/auth/NewDerivAuth';
 
-const STATUS_OFFLINE = 'Offline';
-const STATUS_LIVE = 'Live';
+const ALL_SYMBOLS = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'];
+const SYMBOL_LABELS = {
+  R_10: 'Vol 10', R_25: 'Vol 25', R_50: 'Vol 50', R_75: 'Vol 75', R_100: 'Vol 100',
+  '1HZ10V': 'Vol 10 (1s)', '1HZ25V': 'Vol 25 (1s)', '1HZ50V': 'Vol 50 (1s)',
+  '1HZ75V': 'Vol 75 (1s)', '1HZ100V': 'Vol 100 (1s)',
+};
+const PIP_SIZES = {
+  R_100: 2, R_75: 4, R_50: 4, R_25: 3, R_10: 3,
+  '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
+};
 const MAX_TICKS = 200;
-const MIN_CONFIDENCE = 0.31;
-const MAX_SCAN_ATTEMPTS = 50;
+const MIN_CONFIDENCE = 0.38;
+const SCAN_INTERVAL = 600;
 
 class MakotiMagicStore {
-    is_loading = false;
-    is_running = false;
-    connection_status = STATUS_OFFLINE;
-    last_digit = null;
-    prediction = null;
-    selected_symbol = 'R_100';
-    ws = null;
-    tick_history = [];
-    active_subscription_id = null;
-    is_initialized = false;
-    tick_prices = [];
-    scan_count = 0;
-    last_scan_time = null;
-    scan_interval_ms = 1000;
-    bot_load_callback = null;
-    scan_attempts = 0;
-    is_auto_scanning = false;
+  // Connection
+  ws = null;
+  connection_status = 'Offline';
+  is_initialized = false;
 
-    constructor() {
-        makeAutoObservable(this, {
-            runScan: action,
-            connectWebSocket: action,
-            setSelectedSymbol: action,
-            subscribeToTicks: action,
-            handleTick: action,
-            loadBot: action,
-            setBotLoadCallback: action,
-            dispose: action,
-            performPrediction: action,
-        });
-    }
+  // Config
+  stake = '1';
+  isRunning = false;
 
-    setBotLoadCallback = (callback) => {
-        this.bot_load_callback = callback;
-    }
+  // Per-symbol data
+  symbolData = {};
 
-    setSelectedSymbol = (symbol) => {
-        this.selected_symbol = symbol;
-        if (this.connection_status === STATUS_LIVE) {
-            this.subscribeToTicks(symbol);
-        }
-    }
+  // Analysis
+  bestSignal = null;
+  scanAttempts = 0;
 
-    subscribeToTicks = (symbol) => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-        if (this.active_subscription_id) {
-            this.ws.send(JSON.stringify({ forget: this.active_subscription_id }));
-            this.active_subscription_id = null;
-        }
-        this.ws.send(JSON.stringify({ ticks_history: symbol, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
-        this.tick_history = [];
-        this.tick_prices = [];
-    }
+  // Trade state
+  activeContract = null;
+  hasWon = false;
 
-    handleTick = (data) => {
-        const pip_sizes = {
-            'R_100': 2, 'R_75': 4, 'R_50': 4, 'R_25': 3, 'R_10': 3,
-            '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
-        };
-        const pip_size = pip_sizes[this.selected_symbol] || 2;
-        const quote_str = data.tick.quote.toFixed(pip_size);
-        const digit = parseInt(quote_str.slice(-1), 10);
-        const price = Number(data.tick.quote);
+  // Stats
+  wins = 0;
+  losses = 0;
+  pnl = 0;
+  tradeHistory = [];
 
-        this.last_digit = digit;
-        this.tick_history = [...this.tick_history.slice(-MAX_TICKS + 1), digit];
-        this.tick_prices = [...this.tick_prices.slice(-MAX_TICKS + 1), price];
-    }
+  // Logs
+  logs = [];
+  maxLogs = 50;
 
-    performPrediction = () => {
-        if (this.tick_history.length < 5) {
-            runInAction(() => {
-                this.prediction = {
-                    predictedDigit: null,
-                    confidence: 0,
-                    tickRange: null,
-                    rankedDigits: [],
-                    summary: 'Collecting tick data...',
-                };
-            });
-            return { continueScanning: true };
+  // Unsubscribers
+  _pocUnsub = null;
+
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+    ALL_SYMBOLS.forEach(sym => {
+      this.symbolData[sym] = { ticks: [], prices: [], prediction: null, confidence: 0, ready: false };
+    });
+  }
+
+  // ── WebSocket ──────────────────────────────────────────────────────
+  connectWebSocket = () => {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_initialized) return;
+    if (this.ws) { this.ws.onclose = null; this.ws.close(); }
+
+    const server_url = getSocketURL();
+    const app_id = getAppId();
+    if (!server_url || !app_id) return;
+
+    runInAction(() => { this.connection_status = 'Connecting...'; });
+
+    this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
+
+    this.ws.onopen = () => {
+      runInAction(() => { this.connection_status = 'Live'; this.is_initialized = true; });
+      this.subscribeAll();
+    };
+
+    this.ws.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data);
+        if (data.error) return;
+        if (data.subscription?.id) {}
+
+        if (data.msg_type === 'history' && data.history?.prices) {
+          const sym = data.echo_req?.ticks_history;
+          if (!sym || !this.symbolData[sym]) return;
+          const ps = PIP_SIZES[sym] || 2;
+          const prices = data.history.prices.map(Number);
+          const digits = prices.map(p => parseInt(Number(p).toFixed(ps).slice(-1), 10));
+          runInAction(() => {
+            const sd = this.symbolData[sym];
+            sd.prices = prices.slice(-MAX_TICKS);
+            sd.ticks = digits.slice(-MAX_TICKS);
+            sd.ready = sd.ticks.length >= 30;
+          });
         }
 
-        const history = this.tick_history.slice(-200);
-        const result = predictNextDigits(history);
-        const topDigit = result.rankedDigits[0];
-
-        const tickRange = Math.floor(Math.random() * 4) + 4;
-        const confidence = topDigit?.score ?? 0;
-
-        runInAction(() => {
-            this.prediction = {
-                predictedDigit: topDigit?.digit ?? null,
-                confidence: confidence,
-                tickRange: tickRange,
-                rankedDigits: result.rankedDigits.slice(0, 10),
-                summary: result.summary,
-                symbol: this.selected_symbol,
-            };
-        });
-
-        if (confidence >= MIN_CONFIDENCE || this.scan_attempts >= MAX_SCAN_ATTEMPTS) {
-            return { continueScanning: false, confidence, digit: topDigit?.digit };
+        if (data.msg_type === 'tick' && data.tick?.quote) {
+          const sym = data.tick?.symbol;
+          if (!sym || !this.symbolData[sym]) return;
+          const ps = PIP_SIZES[sym] || 2;
+          const price = Number(data.tick.quote);
+          const digit = parseInt(Number(price).toFixed(ps).slice(-1), 10);
+          runInAction(() => {
+            const sd = this.symbolData[sym];
+            sd.prices = [...sd.prices.slice(-MAX_TICKS + 1), price];
+            sd.ticks = [...sd.ticks.slice(-MAX_TICKS + 1), digit];
+            sd.ready = sd.ticks.length >= 30;
+          });
         }
+      } catch {}
+    };
 
-        return { continueScanning: true, confidence, digit: topDigit?.digit };
+    this.ws.onclose = () => {
+      runInAction(() => { this.connection_status = 'Offline'; this.is_initialized = false; });
+      if (this.isRunning) setTimeout(() => this.connectWebSocket(), 3000);
+    };
+
+    this.ws.onerror = () => {
+      runInAction(() => { this.connection_status = 'Error'; });
+    };
+  };
+
+  subscribeAll = () => {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    ALL_SYMBOLS.forEach(sym => {
+      this.ws.send(JSON.stringify({ ticks_history: sym, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
+    });
+  };
+
+  // ── Run / Stop ─────────────────────────────────────────────────────
+  startRunning = () => {
+    if (this.isRunning) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.connectWebSocket();
     }
+    runInAction(() => {
+      this.isRunning = true;
+      this.hasWon = false;
+      this.activeContract = null;
+      this.bestSignal = null;
+      this.scanAttempts = 0;
+    });
+    this.addLog('🚀 Scanner started — analyzing all volatilities...', 'info');
+    this.startPOCListener();
+    this.runScanLoop();
+  };
 
-    connectWebSocket = () => {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_initialized) {
-            return;
-        }
+  stopRunning = () => {
+    runInAction(() => { this.isRunning = false; });
+    this.addLog('⏹ Scanner stopped', 'info');
+    this.stopPOCListener();
+  };
 
-        if (this.ws) {
-            this.ws.onclose = null;
-            this.ws.close();
-        }
+  // ── POC Listener (contract results) ────────────────────────────────
+  startPOCListener = () => {
+    this.stopPOCListener();
+    this._pocUnsub = onNewSystemMessage((event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.msg_type !== 'proposal_open_contract') return;
+        const c = data.proposal_open_contract;
+        if (!c || !c.contract_id) return;
 
-        const server_url = getSocketURL();
-        const app_id = getAppId();
-
-        runInAction(() => {
-            this.connection_status = 'Connecting...';
-        });
-
-        this.ws = new WebSocket(`wss://${server_url}/websockets/v3?app_id=${app_id}`);
-
-        this.ws.onopen = () => {
-            runInAction(() => {
-                this.connection_status = STATUS_LIVE;
-                this.is_initialized = true;
-            });
-
-            // For new auth users the legacy WS cannot authorize — skip.
-            if (!isNewLoggedIn()) {
-                const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-                if (token) {
-                    this.ws.send(JSON.stringify({ authorize: token }));
-                }
-            }
-            this.subscribeToTicks(this.selected_symbol);
-        };
-
-        this.ws.onmessage = (msg) => {
-            try {
-                const data = JSON.parse(msg.data);
-                if (data.error) {
-                    console.error(data.error.message);
-                    return;
-                }
-
-                if (data.subscription?.id) {
-                    this.active_subscription_id = data.subscription.id;
-                }
-
-                if (data.msg_type === 'history') {
-                    const pip_sizes = {
-                        'R_100': 2, 'R_75': 4, 'R_50': 4, 'R_25': 3, 'R_10': 3,
-                        '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
-                    };
-                    const pip_size = pip_sizes[this.selected_symbol] || 2;
-                    const prices = data.history.prices;
-                    const digits = prices.map((p) => Number(p).toFixed(pip_size).slice(-1)).map(Number);
-
-                    runInAction(() => {
-                        this.tick_history = digits;
-                        this.tick_prices = prices.map((p) => Number(p));
-                        if (digits.length > 0) {
-                            this.last_digit = digits[digits.length - 1];
-                        }
-                    });
-                }
-
-                if (data.msg_type === 'tick') {
-                    this.handleTick(data);
-                }
-
-                if (data.msg_type === 'authorize' && !data.error) {
-                    runInAction(() => {
-                        this.connection_status = 'Connected';
-                    });
-                    this.subscribeToTicks(this.selected_symbol);
-                }
-            } catch (error) {
-                console.error('Message parse error:', error);
-            }
-        };
-
-        this.ws.onclose = () => {
-            runInAction(() => {
-                this.connection_status = STATUS_OFFLINE;
-                this.is_initialized = false;
-            });
-            setTimeout(() => this.connectWebSocket(), 5000);
-        };
-
-        this.ws.onerror = (e) => {
-            console.error('WebSocket error:', e);
-            runInAction(() => {
-                this.connection_status = 'Error';
-            });
-        };
-    }
-
-    runScan = () => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.error('WebSocket is not connected.');
-            return;
-        }
-
-        if (this.is_loading) {
-            return;
-        }
-
-        this.is_loading = true;
-        this.scan_attempts = 0;
-        this.is_auto_scanning = true;
-
-        this.runAutoScan();
-    }
-
-    runAutoScan = () => {
-        if (!this.is_auto_scanning) return;
-
-        this.scan_attempts++;
-
-        setTimeout(() => {
-            const result = this.performPrediction();
-
-            if (result.continueScanning && this.scan_attempts < MAX_SCAN_ATTEMPTS) {
-                this.runAutoScan();
+        if (c.is_sold) {
+          const profit = Number(c.profit);
+          const won = profit >= 0;
+          runInAction(() => {
+            this.pnl += profit;
+            if (won) {
+              this.wins++;
+              this.hasWon = true;
+              this.addLog(`✅ WON +$${profit.toFixed(2)} on ${SYMBOL_LABELS[c.underlying] || c.underlying}`, 'win');
+              this.addLog(`🎯 WINNER FOUND — stopping scanner`, 'win');
+              this.isRunning = false;
             } else {
-                runInAction(() => {
-                    this.is_loading = false;
-                    this.is_auto_scanning = false;
-                });
+              this.losses++;
+              this.addLog(`❌ LOST -$${Math.abs(profit).toFixed(2)} on ${SYMBOL_LABELS[c.underlying] || c.underlying}`, 'loss');
+              this.activeContract = null;
+              this.scanAttempts = 0;
             }
-        }, 800);
-    };
-
-    stopScan = () => {
-        this.is_auto_scanning = false;
-        this.is_loading = false;
-    };
-
-    loadBot = async () => {
-        if (!this.prediction || this.prediction.predictedDigit === null) {
-            console.error('No prediction available to load.');
-            return;
+            this.tradeHistory.push({
+              symbol: c.underlying, profit, won,
+              digit: c.barrier, timestamp: Date.now(),
+            });
+          });
+          if (!won && this.isRunning) {
+            setTimeout(() => this.runScanLoop(), 500);
+          }
         }
+      } catch {}
+    });
+  };
 
-        const predictedDigit = this.prediction.predictedDigit;
-        const symbol = this.prediction.symbol;
+  stopPOCListener = () => {
+    if (this._pocUnsub) { this._pocUnsub(); this._pocUnsub = null; }
+  };
 
-        try {
-            const response = await fetch('/matches.xml');
-            let xmlContent = await response.text();
-            
-            xmlContent = xmlContent.replace(/PREDICTION_VALUE/g, String(predictedDigit));
-            xmlContent = xmlContent.replace(/<field name="SYMBOL_LIST">[^<]*<\/field>/, `<field name="SYMBOL_LIST">${symbol}</field>`);
+  // ── Scan Loop ──────────────────────────────────────────────────────
+  runScanLoop = () => {
+    if (!this.isRunning || this.hasWon || this.activeContract) return;
 
-            if (this.bot_load_callback) {
-                this.bot_load_callback(xmlContent);
-            }
-        } catch (error) {
-            console.error('Failed to load bot XML:', error);
+    this.scanAttempts++;
+    this.analyzeAllSymbols();
+
+    if (this.bestSignal) {
+      this.executeTrade(this.bestSignal);
+      return;
+    }
+
+    if (this.isRunning && !this.hasWon) {
+      setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+    }
+  };
+
+  // ── Analysis ───────────────────────────────────────────────────────
+  analyzeAllSymbols = () => {
+    let best = null;
+
+    ALL_SYMBOLS.forEach(sym => {
+      const sd = this.symbolData[sym];
+      if (!sd || !sd.ready || sd.ticks.length < 30) return;
+
+      const result = predictNextDigits(sd.ticks);
+      const top = result.rankedDigits[0];
+      if (!top) return;
+
+      const confidence = result.overallConfidence;
+      const predictedDigit = top.digit;
+
+      runInAction(() => {
+        sd.prediction = { digit: predictedDigit, confidence, summary: result.summary };
+        sd.confidence = confidence;
+      });
+
+      if (confidence >= MIN_CONFIDENCE) {
+        if (!best || confidence > best.confidence) {
+          best = { symbol: sym, digit: predictedDigit, confidence, summary: result.summary };
         }
+      }
+    });
+
+    runInAction(() => { this.bestSignal = best; });
+  };
+
+  // ── Execute Trade ──────────────────────────────────────────────────
+  executeTrade = async (signal) => {
+    if (!this.isRunning || this.hasWon || this.activeContract) return;
+
+    const { symbol, digit, confidence } = signal;
+    const stakeAmount = parseFloat(this.stake) || 1;
+
+    this.addLog(`🎯 [${(confidence * 100).toFixed(0)}%] Entry found: ${SYMBOL_LABELS[symbol]} — predicting D${digit}`, 'trade');
+
+    const params = {
+      proposal: 1, amount: stakeAmount, basis: 'stake', currency: 'USD',
+      symbol, contract_type: 'DIGITMATCH',
+      duration: 1, duration_unit: 't',
+      barrier: String(digit),
     };
 
-    dispose = () => {
-        this.is_auto_scanning = false;
-        if (this.ws) {
-            this.ws.onclose = null;
-            this.ws.close();
-            this.ws = null;
-        }
-    };
+    try {
+      const proposalRes = await sendViaNewSystemWithPromise(params);
+      if (!proposalRes?.proposal) {
+        this.addLog(`⚠️ No proposal for ${SYMBOL_LABELS[symbol]}`, 'info');
+        if (this.isRunning && !this.hasWon) setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+        return;
+      }
+
+      const buyParams = {
+        buy: 1, price: stakeAmount, parameters: {
+          amount: stakeAmount, basis: 'stake', currency: 'USD',
+          symbol, contract_type: 'DIGITMATCH',
+          duration: 1, duration_unit: 't',
+          barrier: String(digit),
+        },
+      };
+
+      const buyRes = await sendViaNewSystemWithPromise(buyParams);
+      const contractId = buyRes?.buy?.contract_id ?? buyRes?.contract_id;
+
+      if (contractId) {
+        runInAction(() => {
+          this.activeContract = { id: contractId, symbol, digit, stake: stakeAmount, confidence };
+        });
+        this.addLog(`📡 Contract ${contractId} opened — D${digit} on ${SYMBOL_LABELS[symbol]} @ $${stakeAmount}`, 'trade');
+      } else {
+        this.addLog(`⚠️ Buy ok but no contract_id`, 'info');
+        if (this.isRunning && !this.hasWon) setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+      }
+    } catch (err) {
+      this.addLog(`⚠️ Trade error: ${err.message || err}`, 'info');
+      if (this.isRunning && !this.hasWon) setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+    }
+  };
+
+  // ── Helpers ────────────────────────────────────────────────────────
+  setStake = (val) => { this.stake = val; };
+
+  addLog = (text, type = 'info') => {
+    runInAction(() => {
+      this.logs = [{ text, type, time: Date.now() }, ...this.logs].slice(0, this.maxLogs);
+    });
+  };
+
+  dispose = () => {
+    this.isRunning = false;
+    this.stopPOCListener();
+    if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
+  };
 }
 
 export default new MakotiMagicStore();
