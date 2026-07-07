@@ -547,30 +547,73 @@ export function predictNextDigits(history: number[]): PredictionResult {
 
     const final = normaliseScores(combined);
 
-    const last3Freq = getRecentFrequency(history, 3);
-    const last5Freq = getRecentFrequency(history, 5);
-    const last10Freq = getRecentFrequency(history, 10);
-    const last20Freq = getRecentFrequency(history, 20);
-    
+    // ── Enhanced Recency: weight last 1-2 ticks much heavier for 1-tick contracts ──
+    const last1 = history[history.length - 1];
+    const last2 = history[history.length - 2];
+    const last3 = history[history.length - 3];
+
     const recencyBoost = Array(10).fill(0) as number[];
-    last3Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 8.0;
-    });
+
+    // Last 1 tick: massive weight (this is what we're predicting FROM)
+    if (last1 >= 0 && last1 <= 9) recencyBoost[last1] += 15.0;
+
+    // Last 2 ticks: strong weight
+    if (last2 >= 0 && last2 <= 9) recencyBoost[last2] += 8.0;
+
+    // Last 3 ticks
+    if (last3 >= 0 && last3 <= 9) recencyBoost[last3] += 5.0;
+
+    // Last 5 ticks
+    const last5Freq = getRecentFrequency(history, 5);
     last5Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 4.0;
+        if (count > 0) recencyBoost[digit] += count * 3.0;
     });
+
+    // Last 10 ticks
+    const last10Freq = getRecentFrequency(history, 10);
     last10Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 2.0;
+        if (count > 0) recencyBoost[digit] += count * 1.5;
     });
-    last20Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 1.0;
-    });
-    
+
+    // Transition analysis: what digit follows the current sequence most often
+    const last3Key = history.slice(-3).join(',');
+    const transitions: Record<string, number[]> = {};
+    for (let i = 0; i <= history.length - 4; i++) {
+        const key = history.slice(i, i + 3).join(',');
+        if (!transitions[key]) transitions[key] = Array(10).fill(0);
+        transitions[key][history[i + 3]]++;
+    }
+    if (transitions[last3Key]) {
+        const total = transitions[last3Key].reduce((a, b) => a + b, 0);
+        if (total > 0) {
+            transitions[last3Key].forEach((count, digit) => {
+                recencyBoost[digit] += (count / total) * 20.0;
+            });
+        }
+    }
+
+    // Cycle detection: find repeating patterns and predict next
+    for (let cycleLen = 2; cycleLen <= 6; cycleLen++) {
+        if (history.length < cycleLen * 3) continue;
+        const recent = history.slice(-cycleLen * 3);
+        let matches = 0;
+        for (let i = cycleLen; i < recent.length; i++) {
+            if (recent[i] === recent[i - cycleLen]) matches++;
+        }
+        const matchRate = matches / (recent.length - cycleLen);
+        if (matchRate > 0.5) {
+            const nextInCycle = history[history.length - cycleLen];
+            if (nextInCycle >= 0 && nextInCycle <= 9) {
+                recencyBoost[nextInCycle] += matchRate * 12.0;
+            }
+        }
+    }
+
     const recencySum = recencyBoost.reduce((a, b) => a + b, 0);
     if (recencySum > 0) {
         const recencyNorm = recencyBoost.map(v => v / recencySum);
         final.forEach((score, digit) => {
-            final[digit] = score * 0.5 + recencyNorm[digit] * 0.5;
+            final[digit] = score * 0.4 + recencyNorm[digit] * 0.6;
         });
     }
 
@@ -586,7 +629,13 @@ export function predictNextDigits(history: number[]): PredictionResult {
     const dominance = topScore - secondScore;
     const tier1AgreementCount = strategies.filter(s => s.tier === 1 && s.scores[rankedDigits[0].digit] === Math.max(...s.scores)).length;
     const tier2AgreementCount = strategies.filter(s => s.tier === 2 && s.scores[rankedDigits[0].digit] === Math.max(...s.scores)).length;
-    const overallConfidence = Math.min((dominance * 15 + tier1AgreementCount * 0.15 + tier2AgreementCount * 0.08) / 2, 1);
+
+    // Stricter confidence: weighted by dominance, strategy agreement, and raw score
+    const dominanceConf = Math.min(dominance * 20, 0.4);
+    const tier1Conf = Math.min(tier1AgreementCount * 0.06, 0.3);
+    const tier2Conf = Math.min(tier2AgreementCount * 0.03, 0.15);
+    const rawScoreConf = Math.min(topScore * 0.5, 0.15);
+    const overallConfidence = Math.min(dominanceConf + tier1Conf + tier2Conf + rawScoreConf, 1);
 
     const top4Str = rankedDigits.slice(0, 4).map(d => `${d.digit}(${(d.score * 100).toFixed(0)}%)`).join(' ');
     const summary = `Predict NEXT tick: ${predictedDigit} (${(rankedDigits[0].score * 100).toFixed(0)}%), Top4: [${top4Str}], Conf:${(overallConfidence * 100).toFixed(0)}%`;

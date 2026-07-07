@@ -460,7 +460,8 @@
     border-right: none;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
-  .mm-field { flex: 1; min-width: 100px; }
+  .mm-field { flex: 1; min-width: 100px; position: relative; z-index: 10; }
+  .mm-field__input { -webkit-appearance: none; appearance: none; position: relative; z-index: 10; }
   .mm-actions { flex: 0 0 auto; }
   .mm-stats { flex: 1; min-width: 200px; }
 }

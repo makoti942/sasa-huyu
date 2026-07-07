@@ -57,6 +57,7 @@ const MakotiMagic = observer(() => {
           <div className='mm-field'>
             <label className='mm-field__label'><DollarSign size={12} /> Stake (USD)</label>
             <input className='mm-field__input' type='number' min='0.35' step='0.1'
+              inputMode='decimal' autoComplete='off' autoCorrect='off'
               value={stake} onChange={e => setStake(e.target.value)} disabled={isRunning} />
           </div>
 
@@ -152,18 +153,18 @@ const MakotiMagic = observer(() => {
               const isChaseTarget = chaseSymbol === sym && chaseDigit !== null;
               const ticks = sd?.ticks?.length || 0;
               return (
-                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${isChaseTarget ? 'mm-scard--chase' : ''} ${pred && conf >= 0.55 ? 'mm-scard--ready' : ''}`}>
+                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${isChaseTarget ? 'mm-scard--chase' : ''} ${pred && conf >= 0.65 ? 'mm-scard--ready' : ''}`}>
                   <div className='mm-scard__name'>{SYMBOL_LABELS[sym]}</div>
                   <div className='mm-scard__ticks'>{ticks} ticks</div>
                   {pred ? (
                     <>
-                      <div className='mm-scard__digit' style={{ color: conf >= 0.55 ? '#4caf50' : conf >= 0.4 ? '#ff9800' : '#888' }}>
+                      <div className='mm-scard__digit' style={{ color: conf >= 0.65 ? '#4caf50' : conf >= 0.5 ? '#ff9800' : '#888' }}>
                         D{pred.digit}
                         {pred.chaseMode && <span className='mm-scard__chase-badge'>CHASE</span>}
                       </div>
                       <div className='mm-scard__conf'>
                         <div className='mm-scard__bar'>
-                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.55 ? '#4caf50' : conf >= 0.4 ? '#ff9800' : '#f44336' }} />
+                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.65 ? '#4caf50' : conf >= 0.5 ? '#ff9800' : '#f44336' }} />
                         </div>
                         <span>{(conf * 100).toFixed(0)}%</span>
                       </div>

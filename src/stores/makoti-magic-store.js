@@ -18,10 +18,10 @@ const MIN_TICKS = 50;
 const SCAN_INTERVAL = 400;
 const ENTRY_COOLDOWN_MS = 1500;
 
-const MIN_CONFIDENCE = 0.55;
-const MIN_STRATEGY_AGREEMENT = 4;
-const MIN_PATTERN_QUALITY = 0.55;
-const MIN_DOMINANCE_GAP = 0.03;
+const MIN_CONFIDENCE = 0.65;
+const MIN_STRATEGY_AGREEMENT = 5;
+const MIN_PATTERN_QUALITY = 0.60;
+const MIN_DOMINANCE_GAP = 0.04;
 
 class MakotiMagicStore {
   ws = null;
