@@ -63,7 +63,7 @@ const MakotiMagic = observer(() => {
           {/* Run / Stop */}
           <div className='mm-actions'>
             {!isRunning ? (
-              <button className='mm-btn mm-btn--run' onClick={startRunning} disabled={hasWon}>
+              <button className='mm-btn mm-btn--run' onClick={startRunning}>
                 <Play size={18} />
                 <span>{hasWon ? 'WON — Rerun' : 'RUN SCANNER'}</span>
               </button>
