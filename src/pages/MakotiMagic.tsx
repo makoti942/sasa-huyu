@@ -17,8 +17,9 @@ const MakotiMagic = observer(() => {
   const {
     connectWebSocket, startRunning, stopRunning, setStake,
     stake, isRunning, connection_status, symbolData,
-    bestSignal, scanAttempts, activeContract, hasWon,
+    bestSignal, activeContract, hasWon, isExecuting,
     wins, losses, pnl, tradeHistory, logs,
+    chaseSymbol, chaseDigit, chaseLossCount,
   } = MakotiMagicStore;
 
   useEffect(() => {
@@ -103,7 +104,7 @@ const MakotiMagic = observer(() => {
                 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 <Target size={14} className='mm-active-trade__icon' />
                 <div>
-                  <div className='mm-active-trade__title'>ACTIVE TRADE</div>
+                  <div className='mm-active-trade__title'>ACTIVE TRADE {isExecuting && '— EXECUTING'}</div>
                   <div className='mm-active-trade__detail'>
                     {SYMBOL_LABELS[activeContract.symbol]} — D{activeContract.digit} — ${activeContract.stake}
                   </div>
@@ -112,8 +113,16 @@ const MakotiMagic = observer(() => {
             )}
           </AnimatePresence>
 
+          {/* Chase Mode */}
+          {chaseSymbol && chaseDigit !== null && isRunning && (
+            <div className='mm-chase'>
+              <span>🔁 CHASE: {SYMBOL_LABELS[chaseSymbol]} D{chaseDigit}</span>
+              {chaseLossCount > 0 && <span className='mm-chase__losses'>Losses: {chaseLossCount}</span>}
+            </div>
+          )}
+
           {/* Best Signal */}
-          {bestSignal && !activeContract && isRunning && (
+          {bestSignal && !activeContract && isRunning && !isExecuting && (
             <div className='mm-signal'>
               <Activity size={14} />
               <span>Best: {SYMBOL_LABELS[bestSignal.symbol]} D{bestSignal.digit} ({(bestSignal.confidence * 100).toFixed(0)}%)</span>
@@ -122,7 +131,9 @@ const MakotiMagic = observer(() => {
 
           {/* Scan count */}
           {isRunning && (
-            <div className='mm-scan-count'>Scanning... {scanAttempts} cycles</div>
+            <div className='mm-scan-count'>
+              {isExecuting ? '⏳ Executing trade...' : '🔍 Scanning for high-quality entry...'}
+            </div>
           )}
         </div>
 
@@ -137,20 +148,22 @@ const MakotiMagic = observer(() => {
               const sd = symbolData[sym];
               const pred = sd?.prediction;
               const conf = sd?.confidence || 0;
-                            const isActive = bestSignal?.symbol === sym;
+              const isActive = bestSignal?.symbol === sym;
+              const isChaseTarget = chaseSymbol === sym && chaseDigit !== null;
               const ticks = sd?.ticks?.length || 0;
               return (
-                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${pred && conf >= 0.40 ? 'mm-scard--ready' : ''}`}>
+                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${isChaseTarget ? 'mm-scard--chase' : ''} ${pred && conf >= 0.55 ? 'mm-scard--ready' : ''}`}>
                   <div className='mm-scard__name'>{SYMBOL_LABELS[sym]}</div>
                   <div className='mm-scard__ticks'>{ticks} ticks</div>
                   {pred ? (
                     <>
-                      <div className='mm-scard__digit' style={{ color: conf >= 0.40 ? '#4caf50' : '#888' }}>
+                      <div className='mm-scard__digit' style={{ color: conf >= 0.55 ? '#4caf50' : conf >= 0.4 ? '#ff9800' : '#888' }}>
                         D{pred.digit}
+                        {pred.chaseMode && <span className='mm-scard__chase-badge'>CHASE</span>}
                       </div>
                       <div className='mm-scard__conf'>
                         <div className='mm-scard__bar'>
-                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.40 ? '#4caf50' : conf >= 0.3 ? '#ff9800' : '#f44336' }} />
+                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.55 ? '#4caf50' : conf >= 0.4 ? '#ff9800' : '#f44336' }} />
                         </div>
                         <span>{(conf * 100).toFixed(0)}%</span>
                       </div>
@@ -159,6 +172,7 @@ const MakotiMagic = observer(() => {
                           <span title='Strategies agreeing'>🎯 {pred.strategyAgreement}</span>
                           {pred.patternQuality > 0 && <span title='Pattern quality'>📊 {(pred.patternQuality * 100).toFixed(0)}%</span>}
                           {pred.confirmed > 1 && <span title='Confirmed cycles'>✓ {pred.confirmed}x</span>}
+                          {pred.multiTF > 0 && <span title='Timeframe agreement'>⏱ {pred.multiTF}</span>}
                         </div>
                       )}
                     </>

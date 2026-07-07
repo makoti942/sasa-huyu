@@ -14,48 +14,49 @@ const PIP_SIZES = {
   '1HZ100V': 2, '1HZ75V': 2, '1HZ50V': 2, '1HZ25V': 2, '1HZ10V': 2,
 };
 const MAX_TICKS = 200;
-const MIN_CONFIDENCE = 0.40;
 const MIN_TICKS = 50;
-const SCAN_INTERVAL = 500;
-const ENTRY_COOLDOWN_MS = 2000;
-const MIN_STRATEGY_AGREEMENT = 3;
+const SCAN_INTERVAL = 400;
+const ENTRY_COOLDOWN_MS = 1500;
+
+// Entry thresholds — tuned for quality over quantity
+const MIN_CONFIDENCE = 0.55;
+const MIN_STRATEGY_AGREEMENT = 4;
+const MIN_PATTERN_QUALITY = 0.55;
+const MIN_DOMINANCE_GAP = 0.03;
 
 class MakotiMagicStore {
-  // Connection
   ws = null;
   connection_status = 'Offline';
   is_initialized = false;
 
-  // Config
   stake = '1';
   isRunning = false;
 
-  // Per-symbol data
   symbolData = {};
 
-  // Analysis
-  bestSignal = null;
-  scanAttempts = 0;
-
-  // Trade state
+  // Trade enforcement — one trade at a time
+  isExecuting = false;
   activeContract = null;
   hasWon = false;
   lastTradeTime = 0;
-  previousPredictions = {}; // symbol -> { digit, confidence, timestamp }
-  confirmedSignals = {};    // symbol -> confirmation count
 
-  // Stats
+  // Chase mode — stay on same symbol/digit until win
+  chaseSymbol = null;
+  chaseDigit = null;
+  chaseLossCount = 0;
+  chaseScanCount = 0;
+  previousPredictions = {};
+  confirmedSignals = {};
+
   wins = 0;
   losses = 0;
   pnl = 0;
   tradeHistory = [];
-
-  // Logs
   logs = [];
   maxLogs = 50;
 
-  // Unsubscribers
   _pocUnsub = null;
+  _scanTimeout = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -86,7 +87,6 @@ class MakotiMagicStore {
       try {
         const data = JSON.parse(msg.data);
         if (data.error) return;
-        if (data.subscription?.id) {}
 
         if (data.msg_type === 'history' && data.history?.prices) {
           const sym = data.echo_req?.ticks_history;
@@ -98,7 +98,7 @@ class MakotiMagicStore {
             const sd = this.symbolData[sym];
             sd.prices = prices.slice(-MAX_TICKS);
             sd.ticks = digits.slice(-MAX_TICKS);
-            sd.ready = sd.ticks.length >= 30;
+            sd.ready = sd.ticks.length >= MIN_TICKS;
           });
         }
 
@@ -112,7 +112,7 @@ class MakotiMagicStore {
             const sd = this.symbolData[sym];
             sd.prices = [...sd.prices.slice(-MAX_TICKS + 1), price];
             sd.ticks = [...sd.ticks.slice(-MAX_TICKS + 1), digit];
-            sd.ready = sd.ticks.length >= 30;
+            sd.ready = sd.ticks.length >= MIN_TICKS;
           });
         }
       } catch {}
@@ -144,22 +144,35 @@ class MakotiMagicStore {
     runInAction(() => {
       this.isRunning = true;
       this.hasWon = false;
+      this.isExecuting = false;
       this.activeContract = null;
-      this.bestSignal = null;
-      this.scanAttempts = 0;
       this.lastTradeTime = 0;
+      this.chaseSymbol = null;
+      this.chaseDigit = null;
+      this.chaseLossCount = 0;
+      this.chaseScanCount = 0;
       this.previousPredictions = {};
       this.confirmedSignals = {};
     });
-    this.addLog('🚀 Sniper scanner started — analyzing all volatilities for perfect entry...', 'info');
+    this.addLog('🚀 Sniper scanner started — analyzing all volatilities for high-quality entry...', 'info');
     this.startPOCListener();
-    this.runScanLoop();
+    this.scheduleScan();
   };
 
   stopRunning = () => {
-    runInAction(() => { this.isRunning = false; });
+    runInAction(() => {
+      this.isRunning = false;
+      this.isExecuting = false;
+    });
+    if (this._scanTimeout) { clearTimeout(this._scanTimeout); this._scanTimeout = null; }
     this.addLog('⏹ Scanner stopped', 'info');
     this.stopPOCListener();
+  };
+
+  scheduleScan = () => {
+    if (!this.isRunning || this.hasWon || this.isExecuting) return;
+    if (this._scanTimeout) clearTimeout(this._scanTimeout);
+    this._scanTimeout = setTimeout(() => this.runScan(), SCAN_INTERVAL);
   };
 
   // ── POC Listener (contract results) ────────────────────────────────
@@ -177,26 +190,37 @@ class MakotiMagicStore {
           const won = profit >= 0;
           runInAction(() => {
             this.pnl += profit;
+            this.isExecuting = false;
+            this.activeContract = null;
+
             if (won) {
               this.wins++;
               this.hasWon = true;
-              this.addLog(`✅ WON +$${profit.toFixed(2)} on ${SYMBOL_LABELS[c.underlying] || c.underlying}`, 'win');
+              this.addLog(`✅ WON +$${profit.toFixed(2)} on ${SYMBOL_LABELS[c.underlying] || c.underlying} — D${c.barrier}`, 'win');
               this.addLog(`🎯 WINNER FOUND — stopping scanner`, 'win');
               this.isRunning = false;
+              this.chaseSymbol = null;
+              this.chaseDigit = null;
+              this.chaseLossCount = 0;
             } else {
               this.losses++;
-              this.addLog(`❌ LOST -$${Math.abs(profit).toFixed(2)} on ${SYMBOL_LABELS[c.underlying] || c.underlying}`, 'loss');
-              this.activeContract = null;
+              this.addLog(`❌ LOST -$${Math.abs(profit).toFixed(2)} on ${SYMBOL_LABELS[c.underlying] || c.underlying} — D${c.barrier}`, 'loss');
               this.lastTradeTime = Date.now();
-              this.scanAttempts = 0;
+
+              // Chase mode: stay on same symbol/digit after loss
+              if (this.chaseSymbol && this.chaseDigit) {
+                this.chaseLossCount++;
+                this.chaseScanCount = 0;
+                this.addLog(`🔁 Chase mode: re-analyzing ${SYMBOL_LABELS[this.chaseSymbol]} D${this.chaseDigit} (loss #${this.chaseLossCount})`, 'info');
+              }
             }
             this.tradeHistory.push({
               symbol: c.underlying, profit, won,
               digit: c.barrier, timestamp: Date.now(),
             });
           });
-          if (!won && this.isRunning) {
-            setTimeout(() => this.runScanLoop(), 500);
+          if (!won && this.isRunning && !this.isExecuting) {
+            this.scheduleScan();
           }
         }
       } catch {}
@@ -208,54 +232,93 @@ class MakotiMagicStore {
   };
 
   // ── Scan Loop ──────────────────────────────────────────────────────
-  runScanLoop = () => {
-    if (!this.isRunning || this.hasWon || this.activeContract) return;
+  runScan = () => {
+    if (!this.isRunning || this.hasWon || this.isExecuting) return;
 
-    this.scanAttempts++;
-    this.analyzeAllSymbols();
+    // If we're in chase mode, analyze only the chase target
+    if (this.chaseSymbol && this.chaseDigit !== null) {
+      this.chaseScanCount++;
+      const signal = this.analyzeChaseTarget();
+      if (signal) {
+        this.executeTrade(signal);
+        return;
+      }
+      // Signal degraded — fall back to scanning all
+      if (this.chaseScanCount > 30) {
+        this.addLog(`⚠️ Chase signal degraded after ${this.chaseScanCount} scans — scanning all volatilities`, 'info');
+        this.chaseSymbol = null;
+        this.chaseDigit = null;
+        this.chaseLossCount = 0;
+        this.chaseScanCount = 0;
+      }
+    }
 
-    if (this.bestSignal) {
-      this.executeTrade(this.bestSignal);
+    // Scan all symbols for the best signal
+    const best = this.analyzeAllSymbols();
+    if (best) {
+      this.executeTrade(best);
       return;
     }
 
-    if (this.isRunning && !this.hasWon) {
-      setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
-    }
+    this.scheduleScan();
   };
 
-  // ── Sniper Entry Validation ────────────────────────────────────────
-  validateSniperEntry = (sym, digit, confidence, strategyAgreement) => {
-    // 1. Must have enough ticks
+  // ── Analyze Chase Target ───────────────────────────────────────────
+  analyzeChaseTarget = () => {
+    const sym = this.chaseSymbol;
+    const targetDigit = this.chaseDigit;
     const sd = this.symbolData[sym];
-    if (!sd || sd.ticks.length < MIN_TICKS) return false;
+    if (!sd || !sd.ready || sd.ticks.length < MIN_TICKS) return null;
 
-    // 2. Confidence must be above 40%
-    if (confidence < MIN_CONFIDENCE) return false;
+    const result = predictNextDigits(sd.ticks);
+    const top = result.rankedDigits[0];
+    if (!top) return null;
 
-    // 3. Must have enough strategies agreeing on the same digit
-    if (strategyAgreement < MIN_STRATEGY_AGREEMENT) return false;
+    // Check if the prediction engine still predicts the same digit
+    const stillPredicts = result.rankedDigits.slice(0, 3).some(r => r.digit === targetDigit);
+    if (!stillPredicts) {
+      this.addLog(`⚠️ Chase: ${SYMBOL_LABELS[sym]} no longer predicts D${targetDigit}`, 'info');
+      return null;
+    }
 
-    // 4. Cooldown — don't trade too fast
+    const confidence = result.overallConfidence;
+    const dominance = result.rankedDigits[0].score - result.rankedDigits[1].score;
+
+    // Minimum quality for chase: engine confidence + dominance gap
+    if (confidence < MIN_CONFIDENCE * 0.85) return null;
+    if (dominance < MIN_DOMINANCE_GAP * 0.7) return null;
+
+    // Cooldown check
     const now = Date.now();
-    if (now - this.lastTradeTime < ENTRY_COOLDOWN_MS) return false;
+    if (now - this.lastTradeTime < ENTRY_COOLDOWN_MS) return null;
 
-    // 5. Stability check — same digit must have been predicted in previous scan too
-    const prev = this.previousPredictions[sym];
-    if (prev && prev.digit === digit && (now - prev.timestamp) < 3000) {
-      // Same digit predicted twice in 3 seconds — stable signal
-      return true;
-    }
+    // Must NOT have just appeared — wait at least 2 ticks after last appearance
+    const lastIdx = sd.ticks.lastIndexOf(targetDigit);
+    const ticksSinceAppearance = sd.ticks.length - 1 - lastIdx;
+    if (ticksSinceAppearance < 2) return null;
 
-    // 6. For first-time signals, require extra high confidence
-    if (!prev || prev.digit !== digit) {
-      return confidence >= 0.42 && strategyAgreement >= 4;
-    }
+    runInAction(() => {
+      sd.prediction = {
+        digit: targetDigit, confidence,
+        summary: `CHASE: ${result.summary}`,
+        strategyAgreement: MIN_STRATEGY_AGREEMENT,
+        patternQuality: 0.7,
+        confirmed: this.chaseScanCount,
+        chaseMode: true,
+      };
+      sd.confidence = confidence;
+    });
 
-    return false;
+    return {
+      symbol: sym, digit: targetDigit, confidence,
+      score: confidence * 0.8,
+      strategyAgreement: MIN_STRATEGY_AGREEMENT,
+      patternQuality: 0.7,
+      summary: `CHASE — D${targetDigit} (loss #${this.chaseLossCount}, scan #${this.chaseScanCount})`,
+    };
   };
 
-  // ── Analysis ───────────────────────────────────────────────────────
+  // ── Analyze All Symbols ────────────────────────────────────────────
   analyzeAllSymbols = () => {
     let best = null;
 
@@ -269,129 +332,214 @@ class MakotiMagicStore {
 
       const confidence = result.overallConfidence;
       const predictedDigit = top.digit;
+      const dominance = result.rankedDigits[0].score - result.rankedDigits[1].score;
 
-      // Count how many strategies agree on the top digit
-      const strategyAgreement = this.countStrategyAgreement(sd.ticks, predictedDigit);
+      // Multi-timeframe confirmation: check if digit is predicted across different window sizes
+      const multiTF = this.multiTimeframeCheck(sd.ticks, predictedDigit);
 
-      // Store previous prediction for stability check
+      // Count strategies from the prediction engine that agree
+      const strategyAgreement = this.countEngineAgreement(result, predictedDigit);
+
+      // Pattern quality
+      const patternQuality = this.assessPatternQuality(sd.ticks, predictedDigit);
+
+      // Store for stability tracking
       const now = Date.now();
       const prev = this.previousPredictions[sym];
       if (prev && prev.digit === predictedDigit) {
-        // Same digit — increment confirmation count
         this.confirmedSignals[sym] = (this.confirmedSignals[sym] || 0) + 1;
       } else {
         this.confirmedSignals[sym] = 1;
       }
       this.previousPredictions[sym] = { digit: predictedDigit, confidence, timestamp: now };
 
-      // Pattern quality score
-      const patternQuality = this.assessPatternQuality(sd.ticks, predictedDigit);
-
       runInAction(() => {
         sd.prediction = {
           digit: predictedDigit, confidence, summary: result.summary,
-          strategyAgreement, patternQuality,
+          strategyAgreement, patternQuality, multiTF,
           confirmed: this.confirmedSignals[sym] || 0,
         };
         sd.confidence = confidence;
       });
 
-      // Validate as sniper entry
-      const isValid = this.validateSniperEntry(sym, predictedDigit, confidence, strategyAgreement);
+      // Validate entry — all conditions must pass
+      if (!this.validateEntry(sym, predictedDigit, confidence, strategyAgreement, patternQuality, dominance, multiTF)) return;
 
-      if (isValid) {
-        // Score = confidence * patternQuality * agreement bonus
-        const score = confidence * patternQuality * (1 + strategyAgreement * 0.1);
-        if (!best || score > best.score) {
-          best = {
-            symbol: sym, digit: predictedDigit, confidence,
-            score, strategyAgreement, patternQuality,
-            summary: result.summary,
-          };
-        }
+      // Score
+      const score = confidence * patternQuality * (1 + strategyAgreement * 0.08) * (1 + multiTF * 0.1) * (1 + dominance * 5);
+      if (!best || score > best.score) {
+        best = {
+          symbol: sym, digit: predictedDigit, confidence,
+          score, strategyAgreement, patternQuality, dominance, multiTF,
+          summary: result.summary,
+        };
       }
     });
 
-    runInAction(() => { this.bestSignal = best; });
+    return best;
   };
 
-  // Count how many strategies predict the same top digit
-  countStrategyAgreement = (ticks, targetDigit) => {
-    if (ticks.length < 10) return 0;
-    let agreement = 0;
-    const windows = [5, 10, 20, 30, 50];
+  // ── Entry Validation — strict multi-condition ──────────────────────
+  validateEntry = (sym, digit, confidence, strategyAgreement, patternQuality, dominance, multiTF) => {
+    const now = Date.now();
+
+    // 1. Confidence threshold
+    if (confidence < MIN_CONFIDENCE) return false;
+
+    // 2. Strategy agreement from prediction engine
+    if (strategyAgreement < MIN_STRATEGY_AGREEMENT) return false;
+
+    // 3. Pattern quality
+    if (patternQuality < MIN_PATTERN_QUALITY) return false;
+
+    // 4. Dominance gap — top digit must be clearly ahead
+    if (dominance < MIN_DOMINANCE_GAP) return false;
+
+    // 5. Multi-timeframe confirmation — at least 2 timeframes agree
+    if (multiTF < 2) return false;
+
+    // 6. Stability — same digit predicted in previous scan
+    const prev = this.previousPredictions[sym];
+    if (!prev || prev.digit !== digit) return false;
+    if ((now - prev.timestamp) > 5000) return false;
+
+    // 7. Minimum confirmation count — digit predicted in 2+ consecutive scans
+    if ((this.confirmedSignals[sym] || 0) < 2) return false;
+
+    // 8. Cooldown
+    if (now - this.lastTradeTime < ENTRY_COOLDOWN_MS) return false;
+
+    // 9. Digit must NOT have just appeared — wait at least 3 ticks
+    const sd = this.symbolData[sym];
+    if (sd && sd.ticks.length > 0) {
+      const lastIdx = sd.ticks.lastIndexOf(digit);
+      const ticksSince = sd.ticks.length - 1 - lastIdx;
+      if (ticksSince < 3) return false;
+    }
+
+    // 10. Digit frequency check — should NOT be over-appeared in last 5 ticks
+    if (sd && sd.ticks.length >= 5) {
+      const last5Count = sd.ticks.slice(-5).filter(d => d === digit).length;
+      if (last5Count >= 3) return false;
+    }
+
+    return true;
+  };
+
+  // ── Multi-Timeframe Check ──────────────────────────────────────────
+  multiTimeframeCheck = (ticks, targetDigit) => {
+    const windows = [10, 20, 50, 100];
+    let agreeCount = 0;
 
     for (const w of windows) {
       const slice = ticks.slice(-w);
       if (slice.length < 5) continue;
       const freq = Array(10).fill(0);
       slice.forEach(d => { if (d >= 0 && d <= 9) freq[d]++; });
-      const total = freq.reduce((a, b) => a + b, 0) || 1;
       const maxFreq = Math.max(...freq);
-      const dominantDigit = freq.indexOf(maxFreq);
-      if (dominantDigit === targetDigit && (maxFreq / total) > 0.12) {
-        agreement++;
+      const dominant = freq.indexOf(maxFreq);
+      const total = freq.reduce((a, b) => a + b, 0);
+      const pct = maxFreq / total;
+
+      if (dominant === targetDigit && pct > 0.12) {
+        agreeCount++;
       }
     }
 
-    // Check recent 3-tick and 5-tick patterns
-    const last3 = ticks.slice(-3);
-    const last5 = ticks.slice(-5);
-    if (last3.length >= 3) {
-      const freq3 = Array(10).fill(0);
-      last3.forEach(d => freq3[d]++);
-      if (freq3[targetDigit] >= 2) agreement++;
+    return agreeCount;
+  };
+
+  // ── Engine Agreement — count strategies predicting the digit ───────
+  countEngineAgreement = (result, targetDigit) => {
+    // Use the ranked digits and their scores as a proxy for agreement
+    const topDigits = result.rankedDigits.slice(0, 5).map(r => r.digit);
+    const topScore = result.rankedDigits[0].score;
+    let agreement = 0;
+
+    // How many of top-5 ranked digits match the target
+    if (topDigits.includes(targetDigit)) agreement++;
+
+    // Dominance check — is the target clearly #1?
+    if (result.rankedDigits[0].digit === targetDigit) {
+      agreement++;
+      // Gap between #1 and #2
+      if (result.rankedDigits[0].score - result.rankedDigits[1].score > 0.02) agreement++;
+      if (result.rankedDigits[0].score - result.rankedDigits[1].score > 0.05) agreement++;
     }
-    if (last5.length >= 5) {
-      const freq5 = Array(10).fill(0);
-      last5.forEach(d => freq5[d]++);
-      if (freq5[targetDigit] >= 2) agreement++;
-    }
+
+    // Top-4 consensus — if multiple top picks agree
+    const top4Matches = topDigits.slice(0, 4).filter(d => d === targetDigit).length;
+    if (top4Matches >= 2) agreement++;
+    if (top4Matches >= 3) agreement++;
+
+    // Overall confidence is high
+    if (result.overallConfidence > 0.6) agreement++;
+    if (result.overallConfidence > 0.75) agreement++;
 
     return agreement;
   };
 
-  // Assess pattern quality (0 to 1)
+  // ── Pattern Quality Assessment ─────────────────────────────────────
   assessPatternQuality = (ticks, predictedDigit) => {
     if (ticks.length < 20) return 0.5;
     let quality = 0.5;
 
-    // 1. Check if predicted digit has strong recent momentum
     const last10 = ticks.slice(-10);
-    const last10Count = last10.filter(d => d === predictedDigit).length;
-    if (last10Count >= 3) quality += 0.15;
-    else if (last10Count >= 2) quality += 0.08;
+    const last20 = ticks.slice(-20);
 
-    // 2. Check if digit is NOT exhausted (appeared too much recently = less likely)
+    // 1. Recent momentum — digit appearing in last 10 ticks
+    const last10Count = last10.filter(d => d === predictedDigit).length;
+    if (last10Count >= 3) quality += 0.12;
+    else if (last10Count >= 2) quality += 0.06;
+
+    // 2. Absence bonus — digit NOT in last 5 ticks = more likely to appear
     const last5 = ticks.slice(-5);
     const last5Count = last5.filter(d => d === predictedDigit).length;
-    if (last5Count >= 3) quality -= 0.2; // Over-appeared, less likely
-    if (last5Count === 0) quality += 0.1; // Absent recently, more likely to appear
+    if (last5Count === 0) quality += 0.15;
+    else if (last5Count === 1) quality += 0.05;
+    else if (last5Count >= 3) quality -= 0.2;
 
-    // 3. Check for alternating pattern strength
+    // 3. Frequency consistency across windows
+    const freq20 = Array(10).fill(0);
+    last20.forEach(d => freq20[d]++);
+    const expected20 = last20.length / 10;
+    if (freq20[predictedDigit] >= expected20 * 1.2) quality += 0.1;
+
+    // 4. Alternation quality
     let alternations = 0;
     for (let i = 1; i < Math.min(20, ticks.length); i++) {
       if (ticks[ticks.length - i] !== ticks[ticks.length - i - 1]) alternations++;
     }
     const altRate = alternations / Math.min(19, ticks.length - 1);
-    if (altRate > 0.6) quality += 0.1; // Good alternation = more predictable
+    if (altRate > 0.65) quality += 0.08;
 
-    // 4. Check if digit frequency is above average in recent window
-    const recent50 = ticks.slice(-50);
-    const freq50 = Array(10).fill(0);
-    recent50.forEach(d => freq50[d]++);
-    const avg50 = recent50.length / 10;
-    if (freq50[predictedDigit] > avg50 * 1.2) quality += 0.1;
+    // 5. Gap analysis — time since last appearance should be reasonable
+    const lastIdx = ticks.lastIndexOf(predictedDigit);
+    const gap = ticks.length - 1 - lastIdx;
+    const avgGap = ticks.length / (ticks.filter(d => d === predictedDigit).length || 1);
+    if (gap >= avgGap * 0.8 && gap <= avgGap * 1.5) quality += 0.1;
+    else if (gap < avgGap * 0.3) quality -= 0.1;
 
     return Math.max(0.1, Math.min(1, quality));
   };
 
-  // ── Execute Trade ──────────────────────────────────────────────────
+  // ── Execute Trade — ONE at a time ──────────────────────────────────
   executeTrade = async (signal) => {
-    if (!this.isRunning || this.hasWon || this.activeContract) return;
+    if (!this.isRunning || this.hasWon || this.isExecuting) return;
+
+    // Lock immediately
+    runInAction(() => { this.isExecuting = true; });
 
     const { symbol, digit, confidence, strategyAgreement, patternQuality } = signal;
     const stakeAmount = parseFloat(this.stake) || 1;
+
+    // Set chase mode
+    if (!this.chaseSymbol || this.chaseDigit !== digit || this.chaseSymbol !== symbol) {
+      this.chaseSymbol = symbol;
+      this.chaseDigit = digit;
+      this.chaseLossCount = 0;
+      this.chaseScanCount = 0;
+    }
 
     this.addLog(`🎯 SNIPER ENTRY [${(confidence * 100).toFixed(0)}%] ${SYMBOL_LABELS[symbol]} — D${digit} | Agreement: ${strategyAgreement} | Quality: ${(patternQuality * 100).toFixed(0)}%`, 'trade');
 
@@ -406,7 +554,8 @@ class MakotiMagicStore {
       const proposalRes = await sendViaNewSystemWithPromise(params);
       if (!proposalRes?.proposal) {
         this.addLog(`⚠️ No proposal for ${SYMBOL_LABELS[symbol]}`, 'info');
-        if (this.isRunning && !this.hasWon) setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+        runInAction(() => { this.isExecuting = false; });
+        if (this.isRunning && !this.hasWon) this.scheduleScan();
         return;
       }
 
@@ -426,14 +575,16 @@ class MakotiMagicStore {
         runInAction(() => {
           this.activeContract = { id: contractId, symbol, digit, stake: stakeAmount, confidence };
         });
-        this.addLog(`📡 Contract ${contractId} opened — D${digit} on ${SYMBOL_LABELS[symbol]} @ $${stakeAmount}`, 'trade');
+        this.addLog(`📡 Contract ${contractId} — D${digit} on ${SYMBOL_LABELS[symbol]} @ $${stakeAmount}`, 'trade');
       } else {
         this.addLog(`⚠️ Buy ok but no contract_id`, 'info');
-        if (this.isRunning && !this.hasWon) setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+        runInAction(() => { this.isExecuting = false; });
+        if (this.isRunning && !this.hasWon) this.scheduleScan();
       }
     } catch (err) {
       this.addLog(`⚠️ Trade error: ${err.message || err}`, 'info');
-      if (this.isRunning && !this.hasWon) setTimeout(() => this.runScanLoop(), SCAN_INTERVAL);
+      runInAction(() => { this.isExecuting = false; });
+      if (this.isRunning && !this.hasWon) this.scheduleScan();
     }
   };
 
@@ -448,6 +599,8 @@ class MakotiMagicStore {
 
   dispose = () => {
     this.isRunning = false;
+    this.isExecuting = false;
+    if (this._scanTimeout) { clearTimeout(this._scanTimeout); this._scanTimeout = null; }
     this.stopPOCListener();
     if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
   };
