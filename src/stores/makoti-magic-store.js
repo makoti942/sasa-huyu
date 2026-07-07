@@ -54,6 +54,7 @@ class MakotiMagicStore {
   tradeHistory = [];
   logs = [];
   maxLogs = 50;
+  processedContracts = new Set();
 
   _pocUnsub = null;
   _chaseTimeout = null;
@@ -153,6 +154,7 @@ class MakotiMagicStore {
       this.lastTradeTime = 0;
       this.previousPredictions = {};
       this.confirmedSignals = {};
+      this.processedContracts = new Set();
     });
     this.addLog('🚀 Sniper scanner started — analyzing all volatilities for high-quality entry...', 'info');
     this.startPOCListener();
@@ -186,6 +188,10 @@ class MakotiMagicStore {
         if (!c || !c.contract_id) return;
 
         if (c.is_sold) {
+          // Skip if already processed this contract
+          if (this.processedContracts.has(c.contract_id)) return;
+          this.processedContracts.add(c.contract_id);
+
           const profit = Number(c.profit);
           const won = profit >= 0;
           runInAction(() => {
@@ -524,6 +530,7 @@ class MakotiMagicStore {
     this.isRunning = false;
     this.isExecuting = false;
     this.isChasing = false;
+    this.processedContracts = new Set();
     if (this._chaseTimeout) { clearTimeout(this._chaseTimeout); this._chaseTimeout = null; }
     this.stopPOCListener();
     if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
