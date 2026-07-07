@@ -29,7 +29,7 @@ import Dashboard from '../dashboard';
 import RunStrategy from '../dashboard/run-strategy';
 import OverUnder from '../OverUnder'; 
 import MakotiMagic from '../MakotiMagic';
-import MakotiMagicStore from '@/stores/makoti-magic-store';
+
 import './main.scss';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
@@ -52,7 +52,6 @@ const AppWrapper = observer(() => {
         setActiveTab,
         setWebSocketState,
         setTourDialogVisibility,
-        setPendingFreeBot,
     } = dashboard;
     const { stopBot } = run_panel;
     const { is_open } = quick_strategy;
@@ -79,12 +78,6 @@ const AppWrapper = observer(() => {
     const location = useLocation();
     const navigate = useNavigate();
 
-    useEffect(() => {
-        MakotiMagicStore.setBotLoadCallback((xmlContent: string) => {
-            // Just load the bot without navigating
-            setPendingFreeBot({ name: 'Makoti Magic Bot', xml: xmlContent });
-        });
-    }, [setPendingFreeBot]);
 
     const GetHashedValue = (tab: number) => {
         const tab_val = location.hash?.split('#')[1];
