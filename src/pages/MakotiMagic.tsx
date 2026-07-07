@@ -137,23 +137,30 @@ const MakotiMagic = observer(() => {
               const sd = symbolData[sym];
               const pred = sd?.prediction;
               const conf = sd?.confidence || 0;
-              const isActive = bestSignal?.symbol === sym;
+                            const isActive = bestSignal?.symbol === sym;
               const ticks = sd?.ticks?.length || 0;
               return (
-                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${pred && conf >= 0.38 ? 'mm-scard--ready' : ''}`}>
+                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${pred && conf >= 0.40 ? 'mm-scard--ready' : ''}`}>
                   <div className='mm-scard__name'>{SYMBOL_LABELS[sym]}</div>
                   <div className='mm-scard__ticks'>{ticks} ticks</div>
                   {pred ? (
                     <>
-                      <div className='mm-scard__digit' style={{ color: conf >= 0.38 ? '#4caf50' : '#888' }}>
+                      <div className='mm-scard__digit' style={{ color: conf >= 0.40 ? '#4caf50' : '#888' }}>
                         D{pred.digit}
                       </div>
                       <div className='mm-scard__conf'>
                         <div className='mm-scard__bar'>
-                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.38 ? '#4caf50' : conf >= 0.3 ? '#ff9800' : '#f44336' }} />
+                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.40 ? '#4caf50' : conf >= 0.3 ? '#ff9800' : '#f44336' }} />
                         </div>
                         <span>{(conf * 100).toFixed(0)}%</span>
                       </div>
+                      {pred.strategyAgreement > 0 && (
+                        <div className='mm-scard__meta'>
+                          <span title='Strategies agreeing'>🎯 {pred.strategyAgreement}</span>
+                          {pred.patternQuality > 0 && <span title='Pattern quality'>📊 {(pred.patternQuality * 100).toFixed(0)}%</span>}
+                          {pred.confirmed > 1 && <span title='Confirmed cycles'>✓ {pred.confirmed}x</span>}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className='mm-scard__waiting'>Collecting...</div>

@@ -322,6 +322,14 @@
     color: #444;
     font-style: italic;
   }
+
+  &__meta {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    font-size: 9px;
+    color: #666;
+  }
 }
 
 /* ── Logs Panel ───────────────────────────────────────────────── */
