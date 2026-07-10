@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Zap, Play, Square, TrendingUp, TrendingDown, Activity, Target, BarChart2, DollarSign } from 'lucide-react';
+import { Zap, Play, Square, TrendingUp, Target, BarChart2, DollarSign } from 'lucide-react';
 import MakotiMagicStore from '@/stores/makoti-magic-store';
 import './MakotiMagic.scss';
 
@@ -14,12 +14,21 @@ const SYMBOL_LABELS = {
 const ALL_SYMBOLS = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'];
 
 const MakotiMagic = observer(() => {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const {
-    connectWebSocket, startRunning, stopRunning, setStake,
+    connectWebSocket, startRunning, stopRunning, setStake, setTradeEveryTick,
     stake, isRunning, connection_status, symbolData,
-    bestSignal, activeContract, hasWon, isExecuting,
+    activeContract, hasWon, isExecuting,
     wins, losses, pnl, tradeHistory, logs,
     chaseSymbol, chaseDigit, chaseLossCount,
+    tradeEveryTick, bestPrediction,
   } = MakotiMagicStore;
 
   useEffect(() => {
@@ -32,7 +41,6 @@ const MakotiMagic = observer(() => {
 
   return (
     <div className='mm-root'>
-      {/* Animated background */}
       <div className='mm-bg'>
         {Array.from({ length: 60 }).map((_, i) => (
           <span key={i} className='mm-bg__char' style={{ animationDelay: `${Math.random() * 5}s` }}>
@@ -53,7 +61,6 @@ const MakotiMagic = observer(() => {
             </div>
           </div>
 
-          {/* Stake */}
           <div className='mm-field'>
             <label className='mm-field__label'><DollarSign size={12} /> Stake (USD)</label>
             <input className='mm-field__input' type='number' min='0.35' step='0.1'
@@ -61,12 +68,17 @@ const MakotiMagic = observer(() => {
               value={stake} onChange={e => setStake(e.target.value)} disabled={isRunning} />
           </div>
 
-          {/* Run / Stop */}
+          <label className='mm-checkbox'>
+            <input type='checkbox' checked={tradeEveryTick}
+              onChange={e => setTradeEveryTick(e.target.checked)} disabled={isRunning} />
+            <span>Trade on every tick</span>
+          </label>
+
           <div className='mm-actions'>
             {!isRunning ? (
               <button className='mm-btn mm-btn--run' onClick={startRunning}>
                 <Play size={18} />
-                <span>{hasWon ? 'WON — Rerun' : 'RUN SCANNER'}</span>
+                <span>{hasWon ? 'WON — Rerun' : 'RUN'}</span>
               </button>
             ) : (
               <button className='mm-btn mm-btn--stop' onClick={stopRunning}>
@@ -76,7 +88,6 @@ const MakotiMagic = observer(() => {
             )}
           </div>
 
-          {/* Stats */}
           <div className='mm-stats'>
             <div className='mm-stat'>
               <div className='mm-stat__val mm-stat__val--green'>{wins}</div>
@@ -98,23 +109,18 @@ const MakotiMagic = observer(() => {
             </div>
           </div>
 
-          {/* Active Trade */}
-          <AnimatePresence>
-            {activeContract && (
-              <motion.div className='mm-active-trade'
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                <Target size={14} className='mm-active-trade__icon' />
-                <div>
-                  <div className='mm-active-trade__title'>ACTIVE TRADE {isExecuting && '— EXECUTING'}</div>
-                  <div className='mm-active-trade__detail'>
-                    {SYMBOL_LABELS[activeContract.symbol]} — D{activeContract.digit} — ${activeContract.stake}
-                  </div>
+          {activeContract && (
+            <div className='mm-active-trade'>
+              <Target size={14} className='mm-active-trade__icon' />
+              <div>
+                <div className='mm-active-trade__title'>ACTIVE TRADE</div>
+                <div className='mm-active-trade__detail'>
+                  {SYMBOL_LABELS[activeContract.symbol]} — D{activeContract.digit} — ${activeContract.stake}
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              </div>
+            </div>
+          )}
 
-          {/* Chase Mode */}
           {chaseSymbol && chaseDigit !== null && isRunning && (
             <div className='mm-chase'>
               <span>🔁 CHASE: {SYMBOL_LABELS[chaseSymbol]} D{chaseDigit}</span>
@@ -122,69 +128,62 @@ const MakotiMagic = observer(() => {
             </div>
           )}
 
-          {/* Best Signal */}
-          {bestSignal && !activeContract && isRunning && !isExecuting && (
-            <div className='mm-signal'>
-              <Activity size={14} />
-              <span>Best: {SYMBOL_LABELS[bestSignal.symbol]} D{bestSignal.digit} ({(bestSignal.confidence * 100).toFixed(0)}%)</span>
-            </div>
-          )}
-
-          {/* Scan count */}
           {isRunning && (
             <div className='mm-scan-count'>
-              {isExecuting ? '⏳ Executing trade...' : '🔍 Scanning for high-quality entry...'}
+              {isExecuting
+                ? '⏳ Executing...'
+                : tradeEveryTick
+                  ? '⚡ Every tick mode — firing on each tick'
+                  : '🔍 Scanning...'}
+            </div>
+          )}
+
+          {tradeEveryTick && bestPrediction && isRunning && (
+            <div className='mm-signal'>
+              <span>Next: {SYMBOL_LABELS[bestPrediction.symbol]} D{bestPrediction.digit}</span>
             </div>
           )}
         </div>
 
-        {/* ── CENTER: Symbol Grid ── */}
-        <div className='mm-panel mm-panel--grid'>
-          <div className='mm-panel__head'>
-            <BarChart2 size={16} />
-            <span>Live Analysis</span>
-          </div>
-          <div className='mm-symbol-grid'>
-            {ALL_SYMBOLS.map(sym => {
-              const sd = symbolData[sym];
-              const pred = sd?.prediction;
-              const conf = sd?.confidence || 0;
-              const isActive = bestSignal?.symbol === sym;
-              const isChaseTarget = chaseSymbol === sym && chaseDigit !== null;
-              const ticks = sd?.ticks?.length || 0;
-              return (
-                <div key={sym} className={`mm-scard ${isActive ? 'mm-scard--active' : ''} ${isChaseTarget ? 'mm-scard--chase' : ''} ${pred && conf >= 0.65 ? 'mm-scard--ready' : ''}`}>
-                  <div className='mm-scard__name'>{SYMBOL_LABELS[sym]}</div>
-                  <div className='mm-scard__ticks'>{ticks} ticks</div>
-                  {pred ? (
-                    <>
-                      <div className='mm-scard__digit' style={{ color: conf >= 0.65 ? '#4caf50' : conf >= 0.5 ? '#ff9800' : '#888' }}>
-                        D{pred.digit}
-                        {pred.chaseMode && <span className='mm-scard__chase-badge'>CHASE</span>}
-                      </div>
-                      <div className='mm-scard__conf'>
-                        <div className='mm-scard__bar'>
-                          <div className='mm-scard__fill' style={{ width: `${conf * 100}%`, background: conf >= 0.65 ? '#4caf50' : conf >= 0.5 ? '#ff9800' : '#f44336' }} />
+        {/* ── CENTER: Symbol Grid (hidden on mobile) ── */}
+        {!isMobile && (
+          <div className='mm-panel mm-panel--grid'>
+            <div className='mm-panel__head'>
+              <BarChart2 size={16} />
+              <span>Live Analysis</span>
+            </div>
+            <div className='mm-symbol-grid'>
+              {ALL_SYMBOLS.map(sym => {
+                const sd = symbolData[sym];
+                const pred = sd?.prediction;
+                const conf = sd?.confidence || 0;
+                const isChaseTarget = chaseSymbol === sym && chaseDigit !== null;
+                const ticks = sd?.ticks?.length || 0;
+                return (
+                  <div key={sym} className={`mm-scard ${isChaseTarget ? 'mm-scard--chase' : ''}`}>
+                    <div className='mm-scard__name'>{SYMBOL_LABELS[sym]}</div>
+                    <div className='mm-scard__ticks'>{ticks} ticks</div>
+                    {pred ? (
+                      <>
+                        <div className='mm-scard__digit' style={{ color: conf >= 0.14 ? '#4caf50' : '#888' }}>
+                          D{pred.digit}
                         </div>
-                        <span>{(conf * 100).toFixed(0)}%</span>
-                      </div>
-                      {pred.strategyAgreement > 0 && (
-                        <div className='mm-scard__meta'>
-                          <span title='Strategies agreeing'>🎯 {pred.strategyAgreement}</span>
-                          {pred.patternQuality > 0 && <span title='Pattern quality'>📊 {(pred.patternQuality * 100).toFixed(0)}%</span>}
-                          {pred.confirmed > 1 && <span title='Confirmed cycles'>✓ {pred.confirmed}x</span>}
-                          {pred.multiTF > 0 && <span title='Timeframe agreement'>⏱ {pred.multiTF}</span>}
+                        <div className='mm-scard__conf'>
+                          <div className='mm-scard__bar'>
+                            <div className='mm-scard__fill' style={{ width: `${(conf / 0.25) * 100}%`, background: conf >= 0.14 ? '#4caf50' : conf >= 0.12 ? '#ff9800' : '#f44336' }} />
+                          </div>
+                          <span>{(conf * 100).toFixed(0)}%</span>
                         </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className='mm-scard__waiting'>Collecting...</div>
-                  )}
-                </div>
-              );
-            })}
+                      </>
+                    ) : (
+                      <div className='mm-scard__waiting'>Collecting...</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ── RIGHT: Logs ── */}
         <div className='mm-panel mm-panel--logs'>
@@ -193,7 +192,7 @@ const MakotiMagic = observer(() => {
             <span>Activity</span>
           </div>
           <div className='mm-logs'>
-            {logs.length === 0 && <div className='mm-logs__empty'>No activity yet. Click RUN to start.</div>}
+            {logs.length === 0 && <div className='mm-logs__empty'>No activity yet.</div>}
             {logs.map((log, i) => (
               <div key={i} className={`mm-log mm-log--${log.type}`}>
                 <span className='mm-log__text'>{log.text}</span>

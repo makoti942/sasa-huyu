@@ -414,6 +414,213 @@ function trendFollowingStrategy(history: number[]): StrategyResult {
     return { scores: normaliseScores(scores), confidence: Math.abs(upCount - downCount) / history.length, name: 'trend', tier: 2 };
 }
 
+// ── 16. 2nd-Order Transition Matrix ──────────────────────────────────────
+function transitionMatrix2Strategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 4) return { scores: normaliseScores(scores), confidence: 0, name: 'trans2', tier: 1 };
+
+    const matrix: number[][] = Array.from({ length: 100 }, () => Array(10).fill(0));
+    for (let i = 2; i < history.length; i++) {
+        const from = history[i - 2] * 10 + history[i - 1];
+        const to = history[i];
+        if (from >= 0 && from < 100 && to >= 0 && to <= 9) matrix[from][to]++;
+    }
+
+    const lastPair = history[history.length - 2] * 10 + history[history.length - 1];
+    if (lastPair >= 0 && lastPair < 100) {
+        const row = matrix[lastPair];
+        const total = row.reduce((a, b) => a + b, 0);
+        if (total > 0) {
+            row.forEach((c, i) => { scores[i] = c / total; });
+            return { scores: normaliseScores(scores), confidence: Math.max(...scores), name: 'trans2', tier: 1 };
+        }
+    }
+
+    return { scores: normaliseScores(scores), confidence: 0, name: 'trans2', tier: 1 };
+}
+
+// ── 17. Hot Streak Detection ────────────────────────────────────────────
+function hotStreakStrategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 10) return { scores: normaliseScores(scores), confidence: 0, name: 'hotStreak', tier: 1 };
+
+    const last = history[history.length - 1];
+
+    // Find current streak length
+    let streakLen = 1;
+    for (let i = history.length - 2; i >= 0; i--) {
+        if (history[i] === last) streakLen++;
+        else break;
+    }
+
+    // If on a streak of 2+, the same digit is likely to appear again
+    if (streakLen >= 2) {
+        scores[last] += streakLen * 4;
+        return { scores: normaliseScores(scores), confidence: Math.min(streakLen * 0.15, 0.8), name: 'hotStreak', tier: 1 };
+    }
+
+    // If streak just ended (last digit appeared once after a gap), it may continue
+    const prev = history[history.length - 2];
+    if (prev === last) {
+        scores[last] += 3;
+    }
+
+    return { scores: normaliseScores(scores), confidence: 0.1, name: 'hotStreak', tier: 1 };
+}
+
+// ── 18. Missing Digit / Due Digit Strategy ──────────────────────────────
+function missingDigitStrategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 30) return { scores: normaliseScores(scores), confidence: 0, name: 'missing', tier: 2 };
+
+    const recent50 = history.slice(-50);
+    const freq = Array(10).fill(0);
+    recent50.forEach(d => { if (d >= 0 && d <= 9) freq[d]++; });
+
+    const expected = recent50.length / 10;
+
+    // Find digits that are under-represented
+    for (let d = 0; d <= 9; d++) {
+        const deficit = expected - freq[d];
+        if (deficit > 0) {
+            // How long since this digit last appeared?
+            let gap = 0;
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i] === d) break;
+                gap++;
+            }
+            // Bigger deficit + longer gap = more likely to appear
+            scores[d] += deficit * 0.5 + gap * 0.1;
+        }
+    }
+
+    // Also check very recent absence (last 5 ticks)
+    const last5 = history.slice(-5);
+    for (let d = 0; d <= 9; d++) {
+        if (!last5.includes(d)) scores[d] += 2;
+    }
+
+    return { scores: normaliseScores(scores), confidence: Math.max(...scores) / 15, name: 'missing', tier: 2 };
+}
+
+// ── 19. Frequency Momentum (acceleration) ──────────────────────────────
+function frequencyMomentumStrategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 40) return { scores: normaliseScores(scores), confidence: 0, name: 'freqMomentum', tier: 1 };
+
+    const windows = [5, 10, 20];
+    const freqs = windows.map(w => {
+        const slice = history.slice(-w);
+        const f = Array(10).fill(0);
+        slice.forEach(d => { if (d >= 0 && d <= 9) f[d]++; });
+        return f;
+    });
+
+    // Compare short vs medium vs long frequency
+    for (let d = 0; d <= 9; d++) {
+        const shortRate = freqs[0][d] / 5;
+        const medRate = freqs[1][d] / 10;
+        const longRate = freqs[2][d] / 20;
+
+        // Accelerating: short > med > long
+        if (shortRate > medRate && medRate > longRate) {
+            scores[d] += (shortRate - longRate) * 15;
+        }
+        // Decelerating: short < med < long
+        else if (shortRate < medRate && medRate < longRate) {
+            scores[d] -= 2;
+        }
+        // Short-term surge
+        if (shortRate > longRate * 1.5) {
+            scores[d] += 3;
+        }
+    }
+
+    // Normalize negative scores
+    const minScore = Math.min(...scores);
+    if (minScore < 0) scores.forEach((_, i) => { scores[i] -= minScore; });
+
+    return { scores: normaliseScores(scores), confidence: Math.max(...normaliseScores(scores)), name: 'freqMomentum', tier: 1 };
+}
+
+// ── 20. Conditional Probability (given last digit) ─────────────────────
+function conditionalProbabilityStrategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 20) return { scores: normaliseScores(scores), confidence: 0, name: 'conditional', tier: 1 };
+
+    // P(next | last)
+    const last = history[history.length - 1];
+    const counts = Array(10).fill(0);
+    for (let i = 0; i < history.length - 1; i++) {
+        if (history[i] === last) {
+            counts[history[i + 1]]++;
+        }
+    }
+    const total = counts.reduce((a, b) => a + b, 0);
+    if (total > 0) {
+        counts.forEach((c, i) => { scores[i] = (c / total) * 10; });
+    }
+
+    return { scores: normaliseScores(scores), confidence: total > 5 ? Math.max(...scores) / 10 : 0, name: 'conditional', tier: 1 };
+}
+
+// ── 21. Digit Pair Sequence Strategy ────────────────────────────────────
+function digitPairSequenceStrategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 10) return { scores: normaliseScores(scores), confidence: 0, name: 'pairSeq', tier: 2 };
+
+    // Look at what follows specific digit pairs
+    const pairFollow: Record<string, number[]> = {};
+    for (let i = 0; i <= history.length - 3; i++) {
+        const pair = `${history[i]}-${history[i + 1]}`;
+        const next = history[i + 2];
+        if (!pairFollow[pair]) pairFollow[pair] = Array(10).fill(0);
+        pairFollow[pair][next]++;
+    }
+
+    const currentPair = `${history[history.length - 2]}-${history[history.length - 1]}`;
+    if (pairFollow[currentPair]) {
+        const total = pairFollow[currentPair].reduce((a, b) => a + b, 0);
+        if (total > 0) {
+            pairFollow[currentPair].forEach((c, i) => { scores[i] = (c / total) * 8; });
+        }
+    }
+
+    return { scores: normaliseScores(scores), confidence: Math.max(...scores) / 8, name: 'pairSeq', tier: 2 };
+}
+
+// ── 22. Alternation Pattern Strategy ────────────────────────────────────
+function alternationStrategy(history: number[]): StrategyResult {
+    const scores = Array(10).fill(0) as number[];
+    if (history.length < 10) return { scores: normaliseScores(scores), confidence: 0, name: 'alternation', tier: 2 };
+
+    // Detect alternation between two digits
+    const last5 = history.slice(-10);
+    const digitFreq: Record<number, number> = {};
+    last5.forEach(d => { digitFreq[d] = (digitFreq[d] || 0) + 1; });
+
+    const sorted = Object.entries(digitFreq).sort((a, b) => b[1] - a[1]);
+    if (sorted.length >= 2) {
+        const d1 = Number(sorted[0][0]);
+        const d2 = Number(sorted[1][0]);
+        const pattern = last5.map(d => d === d1 ? 'A' : d === d2 ? 'B' : 'X').join('');
+
+        // Check if last few ticks alternate between d1 and d2
+        const last3 = history.slice(-3);
+        if (last3.length === 3) {
+            if ((last3[0] === d1 && last3[1] === d2 && last3[2] === d1) ||
+                (last3[0] === d2 && last3[1] === d1 && last3[2] === d2)) {
+                // Alternating — next should be the other one
+                const next = last3[2] === d1 ? d2 : d1;
+                scores[next] += 8;
+                return { scores: normaliseScores(scores), confidence: 0.6, name: 'alternation', tier: 2 };
+            }
+        }
+    }
+
+    return { scores: normaliseScores(scores), confidence: 0, name: 'alternation', tier: 2 };
+}
+
 // ── MAIN ENGINE ────────────────────────────────────────────────────────────
 export function predictNextDigits(history: number[]): PredictionResult {
     if (history.length < 5) {
@@ -501,6 +708,13 @@ export function predictNextDigits(history: number[]): PredictionResult {
         distributionBalanceStrategy(history),
         trendFollowingStrategy(history),
         immediateNextTickStrategy(history),
+        transitionMatrix2Strategy(history),
+        hotStreakStrategy(history),
+        missingDigitStrategy(history),
+        frequencyMomentumStrategy(history),
+        conditionalProbabilityStrategy(history),
+        digitPairSequenceStrategy(history),
+        alternationStrategy(history),
     ];
 
     const combined = Array(10).fill(0) as number[];
@@ -630,12 +844,20 @@ export function predictNextDigits(history: number[]): PredictionResult {
     const tier1AgreementCount = strategies.filter(s => s.tier === 1 && s.scores[rankedDigits[0].digit] === Math.max(...s.scores)).length;
     const tier2AgreementCount = strategies.filter(s => s.tier === 2 && s.scores[rankedDigits[0].digit] === Math.max(...s.scores)).length;
 
-    // Stricter confidence: weighted by dominance, strategy agreement, and raw score
-    const dominanceConf = Math.min(dominance * 20, 0.4);
-    const tier1Conf = Math.min(tier1AgreementCount * 0.06, 0.3);
-    const tier2Conf = Math.min(tier2AgreementCount * 0.03, 0.15);
-    const rawScoreConf = Math.min(topScore * 0.5, 0.15);
-    const overallConfidence = Math.min(dominanceConf + tier1Conf + tier2Conf + rawScoreConf, 1);
+    // Realistic confidence for 1-tick DIGITMATCH (base rate ~10%)
+    // Combines: dominance gap, strategy agreement, recent frequency, gap analysis
+    // Max confidence ~0.25 for very strong signals
+    const dominanceFactor = Math.min(dominance * 30, 0.10);
+    const tier1Factor = Math.min(tier1AgreementCount * 0.015, 0.07);
+    const tier2Factor = Math.min(tier2AgreementCount * 0.008, 0.04);
+    const recentFreq = getRecentFrequency(history, 10)[predictedDigit] / 10;
+    const freqFactor = recentFreq * 0.02;
+    let gapFactor = 0;
+    const lastIdx = history.lastIndexOf(predictedDigit);
+    const gap = history.length - 1 - lastIdx;
+    const avgGap = history.length / Math.max(1, history.filter(d => d === predictedDigit).length);
+    if (gap >= avgGap * 0.7) gapFactor = 0.02;
+    const overallConfidence = Math.min(0.10 + dominanceFactor + tier1Factor + tier2Factor + freqFactor + gapFactor, 0.25);
 
     const top4Str = rankedDigits.slice(0, 4).map(d => `${d.digit}(${(d.score * 100).toFixed(0)}%)`).join(' ');
     const summary = `Predict NEXT tick: ${predictedDigit} (${(rankedDigits[0].score * 100).toFixed(0)}%), Top4: [${top4Str}], Conf:${(overallConfidence * 100).toFixed(0)}%`;
