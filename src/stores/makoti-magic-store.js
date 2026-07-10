@@ -36,7 +36,6 @@ class MakotiMagicStore {
 
   // Trade enforcement
   isExecuting = false;
-  isFiring = false;
   activeContract = null;
   hasWon = false;
   lastTradeTime = 0;
@@ -120,8 +119,8 @@ class MakotiMagicStore {
             sd.ready = sd.ticks.length >= MIN_TICKS;
           });
 
-          // In every-tick mode, analyze tick and fire immediately
-          if (this.isRunning && this.tradeEveryTick && !this.hasWon && !this.isExecuting && !this.isFiring) {
+          // In every-tick mode, fire on every tick immediately — no blocking
+          if (this.isRunning && this.tradeEveryTick && !this.hasWon) {
             this.handleTickForEveryTickMode(sym);
           }
         }
@@ -145,29 +144,30 @@ class MakotiMagicStore {
     });
   };
 
-  // ── Every-Tick Mode: fire on each incoming tick ────────────────────
+  // ── Every-Tick Mode: fire immediately on each incoming tick ─────────
   handleTickForEveryTickMode = (sym) => {
-    // If we're in chase mode, only process the chase symbol's ticks
+    if (!this.isRunning || this.hasWon) return;
+
+    // If chasing, only process the chase symbol
     if (this.isChasing && this.chaseSymbol && sym !== this.chaseSymbol) return;
 
     const sd = this.symbolData[sym];
     if (!sd || !sd.ready || sd.ticks.length < MIN_TICKS) return;
 
-    // If chasing, use chase digit directly — no analysis needed
+    // If chasing, fire chase digit directly — no analysis needed
     if (this.isChasing && this.chaseSymbol === sym && this.chaseDigit !== null) {
       this.bestPrediction = { symbol: sym, digit: this.chaseDigit, confidence: 0.12 };
       this.fireEveryTickTrade(sym, this.chaseDigit);
       return;
     }
 
-    // Otherwise analyze and pick best digit
+    // Analyze and pick best digit
     const result = predictNextDigits(sd.ticks);
     const top = result.rankedDigits[0];
     if (!top) return;
 
     const predictedDigit = top.digit;
 
-    // Update prediction display
     runInAction(() => {
       sd.prediction = {
         digit: predictedDigit, confidence: result.overallConfidence,
@@ -177,7 +177,7 @@ class MakotiMagicStore {
       this.bestPrediction = { symbol: sym, digit: predictedDigit, confidence: result.overallConfidence };
     });
 
-    // If not chasing yet, set chase mode with first prediction
+    // First tick: set chase mode
     if (!this.isChasing) {
       runInAction(() => {
         this.chaseSymbol = sym;
@@ -190,11 +190,9 @@ class MakotiMagicStore {
     this.fireEveryTickTrade(sym, predictedDigit);
   };
 
-  // Fire on every tick — immediately, no waiting
+  // Fire on every tick — no waiting, no blocking
   fireEveryTickTrade = async (sym, digit) => {
-    if (!this.isRunning || this.hasWon || this.isExecuting || this.isFiring) return;
-
-    runInAction(() => { this.isFiring = true; });
+    if (!this.isRunning || this.hasWon) return;
 
     const stakeAmount = parseFloat(this.stake) || 1;
 
@@ -207,10 +205,7 @@ class MakotiMagicStore {
 
     try {
       const proposalRes = await sendViaNewSystemWithPromise(params);
-      if (!proposalRes?.proposal) {
-        runInAction(() => { this.isFiring = false; });
-        return;
-      }
+      if (!proposalRes?.proposal) return;
 
       const buyParams = {
         buy: 1, price: stakeAmount, parameters: {
@@ -227,16 +222,9 @@ class MakotiMagicStore {
       if (contractId) {
         runInAction(() => {
           this.activeContract = { id: contractId, symbol: sym, digit, stake: stakeAmount, confidence: 0 };
-          this.isExecuting = true;
-          this.isFiring = false;
         });
-        this.addLog(`📡 Tick trade: D${digit} on ${SYMBOL_LABELS[sym]} @ $${stakeAmount}`, 'trade');
-      } else {
-        runInAction(() => { this.isFiring = false; });
       }
-    } catch (err) {
-      runInAction(() => { this.isFiring = false; });
-    }
+    } catch (err) {}
   };
 
   // ── Run / Stop ─────────────────────────────────────────────────────
@@ -249,7 +237,6 @@ class MakotiMagicStore {
       this.isRunning = true;
       this.hasWon = false;
       this.isExecuting = false;
-      this.isFiring = false;
       this.activeContract = null;
       this.isChasing = false;
       this.chaseSymbol = null;
@@ -273,7 +260,6 @@ class MakotiMagicStore {
     runInAction(() => {
       this.isRunning = false;
       this.isExecuting = false;
-      this.isFiring = false;
       this.isChasing = false;
     });
     if (this._scanTimeout) { clearTimeout(this._scanTimeout); this._scanTimeout = null; }
@@ -499,7 +485,6 @@ class MakotiMagicStore {
   dispose = () => {
     this.isRunning = false;
     this.isExecuting = false;
-    this.isFiring = false;
     this.isChasing = false;
     this.processedContracts = new Set();
     if (this._scanTimeout) { clearTimeout(this._scanTimeout); this._scanTimeout = null; }

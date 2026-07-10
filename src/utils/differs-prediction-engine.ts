@@ -708,13 +708,6 @@ export function predictNextDigits(history: number[]): PredictionResult {
         distributionBalanceStrategy(history),
         trendFollowingStrategy(history),
         immediateNextTickStrategy(history),
-        transitionMatrix2Strategy(history),
-        hotStreakStrategy(history),
-        missingDigitStrategy(history),
-        frequencyMomentumStrategy(history),
-        conditionalProbabilityStrategy(history),
-        digitPairSequenceStrategy(history),
-        alternationStrategy(history),
     ];
 
     const combined = Array(10).fill(0) as number[];
@@ -761,33 +754,32 @@ export function predictNextDigits(history: number[]): PredictionResult {
 
     const final = normaliseScores(combined);
 
-    // ── Enhanced Recency: weight last 1-2 ticks much heavier for 1-tick contracts ──
-    const last1 = history[history.length - 1];
-    const last2 = history[history.length - 2];
-    const last3 = history[history.length - 3];
-
+    // ── Enhanced Recency: weight recent frequency, NOT just last tick ──
     const recencyBoost = Array(10).fill(0) as number[];
 
-    // Last 1 tick: massive weight (this is what we're predicting FROM)
-    if (last1 >= 0 && last1 <= 9) recencyBoost[last1] += 15.0;
-
-    // Last 2 ticks: strong weight
-    if (last2 >= 0 && last2 <= 9) recencyBoost[last2] += 8.0;
-
-    // Last 3 ticks
-    if (last3 >= 0 && last3 <= 9) recencyBoost[last3] += 5.0;
-
-    // Last 5 ticks
+    // Last 5 ticks — recent frequency (digits that appear often here are hot)
     const last5Freq = getRecentFrequency(history, 5);
     last5Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 3.0;
+        recencyBoost[digit] += count * 5.0;
     });
 
     // Last 10 ticks
     const last10Freq = getRecentFrequency(history, 10);
     last10Freq.forEach((count, digit) => {
-        if (count > 0) recencyBoost[digit] += count * 1.5;
+        recencyBoost[digit] += count * 2.5;
     });
+
+    // Last 20 ticks
+    const last20Freq = getRecentFrequency(history, 20);
+    last20Freq.forEach((count, digit) => {
+        recencyBoost[digit] += count * 1.0;
+    });
+
+    // PENALIZE digits in last 1-2 ticks (they just appeared, unlikely to repeat)
+    const last1 = history[history.length - 1];
+    const last2 = history[history.length - 2];
+    if (last1 >= 0 && last1 <= 9) recencyBoost[last1] -= 3.0;
+    if (last2 >= 0 && last2 <= 9) recencyBoost[last2] -= 1.5;
 
     // Transition analysis: what digit follows the current sequence most often
     const last3Key = history.slice(-3).join(',');
