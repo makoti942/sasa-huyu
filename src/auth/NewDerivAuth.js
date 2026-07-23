@@ -144,7 +144,7 @@ export function subscribeNewSystemTopics() {
 
 const CONFIG = {
   clientId:    "337DJLKi2OJ4VsyFSLIt9",
-  legacyAppId: "1089",
+  legacyAppId: "101585",
   redirectUri: "https://makotitraderss.vercel.app/callback",
   authUrl:     "https://auth.deriv.com/oauth2/auth",
   tokenUrl:    "https://auth.deriv.com/oauth2/token",
