@@ -78,6 +78,13 @@ export const V2GetActiveToken = () => {
     if (typeof window !== 'undefined') {
         const newAuthToken = sessionStorage.getItem('NEW_AUTH_token') || localStorage.getItem('NEW_AUTH_token');
         if (newAuthToken) {
+            // For new auth users, use the active login ID as the legacy token.
+            // Demo accounts (VRTC*, DOT*) accept the login ID as the token.
+            const loginId = localStorage.getItem('active_loginid');
+            if (loginId && loginId !== 'null') {
+                console.log('[V2GetActiveToken] 🎯 Using login ID as token for new auth user:', loginId);
+                return loginId;
+            }
             return null;
         }
     }
