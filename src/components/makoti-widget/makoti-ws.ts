@@ -1,5 +1,5 @@
 import { getAppId, getSocketURL } from '@/components/shared';
-import { onNewSystemMessage } from '@/auth/NewDerivAuth';
+import { onNewSystemMessage, isNewLoggedIn } from '@/auth/NewDerivAuth';
 
 // ─── Symbols & pip sizes ──────────────────────────────────────────────────────
 
@@ -63,22 +63,39 @@ export function openMakotiWS(
 ): MakotiWS {
     // Prefer the OTP WebSocket (new auth system) — the legacy app ID 101585 has
     // been retired by Deriv, so legacy WS connections no longer work.
-    if (typeof window !== 'undefined' && window._newSystemWS?.readyState === WebSocket.OPEN) {
+    if (typeof window !== 'undefined' && (window._newSystemWS || isNewLoggedIn())) {
         const unsub = onNewSystemMessage((event) => {
             try {
                 const data = JSON.parse(event.data);
                 onMessage(data);
             } catch (_) {}
         });
-        onReady(); // OTP WS is already connected & authorized
+
+        // If OTP WS is already open, signal ready immediately.
+        // Otherwise poll until it becomes open (it may still be CONNECTING
+        // or createNewWebSocket might not have been called yet).
+        let stopped = false;
+        let readyFired = false;
+        const checkReady = () => {
+            if (stopped || readyFired) return;
+            if (window._newSystemWS?.readyState === WebSocket.OPEN) {
+                readyFired = true;
+                onReady();
+                return;
+            }
+            setTimeout(checkReady, 200);
+        };
+        checkReady();
+
         return {
-            send:   (msg) => { window._newSystemWS.send(JSON.stringify(msg)); },
+            send:   (msg) => {
+                if (window._newSystemWS?.readyState === WebSocket.OPEN) {
+                    window._newSystemWS.send(JSON.stringify(msg));
+                }
+            },
             close:  ()    => {
+                stopped = true;
                 unsub();
-                // Forget tick subscriptions to avoid "AlreadySubscribed"
-                // errors on next open. Don't use forget_all ('ticks') —
-                // that would kill other components' tick streams. Instead
-                // the caller should track sub IDs and forget individually.
             },
             isOpen: ()    => window._newSystemWS?.readyState === WebSocket.OPEN,
         };

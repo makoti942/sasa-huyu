@@ -75,8 +75,10 @@ class MakotiMagicStore {
   connectWebSocket = () => {
     // Prefer the OTP WebSocket (new auth system) — the legacy app ID 101585
     // has been retired by Deriv, so legacy WS connections no longer work.
-    if (typeof window !== 'undefined' && window._newSystemWS?.readyState === WebSocket.OPEN) {
+    if (typeof window !== 'undefined' && (window._newSystemWS || isNewLoggedIn())) {
       if (this.is_initialized) return;
+
+      // Register handler immediately so we don't miss any messages
       this._unsubOTP = onNewSystemMessage((event) => {
         try {
           const data = JSON.parse(event.data);
@@ -115,8 +117,17 @@ class MakotiMagicStore {
           }
         } catch {}
       });
-      runInAction(() => { this.connection_status = 'Live'; this.is_initialized = true; });
-      this.subscribeAll();
+
+      // Wait for the OTP WS to be open before subscribing and signalling ready
+      const waitForOTP = () => {
+        if (window._newSystemWS?.readyState === WebSocket.OPEN) {
+          runInAction(() => { this.connection_status = 'Live'; this.is_initialized = true; });
+          this.subscribeAll();
+          return;
+        }
+        setTimeout(waitForOTP, 200);
+      };
+      waitForOTP();
       return;
     }
 
