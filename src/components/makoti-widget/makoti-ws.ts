@@ -1,4 +1,5 @@
 import { getAppId, getSocketURL } from '@/components/shared';
+import { onNewSystemMessage } from '@/auth/NewDerivAuth';
 
 // ─── Symbols & pip sizes ──────────────────────────────────────────────────────
 
@@ -60,6 +61,30 @@ export function openMakotiWS(
     onClose: () => void,
     options?: { skipAuth?: boolean },
 ): MakotiWS {
+    // Prefer the OTP WebSocket (new auth system) — the legacy app ID 101585 has
+    // been retired by Deriv, so legacy WS connections no longer work.
+    if (typeof window !== 'undefined' && window._newSystemWS?.readyState === WebSocket.OPEN) {
+        const unsub = onNewSystemMessage((event) => {
+            try {
+                const data = JSON.parse(event.data);
+                onMessage(data);
+            } catch (_) {}
+        });
+        onReady(); // OTP WS is already connected & authorized
+        return {
+            send:   (msg) => { window._newSystemWS.send(JSON.stringify(msg)); },
+            close:  ()    => {
+                unsub();
+                // Forget tick subscriptions to avoid "AlreadySubscribed"
+                // errors on next open. Don't use forget_all ('ticks') —
+                // that would kill other components' tick streams. Instead
+                // the caller should track sub IDs and forget individually.
+            },
+            isOpen: ()    => window._newSystemWS?.readyState === WebSocket.OPEN,
+        };
+    }
+
+    // Fallback to legacy WS (only used when OTP WS is not available)
     const appId     = getAppId();
     const serverUrl = getSocketURL();
     const ws        = new WebSocket(`wss://${serverUrl}/websockets/v3?app_id=${appId}`);

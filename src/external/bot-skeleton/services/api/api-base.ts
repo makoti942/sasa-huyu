@@ -355,15 +355,22 @@ class APIBase {
             }
         });
 
-        // Override send() – route trade messages through OTP WS when connected.
-        // Non-trade messages (active_symbols, contracts_for, ticks, etc.) always
-        // go through the legacy WS so the bot builder config loads correctly.
-        // balance/proposal_open_contract/transaction are excluded because
-        // subscribeNewSystemTopics() already handles them on the OTP WS, and
-        // sending them here causes doUntilDone to hang (no response on OTP WS).
+        // Override send() – route ALL messages through OTP WS when connected.
+        // The legacy app ID (101585) has been retired by Deriv, so the legacy
+        // WebSocket can no longer authorize or process API queries. The OTP WS
+        // (authenticated via OAuth client ID 337DJLKi2OJ4VsyFSLIt9) replaces it.
+        // Subscribe messages (balance, proposal_open_contract) are separately
+        // handled by subscribeNewSystemTopics() without req_id, so they don't
+        // hang — they push updates through the otpCallbacks handler.
+        // forget_all: 'ticks' is kept on the legacy WS (no-op there) because
+        // the OTP WS may have tick subscriptions from other components
+        // (e.g. Makoti widget) that should not be interrupted by the bot.
         const TRADE_MSG_TYPES = new Set([
             'proposal', 'buy', 'sell',
-            'forget', 'forget_all',
+            'contracts_for', 'trading_times', 'active_symbols',
+            'payout_currencies', 'ticks_history',
+            'balance', 'proposal_open_contract', 'transaction',
+            'forget',
         ]);
         const originalSend = originalApi.send.bind(originalApi);
         originalApi.send = (data) => {
@@ -371,13 +378,8 @@ class APIBase {
                 if (data && typeof data === 'object') {
                     const firstKey = Object.keys(data)[0];
 
-                    // Market-data streams are created on the legacy WebSocket so they must also
-                    // be forgotten on that same socket. Sending `forget_all: 'ticks'` through the
-                    // new-auth WebSocket leaves the legacy subscription alive, which causes the
-                    // Bot Builder rerun error: "already subscribed to <symbol>".
-                    // NOTE: deriv-api's forgetAll() sends { forget_all: ['ticks'] } (ARRAY),
-                    // while direct api.send({ forget_all: 'ticks' }) sends a STRING.
-                    // Handle both formats.
+                    // forget_all: 'ticks' stays on the legacy WS to avoid
+                    // killing tick subscriptions from other components.
                     if (firstKey === 'forget_all') {
                         const forgetTypes = Array.isArray(data.forget_all)
                             ? data.forget_all

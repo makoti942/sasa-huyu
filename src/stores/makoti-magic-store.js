@@ -1,7 +1,7 @@
 import { makeAutoObservable, runInAction } from 'mobx';
 import { predictNextDigits } from '@/utils/differs-prediction-engine';
 import { getAppId, getSocketURL } from '@/components/shared';
-import { sendViaNewSystemWithPromise, onNewSystemMessage } from '@/auth/NewDerivAuth';
+import { sendViaNewSystem, sendViaNewSystemWithPromise, onNewSystemMessage } from '@/auth/NewDerivAuth';
 
 const ALL_SYMBOLS = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'];
 const SYMBOL_LABELS = {
@@ -70,7 +70,57 @@ class MakotiMagicStore {
   }
 
   // ── WebSocket ──────────────────────────────────────────────────────
+  _unsubOTP = null;
+
   connectWebSocket = () => {
+    // Prefer the OTP WebSocket (new auth system) — the legacy app ID 101585
+    // has been retired by Deriv, so legacy WS connections no longer work.
+    if (typeof window !== 'undefined' && window._newSystemWS?.readyState === WebSocket.OPEN) {
+      if (this.is_initialized) return;
+      this._unsubOTP = onNewSystemMessage((event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.error) return;
+
+          if (data.msg_type === 'history' && data.history?.prices) {
+            const sym = data.echo_req?.ticks_history;
+            if (!sym || !this.symbolData[sym]) return;
+            const ps = PIP_SIZES[sym] || 2;
+            const prices = data.history.prices.map(Number);
+            const digits = prices.map(p => parseInt(Number(p).toFixed(ps).slice(-1), 10));
+            runInAction(() => {
+              const sd = this.symbolData[sym];
+              sd.prices = prices.slice(-MAX_TICKS);
+              sd.ticks = digits.slice(-MAX_TICKS);
+              sd.ready = sd.ticks.length >= MIN_TICKS;
+            });
+          }
+
+          if (data.msg_type === 'tick' && data.tick?.quote) {
+            const sym = data.tick?.symbol;
+            if (!sym || !this.symbolData[sym]) return;
+            const ps = PIP_SIZES[sym] || 2;
+            const price = Number(data.tick.quote);
+            const digit = parseInt(Number(price).toFixed(ps).slice(-1), 10);
+            runInAction(() => {
+              const sd = this.symbolData[sym];
+              sd.prices = [...sd.prices.slice(-MAX_TICKS + 1), price];
+              sd.ticks = [...sd.ticks.slice(-MAX_TICKS + 1), digit];
+              sd.ready = sd.ticks.length >= MIN_TICKS;
+            });
+
+            if (this.isRunning && this.tradeEveryTick && !this.hasWon) {
+              this.handleTickForEveryTickMode(sym);
+            }
+          }
+        } catch {}
+      });
+      runInAction(() => { this.connection_status = 'Live'; this.is_initialized = true; });
+      this.subscribeAll();
+      return;
+    }
+
+    // Fallback to legacy WS (only used when OTP WS is not available)
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.is_initialized) return;
     if (this.ws) { this.ws.onclose = null; this.ws.close(); }
 
@@ -119,7 +169,6 @@ class MakotiMagicStore {
             sd.ready = sd.ticks.length >= MIN_TICKS;
           });
 
-          // In every-tick mode, fire on every tick immediately — no blocking
           if (this.isRunning && this.tradeEveryTick && !this.hasWon) {
             this.handleTickForEveryTickMode(sym);
           }
@@ -138,6 +187,14 @@ class MakotiMagicStore {
   };
 
   subscribeAll = () => {
+    // Use OTP WS when available
+    if (typeof window !== 'undefined' && window._newSystemWS?.readyState === WebSocket.OPEN) {
+      ALL_SYMBOLS.forEach(sym => {
+        sendViaNewSystem({ ticks_history: sym, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 });
+      });
+      return;
+    }
+    // Fallback to legacy WS
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     ALL_SYMBOLS.forEach(sym => {
       this.ws.send(JSON.stringify({ ticks_history: sym, count: MAX_TICKS, end: 'latest', style: 'ticks', subscribe: 1 }));
@@ -489,6 +546,7 @@ class MakotiMagicStore {
     this.processedContracts = new Set();
     if (this._scanTimeout) { clearTimeout(this._scanTimeout); this._scanTimeout = null; }
     this.stopPOCListener();
+    if (this._unsubOTP) { this._unsubOTP(); this._unsubOTP = null; }
     if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
   };
 }
