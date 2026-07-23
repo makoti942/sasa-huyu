@@ -358,9 +358,11 @@ class APIBase {
         // Override send() – route trade messages through OTP WS when connected.
         // Non-trade messages (active_symbols, contracts_for, ticks, etc.) always
         // go through the legacy WS so the bot builder config loads correctly.
+        // balance/proposal_open_contract/transaction are excluded because
+        // subscribeNewSystemTopics() already handles them on the OTP WS, and
+        // sending them here causes doUntilDone to hang (no response on OTP WS).
         const TRADE_MSG_TYPES = new Set([
             'proposal', 'buy', 'sell',
-            'proposal_open_contract', 'balance', 'transaction',
             'forget', 'forget_all',
         ]);
         const originalSend = originalApi.send.bind(originalApi);
