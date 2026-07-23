@@ -6,7 +6,7 @@ import { isStaging } from '../url/helpers';
 // Change any value here and it propagates to every tool, tab, and widget.
 
 /** The app ID registered with Deriv for this application. */
-const APP_ID = 101585;
+const APP_ID = 1089;
 
 /** OAuth client ID for PKCE flows (matches the registered app). */
 export const OAUTH_CLIENT_ID = '337DJLKi2OJ4VsyFSLIt9';
