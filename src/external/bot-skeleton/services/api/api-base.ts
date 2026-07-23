@@ -129,7 +129,10 @@ class APIBase {
         if (this.time_interval) clearInterval(this.time_interval);
         this.time_interval = null;
 
-        if (V2GetActiveToken()) {
+        // For new auth users, skip legacy WS authorization — the OTP WS is
+        // already authenticated (set by createNewWebSocket). The legacy app ID
+        // 101585 has been retired by Deriv, so the legacy WS can't authorize.
+        if (V2GetActiveToken() && !isNewLoggedIn()) {
             setIsAuthorizing(true);
             await this.authorizeAndSubscribe();
         }
@@ -355,21 +358,19 @@ class APIBase {
             }
         });
 
-        // Override send() – route ALL messages through OTP WS when connected.
+        // Override send() – route API queries and trades through OTP WS.
         // The legacy app ID (101585) has been retired by Deriv, so the legacy
         // WebSocket can no longer authorize or process API queries. The OTP WS
         // (authenticated via OAuth client ID 337DJLKi2OJ4VsyFSLIt9) replaces it.
-        // Subscribe messages (balance, proposal_open_contract) are separately
-        // handled by subscribeNewSystemTopics() without req_id, so they don't
-        // hang — they push updates through the otpCallbacks handler.
-        // forget_all: 'ticks' is kept on the legacy WS (no-op there) because
-        // the OTP WS may have tick subscriptions from other components
-        // (e.g. Makoti widget) that should not be interrupted by the bot.
+        // Subscribe-only messages (balance, proposal_open_contract, transaction)
+        // are handled by subscribeNewSystemTopics() on the OTP WS — routing them
+        // through sendViaNewSystemWithPromise causes "AlreadySubscribed" errors.
+        // forget_all: 'ticks' stays on the legacy WS (no-op there) because the
+        // OTP WS may have tick subscriptions from other components.
         const TRADE_MSG_TYPES = new Set([
             'proposal', 'buy', 'sell',
             'contracts_for', 'trading_times', 'active_symbols',
             'payout_currencies', 'ticks_history',
-            'balance', 'proposal_open_contract', 'transaction',
             'forget',
         ]);
         const originalSend = originalApi.send.bind(originalApi);
@@ -430,6 +431,29 @@ class APIBase {
     async authorizeAndSubscribe() {
         const token = V2GetActiveToken();
         if (!token || !this.api) return;
+
+        // For new auth (OAuth) users, the OTP WS is already authenticated.
+        // The legacy app ID (101585) is retired so the legacy WS can't
+        // authorize. Skip the legacy authorize — all API calls are proxied
+        // through the OTP WS. The OTP WS already set is_authorized=true in
+        // createNewWebSocket. subscribe() is skipped because the OTP WS
+        // maintains its own balance/POC subscriptions.
+        if (isNewLoggedIn()) {
+            this.token = token;
+            this.account_id = V2GetActiveClientId() ?? '';
+            setIsAuthorizing(true);
+            try {
+                if (!this.has_active_symbols) {
+                    this.active_symbols_promise = this.getActiveSymbols();
+                }
+                this.getSelfExclusion();
+            } catch (e) {
+                console.error('[API] Setup error for OAuth user:', e);
+            } finally {
+                setIsAuthorizing(false);
+            }
+            return;
+        }
 
         this.token = token;
         this.account_id = V2GetActiveClientId() ?? '';
